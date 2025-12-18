@@ -1,0 +1,7 @@
+{
+  "name": "Eldat Plugin",
+  "content_in_root": false,
+  "filename": "eldat_plugin",
+  "render_readme": true,
+  "homeassistant": "2024.1.0"
+}
