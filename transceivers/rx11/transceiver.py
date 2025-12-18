@@ -1,0 +1,1263 @@
+"""RX11 USB Transceiver implementation."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import serial
+import serial.tools.list_ports
+import time
+from typing import Any, Callable, Dict, List, Optional, Set
+
+from ..base import BaseTransceiver, TransceiverType, TransceiverCapabilities, DeviceInfo
+from .wrapper import RX11Wrapper
+
+_LOGGER = logging.getLogger(__name__)
+
+# RX11 USB device identifiers
+RX11_VID = 0x155A  # Vendor ID
+RX11_PIDS = [0x1006, 0x1014]  # Product IDs (USB Transceiver Easywave variants)
+
+
+def find_rx11_devices():
+    """Find all connected RX11 USB devices with detailed information."""
+    rx11_devices = []
+    
+    try:
+        _LOGGER.info("Scanning for RX11 USB devices...")
+        all_ports = serial.tools.list_ports.comports()
+        _LOGGER.debug("Found %d total USB devices", len(all_ports))
+        
+        for port in all_ports:
+            _LOGGER.debug("Checking device: %s (VID: 0x%04X, PID: 0x%04X)", 
+                         port.device, port.vid or 0, port.pid or 0)
+            
+            # Check if device matches RX11 VID/PID
+            if port.vid == RX11_VID and port.pid in RX11_PIDS:
+                device_info = {
+                    "device": port.device,
+                    "name": port.description or f"RX11 Device ({port.device})",
+                    "manufacturer": port.manufacturer or "ELDAT",
+                    "serial_number": port.serial_number,
+                    "vid": port.vid,
+                    "pid": port.pid,
+                    "location": port.location,
+                    "hwid": port.hwid if hasattr(port, 'hwid') else None
+                }
+                rx11_devices.append(device_info)
+                _LOGGER.info("Found RX11 device: %s at %s", device_info["name"], port.device)
+        
+        _LOGGER.info("Found %d RX11 device(s)", len(rx11_devices))
+        return rx11_devices
+        
+    except Exception as e:
+        _LOGGER.error("Error scanning for RX11 devices: %s", e)
+        return []
+
+
+def validate_rx11_device(device_path: str) -> bool:
+    """Validate that a device path points to an RX11 device."""
+    try:
+        all_ports = serial.tools.list_ports.comports()
+        
+        for port in all_ports:
+            if port.device == device_path:
+                is_rx11 = port.vid == RX11_VID and port.pid in RX11_PIDS
+                _LOGGER.debug("Device %s validation: VID=0x%04X, PID=0x%04X, is_RX11=%s", 
+                             device_path, port.vid or 0, port.pid or 0, is_rx11)
+                return is_rx11
+        
+        _LOGGER.error("Device %s not found in system", device_path)
+        return False
+        
+    except Exception as e:
+        _LOGGER.error("Error validating RX11 device %s: %s", device_path, e)
+        return False
+
+
+class RX11Transceiver(BaseTransceiver):
+    """RX11 USB Transceiver implementation.
+    
+    Structured Naming Convention:
+    - rx11_<device_type>_<operation>: Device-specific operations
+      - rx11_ew_receiver_*: EW receiver operations
+      - rx11_ew_transmitter_*: EW transmitter operations
+      - rx11_ewb_sensor_*: EWB sensor operations
+      - rx11_ew_receiver_button_*: Button-specific operations
+    
+    This class acts as a higher-level interface to the RX11 wrapper,
+    providing structured access to different device types and operations.
+    """
+    
+    def __init__(self, device_path: str = None):
+        """Initialize RX11 transceiver."""
+        super().__init__(device_path)
+        
+        # RX11-specific attributes
+        self._rx11_wrapper: Optional[RX11Wrapper] = None
+        self._hw_version: Optional[str] = None
+        self._fw_version: Optional[str] = None
+        
+        # RX11-specific state
+        self._continuous_sending_tasks: Dict[str, Dict] = {}  # serial -> {task, cancel_event, commands}
+        self._rx11_indices: Dict[str, int] = {}  # serial -> rx11_index mapping
+        self._serial_connection = None  # Fallback for simple serial communication
+        
+        # Initialize RX11 wrapper if device path is provided
+        if device_path:
+            try:
+                self._rx11_wrapper = RX11Wrapper(device_path)
+                _LOGGER.info("RX11 wrapper initialized successfully")
+            except Exception as e:
+                _LOGGER.warning("RX11 C library not available, using fallback mode: %s", e)
+                self._rx11_wrapper = None
+
+        # Initialize device factory
+        from .devices.registry import RX11DeviceFactory
+        self.device_factory = RX11DeviceFactory()
+        self._device_instances: Dict[str, Any] = {}
+
+    @property
+    def transceiver_type(self) -> TransceiverType:
+        """Return RX11 transceiver type."""
+        return TransceiverType.RX11
+
+    @property
+    def capabilities(self) -> TransceiverCapabilities:
+        """Return RX11 capabilities."""
+        return TransceiverCapabilities(
+            supports_learning=True,
+            supports_bidirectional=True,
+            supports_continuous_sending=True,
+            supports_security=False,
+            max_devices=255,
+            device_types={
+                "EW_Transmitter", "EW_Receiver", "EW_Dimmer", 
+                "EW_Sensor", "Motor", "WinDim"
+            }
+        )
+
+    def get_connection_health_stats(self) -> dict:
+        """Get connection health and error statistics."""
+        if self._rx11_wrapper:
+            stats = self._rx11_wrapper.get_connection_stats()
+            stats.update({
+                'device_path': self.device_path,
+                'hw_version': self._hw_version,
+                'fw_version': self._fw_version,
+                'transceiver_connected': self.is_connected
+            })
+            return stats
+        else:
+            return {
+                'connected': False,
+                'serial_error_count': 0,
+                'consecutive_errors': 0,
+                'reconnect_in_progress': False,
+                'last_reconnect_attempt': 0,
+                'device_path': self.device_path,
+                'error': 'RX11 wrapper not available'
+            }
+
+    async def async_setup(self, hass) -> bool:
+        """Set up the RX11 transceiver."""
+        if not self.device_path:
+            _LOGGER.info("RX11 transceiver in offline mode - skipping device validation")
+            return True
+            
+        # Validate device asynchronously
+        is_valid = await hass.async_add_executor_job(validate_rx11_device, self.device_path)
+        
+        if not is_valid:
+            _LOGGER.error("Device %s is not a valid RX11 device (VID: 0x%04X, PIDs: %s)", 
+                          self.device_path, RX11_VID, [hex(pid) for pid in RX11_PIDS])
+            return False
+        
+        _LOGGER.info("RX11 device %s validated successfully", self.device_path)
+        return True
+    
+    def set_coordinator_reference(self, coordinator) -> None:
+        """Set coordinator reference for EWB index tracking."""
+        if self._rx11_wrapper:
+            self._rx11_wrapper.set_coordinator(coordinator)
+            _LOGGER.debug("Set coordinator reference in RX11 wrapper for EWB tracking")
+
+    async def connect(self) -> bool:
+        """Connect to the RX11 transceiver."""
+        if not self.device_path:
+            _LOGGER.warning("No device path configured for RX11")
+            return False
+            
+        # Always check actual connection status, don't trust cached state
+        async with self._lock:
+            # Add small delay if recently disconnected to allow device to reset
+            import time
+            if hasattr(self, '_last_disconnect_time'):
+                time_since_disconnect = time.time() - self._last_disconnect_time
+                if time_since_disconnect < 1.0:  # Less than 1 second
+                    delay = 1.0 - time_since_disconnect
+                    _LOGGER.debug("Waiting %.2fs for RX11 device to reset", delay)
+                    await asyncio.sleep(delay)
+                    
+            # Always attempt connection, ignore cached connection status
+            _LOGGER.info("🔌 Force connecting to RX11 at %s...", self.device_path)
+                    
+            # Try to connect with C library wrapper first
+            if self._rx11_wrapper:
+                success = await self._rx11_wrapper.connect()
+                if success:
+                    # Get version information (cached by wrapper to avoid multiple queries)
+                    if not self._hw_version:
+                        self._hw_version = await self._rx11_wrapper.get_hw_version()
+                    if not self._fw_version:
+                        self._fw_version = await self._rx11_wrapper.get_fw_version()
+                    
+                    _LOGGER.info("RX11 connected via C library: HW=%s, FW=%s", 
+                               self._hw_version, self._fw_version)
+                    return True
+                else:
+                    _LOGGER.warning("C library connection failed, trying fallback")
+            
+            # Fallback to simple serial connection
+            try:
+                success = await self._setup_simple_serial_connection()
+                if success:
+                    _LOGGER.info("RX11 connected via serial fallback")
+                    return True
+            except Exception as e:
+                _LOGGER.error("Serial fallback connection failed: %s", e)
+            
+            return False
+
+    async def disconnect(self) -> None:
+        """Disconnect from the RX11 transceiver."""
+        if self._disposed:
+            return
+            
+        async with self._lock:
+            # Stop all continuous sending tasks
+            for serial_number in list(self._continuous_sending_tasks.keys()):
+                await self._stop_continuous_sending(serial_number)
+            
+            # Log cache statistics before disconnect
+            if self._rx11_wrapper and hasattr(self._rx11_wrapper, 'get_cache_stats'):
+                stats = self._rx11_wrapper.get_cache_stats()
+                _LOGGER.info("📊 RX11 Cache Stats: %d total entries, %d valid, %d expired, %d used receivers", 
+                           stats['total_entries'], stats['valid_entries'], 
+                           stats['expired_entries'], stats['used_receivers'])
+            
+            # Disconnect C library wrapper
+            if self._rx11_wrapper:
+                await self._rx11_wrapper.disconnect()
+            
+            # Close serial connection
+            if self._serial_connection:
+                try:
+                    self._serial_connection.close()
+                except Exception:
+                    pass
+                self._serial_connection = None
+            
+            # Record disconnect time for reconnection delay
+            import time
+            self._last_disconnect_time = time.time()
+            
+            _LOGGER.info("RX11 transceiver disconnected")
+
+    async def get_hw_version(self) -> Optional[str]:
+        """Get hardware version."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.get_hw_version()
+        return self._hw_version
+
+    async def get_fw_version(self) -> Optional[str]:
+        """Get firmware version.""" 
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.get_fw_version()
+        return self._fw_version
+
+    async def start_learning_mode(self, duration: int = 60) -> bool:
+        """Start learning mode."""
+        if not self._rx11_wrapper:
+            _LOGGER.error("Learning mode requires C library wrapper")
+            return False
+            
+        return await self._rx11_wrapper.set_learning_mode(True, duration)
+
+    async def stop_learning_mode(self) -> bool:
+        """Stop learning mode."""
+        if not self._rx11_wrapper:
+            _LOGGER.error("Learning mode requires C library wrapper")
+            return False
+            
+        return await self._rx11_wrapper.set_learning_mode(False)
+
+    async def set_learning_mode(self, enabled: bool, timeout: int = 60) -> bool:
+        """Set learning mode on or off."""
+        if enabled:
+            return await self.start_learning_mode(timeout)
+        else:
+            return await self.stop_learning_mode()
+
+    async def send_command_to_device(self, serial_number: str, command: bytes) -> bool:
+        """Send command to a specific device."""
+        try:
+            # Convert serial number to int
+            if isinstance(serial_number, str):
+                serial_int = int(serial_number, 16) if len(serial_number) == 8 else int(serial_number)
+            else:
+                serial_int = serial_number
+            
+            # Extract command data
+            if len(command) >= 1:
+                tm_type = command[0]
+                data1 = command[1] if len(command) > 1 else 0
+                data2 = command[2] if len(command) > 2 else 0
+                data3 = command[3] if len(command) > 3 else 0
+                data4 = command[4] if len(command) > 4 else 0
+                
+                if self._rx11_wrapper:
+                    return await self._rx11_wrapper.send_telegram(
+                        serial_int, tm_type, data1, data2, data3, data4
+                    )
+                else:
+                    _LOGGER.warning("Command sending requires C library wrapper")
+                    return False
+            else:
+                _LOGGER.error("Invalid command format")
+                return False
+                
+        except Exception as e:
+            _LOGGER.error("❌ Error sending command to device %s: %s", serial_number, e)
+            return False
+
+    async def send_command_to_receiver(self, serial_number: str, command: str) -> bool:
+        """Send command to EW receiver using cached serial mapping - no repeated EW_GET_FD_SERIAL calls."""
+        try:
+            # Convert string command to bytes if needed
+            if isinstance(command, str):
+                # Check if it's a valid hex string with even length
+                clean_command = command.replace(' ', '')
+                if len(clean_command) % 2 == 0 and all(c in '0123456789ABCDEFabcdef' for c in clean_command):
+                    command_bytes = bytes.fromhex(clean_command)
+                else:
+                    # Simple button mapping for EW receivers
+                    button_map = {'10': b'\x10', '11': b'\x11', '12': b'\x12', '13': b'\x13', 'A': b'\x10', 'B': b'\x11', 'C': b'\x12', 'D': b'\x13'}
+                    command_bytes = button_map.get(command.upper(), b'\x10')  # Default to button A
+            else:
+                command_bytes = bytes(command)
+                
+            # Delegate to wrapper's optimized rx11_ew_receiver_send_command method
+            # This method now uses central cache and avoids repeated EwGetFdSerialRequest calls
+            if self._rx11_wrapper and hasattr(self._rx11_wrapper, 'rx11_ew_receiver_send_command'):
+                return await self._rx11_wrapper.rx11_ew_receiver_send_command(serial_number, command_bytes)
+            # Fallback to alias for compatibility
+            elif self._rx11_wrapper and hasattr(self._rx11_wrapper, 'send_command_to_receiver'):
+                return await self._rx11_wrapper.send_command_to_receiver(serial_number, command_bytes)
+            else:
+                _LOGGER.error("❌ RX11 wrapper not available or method missing")
+                return False
+            
+        except Exception as e:
+            _LOGGER.error("❌ Error in send_command_to_receiver: %s", e)
+            return False
+
+    async def _send_eldat_protocol_command(self, serial_number: str, command: bytes) -> bool:
+        """Send ELDAT protocol command via serial fallback."""
+        try:
+            if not self._serial_connection or not self._serial_connection.is_open:
+                _LOGGER.error("No serial connection available for ELDAT protocol")
+                return False
+            
+            # Convert serial number to device ID for ELDAT protocol
+            try:
+                device_id = int(serial_number) if serial_number.isdigit() else int(serial_number, 16)
+            except ValueError:
+                _LOGGER.error("Invalid serial number format: %s", serial_number)
+                return False
+                
+            # Create ELDAT protocol frame
+            # Basic frame structure: [Start][Length][Command][DeviceID][Data][Checksum]
+            frame = bytearray()
+            frame.append(0xAA)  # Start byte
+            frame.append(len(command) + 5)  # Frame length
+            frame.append(0x01)  # Command type (Send)
+            
+            # Add device ID (4 bytes)
+            frame.extend(device_id.to_bytes(4, byteorder='little'))
+            
+            # Add command data
+            frame.extend(command)
+            
+            # Calculate checksum (XOR of all bytes except start)
+            checksum = 0
+            for byte in frame[1:]:
+                checksum ^= byte
+            frame.append(checksum)
+            
+            # Send frame
+            _LOGGER.debug("Sending ELDAT protocol frame: %s", frame.hex())
+            self._serial_connection.write(frame)
+            await asyncio.sleep(0.2)  # Wait for transmission
+            
+            # Check for response (optional)
+            if self._serial_connection.in_waiting > 0:
+                response = self._serial_connection.read(self._serial_connection.in_waiting)
+                _LOGGER.debug("Received response: %s", response.hex())
+            
+            _LOGGER.info("✅ ELDAT protocol command sent to device %s", serial_number)
+            return True
+            
+        except Exception as e:
+            _LOGGER.error("Error in ELDAT protocol communication: %s", e)
+            return False
+
+    async def start_telegram_listening(self, callback: Callable) -> bool:
+        """Start listening for telegrams."""
+        if not self._rx11_wrapper:
+            _LOGGER.error("Telegram listening requires C library wrapper")
+            return False
+            
+        # Store the additional callback (e.g., for learning) but don't overwrite the main callback
+        if hasattr(self, '_learning_callback'):
+            self._learning_callback = callback
+        else:
+            self._additional_callback = callback
+            
+        self._listening_for_telegram = True
+        
+        _LOGGER.info("🔍 Starting telegram listening - main callback: %s, additional callback: %s", 
+                    bool(self._telegram_callback), bool(callback))
+        
+        # Start telegram listening thread with internal handler
+        success = self._rx11_wrapper.start_telegram_listening(self._handle_telegram)
+        
+        if success:
+            _LOGGER.info("RX11 telegram listening started")
+        else:
+            self._listening_for_telegram = False
+            
+        return success
+
+    async def stop_telegram_listening(self) -> bool:
+        """Stop listening for telegrams."""
+        if not self._listening_for_telegram:
+            return True
+            
+        self._listening_for_telegram = False
+        
+        if self._rx11_wrapper:
+            success = self._rx11_wrapper.stop_telegram_listening()
+            if success:
+                _LOGGER.info("RX11 telegram listening stopped")
+            return success
+            
+        return True
+
+    def _handle_telegram(self, telegram_data: Dict[str, Any]) -> None:
+        """Handle incoming telegram from RX11."""
+        try:
+            # Convert to standard format
+            serial_number = f"{telegram_data['serial']:08X}"
+            
+            processed_data = {
+                'serial_number': serial_number,
+                'type': telegram_data['type'],
+                'data': [
+                    telegram_data['data1'],
+                    telegram_data['data2'], 
+                    telegram_data['data3'],
+                    telegram_data['data4']
+                ],
+                'raw': telegram_data
+            }
+            
+            # Call registered callback
+            if self._telegram_callback:
+                asyncio.create_task(self._telegram_callback(processed_data))
+                
+        except Exception as e:
+            _LOGGER.error("Error processing RX11 telegram: %s", e)
+
+    # RX11-specific methods
+
+    def assign_rx11_index(self, serial_number: str, rx11_index: int) -> None:
+        """Assign RX11 index to a device."""
+        self._rx11_indices[serial_number] = rx11_index
+
+    def get_rx11_index(self, serial_number: str) -> Optional[int]:
+        """Get RX11 index for a device."""
+        return self._rx11_indices.get(serial_number)
+
+    def get_available_rx11_indices(self) -> List[int]:
+        """Get list of available RX11 indices using wrapper management."""
+        if self._rx11_wrapper:
+            used_indices = self._rx11_wrapper.get_used_indices()
+            return [i for i in range(255) if i not in used_indices]
+        else:
+            # Fallback to old method if no wrapper available
+            used_indices = set(self._rx11_indices.values())
+            return [i for i in range(1, 256) if i not in used_indices]
+            
+    def get_next_free_rx11_index(self) -> Optional[int]:
+        """Get the next free RX11 index."""
+        if self._rx11_wrapper:
+            return self._rx11_wrapper.get_next_free_index()
+        else:
+            available = self.get_available_rx11_indices()
+            return available[0] if available else None
+
+    async def _start_continuous_sending(self, serial_number: str, button: int) -> bool:
+        """Start continuous sending for RX11."""
+        try:
+            if serial_number in self._continuous_sending_tasks:
+                _LOGGER.warning("Continuous sending already active for %s", serial_number)
+                return True
+            
+            cancel_event = asyncio.Event()
+            task = asyncio.create_task(
+                self._continuous_sending_worker(serial_number, button, cancel_event)
+            )
+            
+            self._continuous_sending_tasks[serial_number] = {
+                'task': task,
+                'cancel_event': cancel_event,
+                'button': button
+            }
+            
+            _LOGGER.info("Started continuous sending for %s, button %d", serial_number, button)
+            return True
+            
+        except Exception as e:
+            _LOGGER.error("Error starting continuous sending for %s: %s", serial_number, e)
+            return False
+
+    async def _stop_continuous_sending(self, serial_number: str) -> bool:
+        """Stop continuous sending for RX11."""
+        try:
+            task_info = self._continuous_sending_tasks.pop(serial_number, None)
+            if not task_info:
+                return True
+            
+            # Signal cancellation
+            task_info['cancel_event'].set()
+            
+            # Wait for task to finish
+            try:
+                await asyncio.wait_for(task_info['task'], timeout=2.0)
+            except asyncio.TimeoutError:
+                task_info['task'].cancel()
+                try:
+                    await task_info['task']
+                except asyncio.CancelledError:
+                    pass
+            
+            _LOGGER.info("Stopped continuous sending for %s", serial_number)
+            return True
+            
+        except Exception as e:
+            _LOGGER.error("Error stopping continuous sending for %s: %s", serial_number, e)
+            return False
+
+    async def _continuous_sending_worker(self, serial_number: str, button: int, 
+                                       cancel_event: asyncio.Event) -> None:
+        """Worker for continuous sending."""
+        try:
+            # Send initial push command
+            command = bytes([0x01, button, 0x00, 0x00, 0x00])  # TM_IT_EASW_PUSH
+            await self.send_command_to_device(serial_number, command)
+            
+            # Keep sending while not cancelled
+            while not cancel_event.is_set():
+                await asyncio.sleep(0.5)  # 500ms interval
+                
+                if not cancel_event.is_set():
+                    await self.send_command_to_device(serial_number, command)
+            
+            # Send release command
+            command = bytes([0x00, button, 0x00, 0x00, 0x00])  # TM_IT_EASW_RELEASE
+            await self.send_command_to_device(serial_number, command)
+            
+        except Exception as e:
+            _LOGGER.error("Error in continuous sending worker for %s: %s", serial_number, e)
+
+    async def _setup_simple_serial_connection(self) -> bool:
+        """Set up simple serial connection as fallback with ELDAT protocol support."""
+        try:
+            _LOGGER.info("Setting up ELDAT protocol serial connection to %s", self.device_path)
+            
+            self._serial_connection = serial.Serial(
+                port=self.device_path,
+                baudrate=57600,  # Standard ELDAT baud rate
+                timeout=1.0,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                bytesize=serial.EIGHTBITS
+            )
+            
+            # Clear any existing data in buffers
+            self._serial_connection.reset_input_buffer()
+            self._serial_connection.reset_output_buffer()
+            
+            # Send initialization sequence
+            await self._initialize_eldat_protocol()
+            
+            _LOGGER.info("✅ ELDAT protocol serial connection established")
+            return True
+            
+        except Exception as e:
+            _LOGGER.error("Failed to establish ELDAT protocol serial connection: %s", e)
+            return False
+
+    def set_telegram_callback(self, callback: Callable) -> None:
+        """Set callback function for incoming telegrams."""
+        self._telegram_callback = callback
+        _LOGGER.info("🔗 Telegram callback set to: %s (type: %s)", callback, type(callback))
+        
+        # Verify the callback was stored correctly
+        if self._telegram_callback != callback:
+            _LOGGER.error("❌ Callback storage failed! Expected %s, got %s", callback, self._telegram_callback)
+        else:
+            _LOGGER.info("✅ Callback verified and stored successfully")
+        
+        # Erstelle einen Wrapper-Callback für den RX11 Wrapper
+        if self._rx11_wrapper and hasattr(self._rx11_wrapper, 'set_telegram_callback'):
+            def wrapper_callback(info_type: int, receiver_transmitter: bytes, info_data: bytes) -> None:
+                try:
+                    _LOGGER.info("📨 Telegram wrapper callback triggered: info_type=%s", info_type)
+                    # Parse rohe Daten zu strukturiertem Dictionary
+                    telegram_data = self._parse_telegram_data(info_type, receiver_transmitter, info_data)
+                    
+                    # Verify callback is still available
+                    current_callback = self._telegram_callback
+                    _LOGGER.info("🔍 Current callback state: %s (type: %s)", bool(current_callback), type(current_callback) if current_callback else "None")
+                    
+                    if telegram_data and current_callback:
+                        _LOGGER.info("📤 Calling coordinator callback with telegram: %s", telegram_data.get("serial_number", "unknown")[-8:])
+                        # Schedule async callback in event loop
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(current_callback(telegram_data))
+                        else:
+                            loop.run_until_complete(current_callback(telegram_data))
+                    else:
+                        _LOGGER.warning("⚠️ Skipping callback: telegram_data=%s, callback=%s", bool(telegram_data), bool(current_callback))
+                except Exception as e:
+                    _LOGGER.error("Error in telegram callback wrapper: %s", e)
+                    import traceback
+                    _LOGGER.error("Full traceback: %s", traceback.format_exc())
+            
+            self._rx11_wrapper.set_telegram_callback(wrapper_callback)
+            _LOGGER.info("🔗 Telegram callback weitergegeben an RX11 Wrapper")
+        else:
+            _LOGGER.error("❌ Cannot set telegram callback - RX11 wrapper not available or missing method")
+        
+        _LOGGER.debug("Telegram callback set for RX11 transceiver")
+
+    def _parse_telegram_data(self, info_type: int, receiver_transmitter: bytes, info_data: bytes) -> Optional[Dict[str, Any]]:
+        """Parse raw telegram data into structured format."""
+        try:
+            # Extrahiere Seriennummer aus receiver_transmitter (16 bytes)
+            if len(receiver_transmitter) >= 16:
+                serial_hex = receiver_transmitter[:16].hex().upper()
+                serial_number = serial_hex
+            else:
+                _LOGGER.warning("Invalid receiver_transmitter length: %d", len(receiver_transmitter))
+                return None
+            
+            # Bestimme Gerätetyp basierend auf info_type
+            if info_type == 1:
+                device_type = "ew_transmitter"
+                type_name = "transmitter"
+            elif info_type == 0:  # Release events sind auch EW-Transmitter
+                device_type = "ew_transmitter" 
+                type_name = "transmitter"
+            elif info_type == 2:
+                device_type = "ew_sensor" 
+                type_name = "sensor"
+            else:
+                device_type = "unknown"
+                type_name = "unknown"
+            
+            # Parse zusätzliche Daten aus info_data
+            telegram_data = {
+                "serial_number": serial_number,
+                "serial": serial_number,  # Alias for compatibility
+                "type": device_type,
+                "device_type": type_name,
+                "info_type": info_type,
+                "raw_data": {
+                    "receiver_transmitter": receiver_transmitter.hex(),
+                    "info_data": info_data.hex() if info_data else ""
+                },
+                "timestamp": time.time()
+            }
+            
+            # Für EW-Transmitter: Parse Button-Info aus den 8 Bytes info_data
+            if info_type == 1 and len(info_data) >= 1:
+                # EWB_RCV Telegramm-Format für EW-Transmitter:
+                # info_data ist 8 Bytes lang
+                # info_type bestimmt Press (1) oder Release (0) 
+                # Byte 0 in info_data: Button-ID (0=A, 1=B, 2=C, 3=D)
+                
+                try:
+                    # Extract button from first byte of info_data
+                    button_id = info_data[0] if info_data else 0
+                    
+                    # info_type: 1 = press, 0 = release
+                    is_push = (info_type == 1)
+                    is_release = (info_type == 0)
+                    
+                    # Battery detection for EW-Transmitter
+                    # Check bit 7-2 of info_data[0] for 0x20 (low battery indicator)
+                    is_low_battery = False
+                    battery_level = 100  # Default to full
+                    if len(info_data) >= 1:
+                        # Bits 7-2 (mask 0xFC) should be 0x20 for low battery
+                        battery_bits = info_data[0] & 0xFC  # Extract bits 7-2
+                        _LOGGER.debug("🔋 EW-Transmitter %s: Battery check - info_data[0]=0x%02X, bits 7-2=0x%02X", 
+                                    serial_number[-6:], info_data[0], battery_bits)
+                        if battery_bits == 0x20:
+                            is_low_battery = True
+                            battery_level = 10  # Low battery (10%)
+                            _LOGGER.warning("🔋 Low battery detected for EW-Transmitter %s", serial_number[-6:])
+                        else:
+                            battery_level = 100  # Full battery
+                            _LOGGER.debug("🔋 EW-Transmitter %s: Battery full (bits 7-2 = 0x%02X, not 0x20)", 
+                                        serial_number[-6:], battery_bits)
+                    
+                    # Determine function
+                    if is_push:
+                        function = "push"
+                    else:
+                        function = "release"
+                    
+                    # Button names mapping
+                    button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
+                    button_name = button_names.get(button_id, "Unknown")
+                    
+                    telegram_data.update({
+                        "button": button_id,
+                        "button_name": button_name,
+                        "function": function,
+                        "is_push": is_push,
+                        "is_release": is_release,
+                        "is_low_battery": is_low_battery,
+                        "battery_level": battery_level,
+                        "battery_status": "low" if is_low_battery else "good",
+                        "additional_info": info_data[1] if len(info_data) > 1 else 0,
+                    })
+                    
+                    battery_info = f" (Battery: {battery_level}%)"
+                    _LOGGER.info("🎛️ EW-Transmitter %s: Button %s (%d) %s%s", 
+                               serial_number[-6:], button_name, button_id, function, battery_info)
+                    
+                except Exception as e:
+                    _LOGGER.warning("Error parsing EW-Transmitter button data: %s", e)
+                    # Fallback to basic parsing
+                    button_data = info_data[0] if info_data else 0
+                    telegram_data["button"] = button_data
+                    telegram_data["function"] = "push" if info_type == 1 else "release"
+                    telegram_data["battery_level"] = 100  # Default to full
+                    
+            # Handle info_type 0 as release for existing devices
+            elif info_type == 0:
+                # This is a release telegram - find the device type and handle accordingly
+                # For EW-Transmitter releases, we need to determine which button was released
+                # The button info should be in the first byte of info_data (similar to press)
+                
+                # Check if this could be an EW-Transmitter by pattern matching
+                if len(info_data) == 8:
+                    # For release, try to extract button from first byte, but default to 0 if all zeros
+                    button_id = info_data[0] if info_data and info_data[0] != 0 else 0
+                    
+                    # Battery detection for EW-Transmitter releases
+                    # Check bit 7-2 of info_data[0] for 0x20 (low battery indicator)
+                    is_low_battery = False
+                    battery_level = 100  # Default to full
+                    if len(info_data) >= 1:
+                        # Bits 7-2 (mask 0xFC) should be 0x20 for low battery
+                        battery_bits = info_data[0] & 0xFC  # Extract bits 7-2
+                        if battery_bits == 0x20:
+                            is_low_battery = True
+                            battery_level = 10  # Low battery (10%)
+                            _LOGGER.warning("🔋 Low battery detected for EW-Transmitter %s on release", serial_number[-6:])
+                        else:
+                            battery_level = 100  # Full battery
+                    
+                    button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
+                    button_name = button_names.get(button_id, "A")  # Default to A
+                    
+                    telegram_data.update({
+                        "device_type": "transmitter", 
+                        "type": "ew_transmitter",
+                        "button": button_id,
+                        "button_name": button_name,
+                        "function": "release",
+                        "is_push": False,
+                        "is_release": True,
+                        "is_low_battery": is_low_battery,
+                        "battery_level": battery_level,
+                        "battery_status": "low" if is_low_battery else "good",
+                    })
+                    
+                    battery_info = f" (Battery: {battery_level}%)"
+                    _LOGGER.info("🎛️ EW-Transmitter %s: Button %s (%d) release%s", 
+                               serial_number[-6:], button_name, button_id, battery_info)
+            
+            # Für EWneo-Sensor: Prüfe ob Learn-Telegramm oder Messwert-Telegramm
+            if info_type == 2:
+                # Default: Kein Lerntelegramm (wird später aus Flags gesetzt)
+                telegram_data["is_learn_telegram"] = False
+                # Default Sensoren (falls Parsing fehlschlägt)
+                available_sensors = ["temperature", "humidity"]
+                telegram_data["available_sensors"] = available_sensors
+                telegram_data["measurement_types"] = available_sensors
+                telegram_data["sensor_capabilities"] = available_sensors + ["battery"]
+                
+                # Parse tatsächliche Sensor-Messwerte aus info_data
+                if len(info_data) >= 7:
+                    # EWneo-Sensor Telegramm-Format (offiziell dokumentiert):
+                    # Byte 0: Version (bits 2-0, immer 0)
+                    # Byte 1: 
+                    #   - Bit 7: 1=Learn-Telegramm, 0=Messwert-Telegramm
+                    #   - Bit 6: 1=Hat Batterie, 0=Keine Batterie
+                    #   - Bits 5-3: Batterie-Level (0=schwach, 7=voll)
+                    
+                    try:
+                        # Parse Byte 1 flags
+                        flags = info_data[1] 
+                        is_learn_telegram = bool(flags & 0x80)  # Bit 7
+                        # WICHTIG: Setze is_learn_telegram im telegram_data Dictionary
+                        telegram_data["is_learn_telegram"] = is_learn_telegram
+                        has_battery = bool(flags & 0x40)        # Bit 6
+                        battery_level_raw = (flags >> 3) & 0x07  # Bits 5-3
+                        
+                        # Convert battery level: 0=weak (0%), 7=full (100%)
+                        if has_battery:
+                            battery_level = int((battery_level_raw / 7.0) * 100) if battery_level_raw > 0 else 0
+                            telegram_data["battery_level"] = battery_level
+                            if battery_level_raw <= 1:  # 0 or 1 = weak
+                                telegram_data["battery_status"] = "low"
+                            elif battery_level_raw <= 4:  # medium range
+                                telegram_data["battery_status"] = "medium" 
+                            else:  # 5, 6, 7 = good to full
+                                telegram_data["battery_status"] = "good"
+                        
+                        if is_learn_telegram:
+                            # Learn-Telegramm: Bytes 2-7 enthalten Fähigkeiten (6 bytes big-endian)
+                            _LOGGER.info("📚 LERNTELEGRAMM empfangen von EWneo-Sensor %s (Byte1=0x%02X, Bit7=1)", 
+                                       serial_number[-6:], flags)
+                            
+                            # Bytes 2-7: 48-bit capability field (big-endian)
+                            if len(info_data) >= 8:
+                                capabilities = int.from_bytes(info_data[2:8], byteorder='big')
+                                _LOGGER.info("📚 Capabilities raw: 0x%012X (bytes 2-7: %s)", 
+                                           capabilities, info_data[2:8].hex())
+                                
+                                has_humidity = bool(capabilities & (1 << 5))  # Bit 5
+                                has_temperature = bool(capabilities & (1 << 4))  # Bit 4
+                                
+                                _LOGGER.info("📚 Capability bits: Bit5(humidity)=%s, Bit4(temperature)=%s", 
+                                           has_humidity, has_temperature)
+                                
+                                available_sensors = []
+                                if has_temperature:
+                                    available_sensors.append("temperature")
+                                if has_humidity:
+                                    available_sensors.append("humidity")
+                                
+                                # Immer Battery hinzufügen wenn has_battery gesetzt ist
+                                sensor_capabilities = available_sensors.copy()
+                                if has_battery:
+                                    sensor_capabilities.append("battery")
+                                
+                                telegram_data["available_sensors"] = available_sensors
+                                telegram_data["measurement_types"] = available_sensors
+                                telegram_data["sensor_capabilities"] = sensor_capabilities
+                                
+                                _LOGGER.info("📚 EWneo-Sensor %s Fähigkeiten: Temperature=%s, Humidity=%s, Battery=%s → Entities: %s", 
+                                           serial_number[-6:], has_temperature, has_humidity, has_battery, sensor_capabilities)
+                        else:
+                            # Messwert-Telegramm: Byte 2 = Messtyp, Bytes 3-4 = Wert
+                            _LOGGER.info("📊 MESSWERT-Telegramm empfangen von EWneo-Sensor %s (Byte1=0x%02X, Bit7=0)", 
+                                       serial_number[-6:], flags)
+                            if len(info_data) >= 5:
+                                measurement_type = (info_data[2] >> 2) & 0x3F  # Bits 7-2
+                                has_reference = bool(info_data[2] & 0x01)      # Bit 0
+                                
+                                # Messwert (16-bit big-endian)
+                                measurement_raw = int.from_bytes(info_data[3:5], byteorder='big')
+                                
+                                if measurement_type == 4:  # Temperatur
+                                    # Temperature formula from ELDAT specification:
+                                    # T = a * n where a = 1/20 K
+                                    # Range: n = 0 to 65535
+                                    a = 1.0 / 20.0  # K per unit
+                                    temperature_k = a * measurement_raw
+                                    temperature_c = temperature_k - 273.15
+                                    
+                                    # Sanity check: if temperature is physically impossible, log warning
+                                    if temperature_c < -100.0 or temperature_c > 100.0:
+                                        _LOGGER.warning("⚠️ Temperature %s°C (raw=%d) seems out of reasonable range, sensor may need calibration", 
+                                                      temperature_c, measurement_raw)
+                                    
+                                    telegram_data["temperature"] = round(temperature_c, 1)
+                                    _LOGGER.debug("Temperature measurement: raw=%d → %.1f K → %.1f°C", 
+                                                measurement_raw, temperature_k, temperature_c)
+                                    
+                                elif measurement_type == 5:  # Luftfeuchtigkeit  
+                                    # Humidity formula: φ = b * n where b = 100/4095%
+                                    # Range: n = 0 to 4095
+                                    b = 100.0 / 4095.0  # % per unit
+                                    humidity = b * measurement_raw
+                                    telegram_data["humidity"] = round(humidity, 1)
+                                    _LOGGER.debug("Humidity measurement: raw=%d → %.1f%%", 
+                                                measurement_raw, humidity)
+                                else:
+                                    _LOGGER.debug("Unknown measurement type: %d", measurement_type)
+                                
+                                # Referenzwert falls vorhanden (Bytes 5-6)
+                                if has_reference and len(info_data) >= 7:
+                                    reference_raw = int.from_bytes(info_data[5:7], byteorder='big')
+                                    _LOGGER.debug("Reference value present: %d", reference_raw)
+                        
+                        # Log final values with clear indication of telegram type
+                        temp_str = f"{telegram_data.get('temperature', 'N/A'):.1f}°C" if 'temperature' in telegram_data else "N/A"
+                        hum_str = f"{telegram_data.get('humidity', 'N/A'):.1f}%" if 'humidity' in telegram_data else "N/A"
+                        batt_str = f"{telegram_data.get('battery_level', 'N/A')}%" if 'battery_level' in telegram_data else "N/A"
+                        telegram_type = "📚 LERNTELEGRAMM" if is_learn_telegram else "📊 MESSWERT"
+                        
+                        _LOGGER.info("%s - EWneo-Sensor %s: Temp=%s, Hum=%s, Batt=%s (raw: %s)",
+                                   telegram_type, serial_number[-6:], temp_str, hum_str, batt_str, info_data.hex())
+                        
+                    except Exception as e:
+                        _LOGGER.warning("Error parsing EWneo-Sensor telegram data: %s", e)
+                else:
+                    _LOGGER.debug("EW-Sensor telegram too short for measurement data: %d bytes", len(info_data))
+            
+            # Generiere Gerätename
+            device_name = f"{device_type.replace('_', ' ').title()} {serial_number[-6:]}"
+            telegram_data["name"] = device_name
+            
+            _LOGGER.debug("Parsed telegram: %s", telegram_data)
+            return telegram_data
+            
+        except Exception as e:
+            _LOGGER.error("Error parsing telegram data: %s", e)
+            return None
+    
+    @property
+    def is_connected(self) -> bool:
+        """Check if RX11 transceiver is connected."""
+        if self._rx11_wrapper and self._rx11_wrapper.is_connected():
+            return True
+        return bool(self._serial_connection and self._serial_connection.is_open)
+
+    def _handle_telegram(self, telegram_data: bytes) -> None:
+        """Handle incoming telegram data."""
+        _LOGGER.debug("📨 Simple telegram handler called with data: %s", telegram_data.hex() if telegram_data else "None")
+        
+        # Call main telegram callback (coordinator)
+        if hasattr(self, '_telegram_callback') and self._telegram_callback:
+            try:
+                self._telegram_callback(telegram_data)
+                _LOGGER.debug("✅ Main callback executed")
+            except Exception as e:
+                _LOGGER.error("Error in main telegram callback: %s", e)
+        
+        # Call additional callback if set (e.g., for learning)
+        if hasattr(self, '_additional_callback') and self._additional_callback:
+            try:
+                self._additional_callback(telegram_data)
+                _LOGGER.debug("✅ Additional callback executed")
+            except Exception as e:
+                _LOGGER.error("Error in additional telegram callback: %s", e)
+        
+        if not hasattr(self, '_telegram_callback') or not self._telegram_callback:
+            _LOGGER.warning("❌ No main telegram callback set: %s", telegram_data.hex() if telegram_data else "None")
+
+    async def register_device(self, serial_number: str, device_info: dict) -> None:
+        """Register a device with the RX11 transceiver."""
+        _LOGGER.debug("Registering device %s with RX11 transceiver: %s", serial_number, device_info.get('name', 'Unknown'))
+        # Store device info for future reference
+        if not hasattr(self, '_registered_devices'):
+            self._registered_devices = {}
+        self._registered_devices[serial_number] = device_info
+        _LOGGER.info("Device %s successfully registered with RX11 transceiver", serial_number)
+
+    async def unregister_device(self, serial_number: str) -> bool:
+        """Unregister a device from the RX11 transceiver."""
+        try:
+            _LOGGER.debug("Unregistering device %s from RX11 transceiver", serial_number)
+            
+            # Remove from registered devices if it exists
+            if hasattr(self, '_registered_devices') and serial_number in self._registered_devices:
+                del self._registered_devices[serial_number]
+                _LOGGER.info("Device %s successfully unregistered from RX11 transceiver", serial_number)
+                return True
+            else:
+                _LOGGER.warning("Device %s was not found in registered devices", serial_number)
+                return False
+                
+        except Exception as e:
+            _LOGGER.error("Error unregistering device %s: %s", serial_number, e)
+            return False
+
+    async def send_command_to_device(self, serial_number: str, command: bytes) -> bool:
+        """Send command to a specific device."""
+        try:
+            if not self.is_connected:
+                _LOGGER.error("Cannot send command - transceiver not connected")
+                return False
+                
+            # Ensure command is bytes
+            if isinstance(command, str):
+                # Convert hex string to bytes if needed
+                if all(c in '0123456789ABCDEFabcdef' for c in command.replace(' ', '')):
+                    command = bytes.fromhex(command.replace(' ', ''))
+                else:
+                    command = command.encode('utf-8')
+                
+            if self._rx11_wrapper:
+                # Use RX11 wrapper for command sending with device-specific targeting
+                return await self._rx11_wrapper.rx11_ew_receiver_send_command(serial_number, command)
+            else:
+                # Fallback: Implement proper ELDAT protocol commands
+                _LOGGER.info("Using ELDAT protocol fallback for device %s", serial_number[-8:])
+                return await self._send_eldat_protocol_command(serial_number, command)
+                    
+        except Exception as e:
+            _LOGGER.error("Error sending command to device %s: %s", serial_number, e)
+            return False
+
+    async def _send_eldat_protocol_command(self, serial_number: str, command: bytes) -> bool:
+        """Send ELDAT protocol command via serial fallback."""
+        try:
+            if not self._serial_connection or not self._serial_connection.is_open:
+                _LOGGER.error("No serial connection available for ELDAT protocol")
+                return False
+            
+            # Convert serial number to device ID for ELDAT protocol
+            try:
+                device_id = int(serial_number) if serial_number.isdigit() else int(serial_number, 16)
+            except ValueError:
+                _LOGGER.error("Invalid serial number format: %s", serial_number)
+                return False
+                
+            # Create ELDAT protocol frame
+            # Basic frame structure: [Start][Length][Command][DeviceID][Data][Checksum]
+            frame = bytearray()
+            frame.append(0xAA)  # Start byte
+            frame.append(len(command) + 5)  # Frame length
+            frame.append(0x01)  # Command type (Send)
+            
+            # Add device ID (4 bytes)
+            frame.extend(device_id.to_bytes(4, byteorder='little'))
+            
+            # Add command data
+            frame.extend(command)
+            
+            # Calculate checksum (XOR of all bytes except start)
+            checksum = 0
+            for byte in frame[1:]:
+                checksum ^= byte
+            frame.append(checksum)
+            
+            # Send frame
+            _LOGGER.debug("Sending ELDAT protocol frame: %s", frame.hex())
+            self._serial_connection.write(frame)
+            await asyncio.sleep(0.2)  # Wait for transmission
+            
+            # Check for response (optional)
+            if self._serial_connection.in_waiting > 0:
+                response = self._serial_connection.read(self._serial_connection.in_waiting)
+                _LOGGER.debug("Received response: %s", response.hex())
+            
+            _LOGGER.info("✅ ELDAT protocol command sent to device %s", serial_number)
+            return True
+            
+        except Exception as e:
+            _LOGGER.error("Error in ELDAT protocol communication: %s", e)
+            return False
+
+    async def _initialize_eldat_protocol(self) -> bool:
+        """Initialize ELDAT protocol communication."""
+        try:
+            # Send Connect equivalent command
+            connect_frame = bytearray([
+                0xAA,  # Start byte
+                0x06,  # Frame length
+                0x10,  # Connect command
+                0x00, 0x00, 0x00, 0x00,  # Reserved
+                0x16   # Checksum (XOR of bytes 1-6)
+            ])
+            
+            _LOGGER.debug("Sending ELDAT Connect command: %s", connect_frame.hex())
+            self._serial_connection.write(connect_frame)
+            await asyncio.sleep(0.2)  # Reduced wait for faster response
+            
+            # Check for response
+            if self._serial_connection.in_waiting > 0:
+                response = self._serial_connection.read(self._serial_connection.in_waiting)
+                _LOGGER.debug("Connect response: %s", response.hex())
+                # Basic validation - should start with 0xAA
+                if response and response[0] == 0xAA:
+                    _LOGGER.info("✅ ELDAT protocol Connect successful")
+                    return True
+            
+            _LOGGER.warning("⚠️ ELDAT protocol Connect - no response received")
+            return True  # Continue anyway, device might not respond to init
+            
+        except Exception as e:
+            _LOGGER.error("Error in ELDAT protocol initialization: %s", e)
+            return False
+
+    # EW Receiver Management Methods (Delegate to wrapper)
+    async def get_next_available_receiver(self) -> Optional[tuple[int, str]]:
+        """Get the next available EW receiver (index, serial) that is not yet used."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.get_next_available_receiver()
+        _LOGGER.warning("RX11 wrapper not available for receiver management")
+        return None
+        
+    def mark_receiver_used(self, index: int, serial: str) -> None:
+        """Mark a receiver as used/allocated."""
+        if self._rx11_wrapper:
+            self._rx11_wrapper.mark_receiver_used(index, serial)
+        else:
+            _LOGGER.warning("RX11 wrapper not available for receiver management")
+            
+    def mark_receiver_available(self, index: int) -> None:
+        """Mark a receiver as available again (e.g., when device is removed)."""
+        if self._rx11_wrapper:
+            self._rx11_wrapper.mark_receiver_available(index)
+        else:
+            _LOGGER.warning("RX11 wrapper not available for receiver management")
+            
+    def get_used_receivers(self) -> dict[int, str]:
+        """Get all currently used receivers."""
+        if self._rx11_wrapper:
+            return self._rx11_wrapper.get_used_receivers()
+        return {}
+        
+    def get_available_receivers_count(self) -> int:
+        """Get count of available (not used) receivers."""
+        if self._rx11_wrapper:
+            return self._rx11_wrapper.get_available_receivers_count()
+        return 0
+
+    # =============================================================================
+    # RX11 EW RECEIVER OPERATIONS
+    # =============================================================================
+
+    async def rx11_ew_receiver_scan_all(self, max_index: int = 50, force_refresh: bool = False) -> dict[int, str]:
+        """Scan for EW receivers and return mapping."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ew_receiver_scan_all(max_index)
+        return {}
+        
+    def rx11_ew_receiver_reset_used_list(self) -> None:
+        """Reset the used receivers list (for debugging/recovery)."""
+        if self._rx11_wrapper:
+            self._rx11_wrapper.reset_used_receivers()
+        else:
+            _LOGGER.warning("RX11 wrapper not available for receiver management")
+            
+    async def rx11_ew_receiver_unregister_device(self, serial_number: str) -> None:
+        """Unregister a device and mark its receiver as available again."""
+        try:
+            if self._rx11_wrapper:
+                # Check if this serial is in our used receivers and free it
+                used_receivers = self._rx11_wrapper.get_used_receivers()
+                for index, used_serial in used_receivers.items():
+                    if used_serial == serial_number:
+                        self._rx11_wrapper.mark_receiver_available(index)
+                        _LOGGER.info("♻️ Freed receiver index %d for serial %s", index, serial_number[-8:])
+                        
+                        # Also remove from legacy tracking
+                        if serial_number in self._rx11_indices:
+                            del self._rx11_indices[serial_number]
+                            
+                        break
+                else:
+                    _LOGGER.debug("Serial %s not found in used receivers list", serial_number[-8:])
+                    
+                    # Check legacy tracking as fallback
+                    if serial_number in self._rx11_indices:
+                        index = self._rx11_indices[serial_number]
+                        self._rx11_wrapper.mark_receiver_available(index)
+                        del self._rx11_indices[serial_number]
+                        _LOGGER.info("♻️ Freed receiver index %d (from legacy) for serial %s", index, serial_number[-8:])
+            else:
+                _LOGGER.warning("RX11 wrapper not available for device unregistration")
+        except Exception as e:
+            _LOGGER.warning("Error unregistering device %s: %s", serial_number[-8:], e)
+
+    # =============================================================================
+    # RX11 EWB (EASYWAVE BIDI) OPERATIONS
+    # =============================================================================
+
+    async def rx11_ewb_get_next_available_index(self) -> Optional[int]:
+        """Get the next available EWB index."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_get_next_available_index()
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+
+    async def rx11_ewb_get_next_available_index_single(self) -> Optional[int]:
+        """Get the next available EWB index using optimized single GetFdSerial call."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_get_next_available_index_single()
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+
+    async def rx11_ewb_get_serial_by_index(self, index: int) -> Optional[str]:
+        """Get EWB gateway serial number by index."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_get_serial_by_index(index)
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+
+    async def rx11_ewb_add_filter(self, gateway_serial: str) -> bool:
+        """Add EWB serial to receive filter."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_add_filter(gateway_serial)
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return False
+
+    async def rx11_ewb_join_device(self, gateway_serial: str) -> Optional[tuple[int, str]]:
+        """Join EWB device and return (device_type, receiver_serial)."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_join_device(gateway_serial)
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+
+    async def rx11_ewb_remove_device(self, gateway_serial: str, receiver_serial: str) -> bool:
+        """Remove EWB device using gateway and receiver serials."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_remove_device(gateway_serial, receiver_serial)
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return False
+
+    async def rx11_ewb_query_state(self, gateway_serial: str, receiver_serial: str, mode: int = 0) -> Optional[tuple[int, list]]:
+        """Query EWB device state and return (mode, state_bytes)."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_query_state(gateway_serial, receiver_serial, mode)
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+
+    async def rx11_ewb_change_state(self, gateway_serial: str, receiver_serial: str, 
+                                   desired_mode: int, desired_state: list) -> Optional[tuple[int, list]]:
+        """Change EWB device state and return (recent_mode, recent_state)."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_change_state(gateway_serial, receiver_serial, desired_mode, desired_state)
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+
+    async def rx11_ewb_receive_telegram(self) -> Optional[dict]:
+        """Receive EWB telegram for state updates."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_receive_telegram()
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None

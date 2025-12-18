@@ -1,0 +1,45 @@
+{
+  "domain": "eldat_plugin",
+  "name": "ELDAT Integration",
+  "version": "1.0.0",
+  "documentation": "https://github.com/eldat-eas/homeassistant-eldat",
+  "dependencies": [],
+  "codeowners": [
+    "@eldat-dev"
+  ],
+  "config_flow": true,
+  "dhcp": [],
+  "homekit": {},
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/eldat-eas/homeassistant-eldat/issues",
+  "quality_scale": "silver",
+  "requirements": [
+    "pyserial>=3.5",
+    "pyusb>=1.2.1"
+  ],
+  "ssdp": [],
+  "platforms": [
+    "binary_sensor",
+    "button", 
+    "sensor",
+    "switch",
+    "cover",
+    "light"
+  ],
+  "device_automation": true,
+  "usb": [
+    {
+      "vid": "155A",
+      "pid": "1006",
+      "description": "*eldat*"
+    },
+    {
+      "vid": "155A",
+      "pid": "1014",
+      "description": "*eldat*"
+    }
+  ],
+  "zeroconf": [],
+  "panel_custom": [],
+  "logo": "icon.png"
+}
