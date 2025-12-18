@@ -1,0 +1,332 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup ELDAT RX11 USB Transceiver",
+        "description": "Found {found_devices} ELDAT devices: {device_list}.\n\n{status}\n\nSelect a device from the list or use other options.",
+        "data": {
+          "device_path": "USB Device",
+          "device_name": "Integration Name"
+        },
+        "data_description": {
+          "device_path": "Select an available device or manual entry",
+          "device_name": "Display name for the integration"
+        }
+      },
+      "device": {
+        "title": "Add New ELDAT Device",
+        "description": "Add a new ELDAT device via the RX11 transceiver."
+      },
+      "device_type_select": {
+        "title": "Select Device Type",
+        "description": "{instructions}",
+        "data": {
+          "device_type": "Device Type"
+        }
+      },
+      "device_transmitter": {
+        "title": "Learn EW Transmitter",
+        "description": "Press any button on the EW transmitter. Waiting for telegram...",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_transmitter_verify": {
+        "title": "Verify EW Transmitter",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_transmitter_config": {
+        "title": "Configure EW Transmitter",
+        "description": "{instructions}",
+        "data": {
+          "button_count": "Number of Buttons"
+        }
+      },
+      "device_transmitter_description": {
+        "title": "EW-Transmitter Learning - Instructions",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_transmitter_learn": {
+        "title": "Learning EW-Transmitter",
+        "description": "🎛️ **Waiting for EW-Transmitter signal...**\n\n📡 **Please press any button on your EW-Transmitter NOW!**\n\nThe system is listening for the radio signal. This may take up to 3 minutes.\n\n⚡ **Status:** Waiting for telegram reception...",
+        "data": {}
+      },
+      "device_sensor": {
+        "title": "Learn EWneo Sensor",
+        "description": "Trigger the EWneo sensor or wait for automatic measurement. Waiting for telegram...",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_sensor_description": {
+        "title": "EW-Sensor Learning - Instructions",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_sensor_learn_actual": {
+        "title": "Learning EW-Sensor",
+        "description": "🌡️ **Waiting for EW-Sensor signal...**\n\n📡 **Please trigger your EW-Sensor NOW!**\n\nThe system is listening for the radio signal. This may take up to 3 minutes.\n\n⚡ **Status:** Waiting for telegram reception...",
+        "data": {}
+      },
+      "device_sensor_verify": {
+        "title": "Verify EWneo Sensor",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_ewneo_receiver": {
+        "title": "Add EWneo Receiver",
+        "description": "{instructions}"
+      },
+      "device_ewneo_receiver_learn": {
+        "title": "Prepare EWneo Receiver",
+        "description": "🔧 **Preparing EWneo receiver...**\n\n📋 **Preparation steps:**\n• Determining EWneo index\n• Loading gateway serial\n• Setting receive filter\n\n⚡ **Please wait a moment...**"
+      },
+      "device_ewneo_receiver_learning_mode": {
+        "title": "Put EWneo Transceiver in Learning Mode",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_ewneo_receiver_join": {
+        "title": "Connect EWneo Receiver",
+        "description": "🔗 **Establishing connection to EWneo receiver...**\n\n📡 **Executing EWB_JOIN_DEVICE...**\n\n⚡ **Please wait for device confirmation...**"
+      },
+      "device_ewneo_receiver_confirm": {
+        "title": "Configure EWneo Receiver",
+        "description": "{instructions}",
+        "data": {
+          "device_name": "Device Name",
+          "entity_type": "Entity Type",
+          "supports_dimming": "Supports Dimming",
+          "supports_color": "Supports Colors"
+        }
+      },
+      "device_receiver_type": {
+        "title": "EW Receiver Device Type",
+        "description": "{instructions}",
+        "data": {
+          "receiver_type": "Device Type"
+        }
+      },
+      "device_receiver_operating_mode": {
+        "title": "EW Receiver Operating Mode",
+        "description": "{instructions}",
+        "data": {
+          "operating_mode": "Operating Mode"
+        }
+      },
+      "device_receiver_confirm": {
+        "title": "EW Receiver Confirmation",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_receiver": {
+        "title": "Learn EW Receiver",
+        "description": "Press the learn button on the EW receiver. Waiting for telegram...",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_receiver_verify": {
+        "title": "Verify EW Receiver",
+        "description": "{instructions}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_ewneo_receiver": {
+        "title": "Configure EWneo Receiver",
+        "description": "{instructions}",
+        "data": {
+          "entity_type": "Device Type",
+          "supports_dimming": "Supports Dimming",
+          "supports_color": "Supports Color"
+        }
+      },
+      "device_ewneo_receiver_learn": {
+        "title": "Learning EWneo Receiver",
+        "description": "⚡ **EWneo Receiver Learning Process**\n\n🔧 Automatic setup in progress...\n\n📡 This process will:\n• Find next available EWneo index\n• Load gateway serial number\n• Set receive filter\n• Learn the receiver device\n\nPlease wait...",
+        "data": {}
+      },
+      "device_confirm": {
+        "title": "Confirm Device",
+        "description": "Device successfully detected:\n\n📡 {device_name}\n🔑 Serial: ...{serial_number}\n\nDo you want to save this device?",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "show_all_devices": {
+        "title": "Show All USB Devices",
+        "description": "Found: {total_devices} USB devices ({eldat_devices} ELDAT devices).\n\n{warning}",
+        "data": {
+          "device_path": "Select USB Device",
+          "device_name": "Integration Name"
+        }
+      },
+      "manual": {
+        "title": "Manual ELDAT USB Device Entry",
+        "description": "Enter the path to your ELDAT USB device:\n\n{example_paths}",
+        "data": {
+          "device_path": "Device Path",
+          "device_name": "Integration Name"
+        },
+        "data_description": {
+          "device_path": "Complete path to USB device",
+          "device_name": "Display name for the integration"
+        }
+      },
+      "usb_confirm": {
+        "title": "Confirm ELDAT USB Device",
+        "description": "ELDAT USB device found at {device_path}. Do you want to add it?",
+        "data": {
+          "device_name": "Integration Name"
+        }
+      },
+      "device_add_select": {
+        "title": "Add ELDAT Device",
+        "description": "Select the device type you want to learn.",
+        "data": {
+          "device_type": "Device Type",
+          "learning_timeout": "Learning Timeout (seconds)"
+        }
+      },
+      "device_add_select_options": {
+        "title": "Add Device (Options)",
+        "description": "Select the device type to learn via options flow.",
+        "data": {
+          "device_type": "Device Type",
+          "learning_timeout": "Learning Timeout (seconds)"
+        }
+      },
+      "device_add_learn": {
+        "title": "Learning Mode Active",
+        "description": "Press a button / trigger the sensor now. Abort if you want to cancel.",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_add_learn_options": {
+        "title": "Learning (Options)",
+        "description": "Waiting for telegram... abort to cancel.",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_add_confirm": {
+        "title": "Confirm Learned Device",
+        "description": "Review the detected device information before saving.\n\n{details}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_add_confirm_options": {
+        "title": "Confirm Device (Options)",
+        "description": "Review learned device info.\n\n{details}",
+        "data": {
+          "action": "Action"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to device. Check the path and permissions.",
+      "invalid_device": "Invalid or unsupported device",
+      "invalid_path": "Invalid device path entered",
+      "learning_timeout": "No device detected within the timeout.",
+      "learning_aborted": "Learning aborted.",
+      "learning_failed": "Device learning failed.",
+      "no_coordinator": "No coordinator available.",
+      "no_devices_found": "No ELDAT USB devices found. Connect your device and refresh the list.",
+      "no_usb_devices_found": "No USB devices found.",
+      "no_device_selected": "No device selected.",
+      "device_type_mismatch": "Detected device type does not match selection.",
+      "measurement_without_learning": "Measurement telegram received, but sensor must be learned first. Press the learning button on the sensor and try again.",
+      "invalid_sensor_telegram": "Invalid sensor telegram received. Please press the learning button on the sensor.",
+      "no_available_ewneo_index": "No available EWneo index found. All 100 EWneo indices are occupied.",
+      "ewneo_learning_failed": "EWneo receiver learning failed. Please check the connection and try again.",
+      "ewneo_join_failed": "Connection to EWneo receiver failed. Make sure the device is in learning mode.",
+      "no_preparation_data": "Preparation data for EWneo receiver missing. Please restart the process.",
+      "unknown": "Unknown error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "invalid_discovery_info": "Invalid discovery information received.",
+      "not_eldat_device": "Not an ELDAT device",
+      "no_rx11_configured": "No RX11 transceiver configured. Please setup an RX11 first.",
+      "rx11_not_available": "RX11 transceiver not available",
+      "yaml_not_supported": "YAML configuration not supported. Please use the user interface.",
+      "device_added": "✅ Device successfully added!\n\n📡 {device_name}\n🔑 Serial number: ...{serial_number}\n\nThe device is now available and entities have been created.",
+      "learning_timeout": "Learning timeout. Please try again.",
+      "unknown": "Unknown error occurred",
+      "no_coordinator": "Coordinator not available",
+      "no_rx11_connection": "No RX11 connection available",
+      "rx11_not_connected": "RX11 transceiver is not connected",
+      "no_available_ewneo_index": "No available EWneo index found. All indices (0-255) are already in use.",
+      "no_gateway_serial": "Could not load gateway serial number",
+      "ewneo_join_failed": "EWneo receiver could not be learned. Make sure the device is in learning mode.",
+      "ewneo_learning_failed": "EWneo receiver learning process failed. Please check the connection and try again.",
+      "no_preparation_data": "Preparation data for EWneo receiver missing. Please restart the process."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ELDAT Options",
+        "description": "Configure the ELDAT integration.\n\nFound devices: {device_count}\nLearning mode: {learning_status}",
+        "data": {
+          "scan_interval": "Scan Interval (seconds)",
+          "auto_discovery": "Automatic Device Discovery",
+          "action": "Action",
+          "learning_duration": "Learning Mode Duration (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often to scan for new devices",
+          "auto_discovery": "Automatic addition of devices by telegram reception"
+        }
+      }
+    }
+  },
+  "selector": {
+    "button_count": {
+      "button_count_1": "🔘 Single button (1 button)",
+      "button_count_2": "🔘🔘 Dual button (2 buttons)",
+      "button_count_3": "🔘🔘🔘 Triple button (3 buttons A/B/C)",
+      "button_count_4": "🔘🔘🔘🔘 Quad button (4 buttons A/B/C/D)"
+    },
+    "receiver_type": {
+      "switch": "🔌 Switch",
+      "motor": "🏠 Motor/Blind",
+      "heating_cooling": "🌡️ Heating/Cooling"
+    },
+    "operating_mode": {
+      "1": "🔘 1-button operation",
+      "2": "🔘🔘 2-button operation", 
+      "3": "🔘🔘🔘 3-button operation"
+    },
+    "action": {
+      "wait": "⏳ Keep waiting",
+      "cancel": "❌ Cancel",
+      "proceed": "✅ Ready - Device is in learning mode",
+      "confirm": "✅ Confirm",
+      "ok": "✅ OK",
+      "retry": "🔄 Try again"
+    },
+    "entity_type": {
+      "switch": "🔌 Switch (On/Off)",
+      "light": "💡 Light (with advanced functions)",
+      "cover": "🏠 Cover/Blind"
+    }
+  }
+}

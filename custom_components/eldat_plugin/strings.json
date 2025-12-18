@@ -1,0 +1,657 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ELDAT RX11 USB Transceiver einrichten",
+        "description": "Es wurden {found_devices} ELDAT Geräte gefunden: {device_list}.\n\n{status}\n\nWählen Sie ein Gerät aus der Liste oder verwenden Sie die anderen Optionen.",
+        "data": {
+          "device_path": "USB-Gerät",
+          "device_name": "Name der Integration"
+        },
+        "data_description": {
+          "device_path": "Wählen Sie ein verfügbares Gerät oder manuelle Eingabe",
+          "device_name": "Anzeigename für die Integration"
+        }
+      },
+      "device": {
+        "title": "Neues ELDAT Gerät hinzufügen",
+        "description": "Fügen Sie ein neues ELDAT Gerät über den RX11 Transceiver hinzu."
+      },
+      "device_type_select": {
+        "title": "Gerätetyp auswählen",
+        "description": "{instructions}",
+        "data": {
+          "device_type": "Gerätetyp"
+        }
+      },
+      "device_transmitter_learn": {
+        "title": "EW-Transmitter Einlernen",
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_transmitter_config": {
+        "title": "EW-Sender konfigurieren",
+        "description": "{instructions}",
+        "data": {
+          "button_count": "Tastenanzahl"
+        }
+      },
+      "device_transmitter_description": {
+        "title": "EW-Transmitter Einlernen - Anweisungen",
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_sensor_description": {
+        "title": "EW-Sensor Einlernen - Anweisungen",
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_sensor_learn_actual": {
+        "title": "EW-Sensor Einlernen",
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_receiver": {
+        "title": "EW-Empfänger - Automatisches Laden",
+        "description": "Seriennummer wird automatisch vom RX11 geladen...",
+        "data": {
+        }
+      },
+      "device_receiver_type": {
+        "title": "EW-Empfänger - Gerätetyp auswählen",
+        "description": "**Schritt 1: Geraetetyp waehlen**\\n\\n- Geraet: {device_name}\\n- Serial: {serial}\\n\\n{instruction}",
+        "data": {
+          "receiver_type": "Gerätetyp"
+        }
+      },
+      "device_receiver_operating_mode": {
+        "title": "EW-Empfänger - Betriebsart auswählen",
+        "description": "**Schritt 2: Betriebsart waehlen**\\n\\n- Typ: {device_type}\\n- Serial: {serial}\\n\\n{instruction}",
+        "data": {
+          "operating_mode": "Betriebsart"
+        }
+      },
+      "device_receiver_confirm": {
+        "title": "EW-Empfänger - Bestätigung",
+        "description": "Schritt 3: Lernmodus aktivieren und bestaetigen. Geraetedaten: Name {device_name}, Serial {serial}, Index {rx11_index}, Typ {receiver_kind}, Modus {operating_mode}. Funktionen: {button_summary}. Anleitung: {instruction}. Wichtig: Nach Bestaetigung wird Code A gesendet!",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_receiver_manual": {
+        "title": "EW-Empfänger - Manuelle Konfiguration", 
+        "description": "Fallback: Manuelle Eingabe. {instruction}",
+        "data": {
+          "serial_number": "Seriennummer",
+          "name": "Gerätename",
+          "rx11_index": "RX11-Index (optional)"
+        }
+      },
+      "device_receiver_verify": {
+        "title": "EW-Empfänger bestätigen",
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_ewneo_receiver": {
+        "title": "EWneo-Empfänger hinzufügen",
+        "description": "{instructions}"
+      },
+      "device_ewneo_receiver_learn": {
+        "title": "EWneo-Empfänger vorbereiten",
+        "description": "🔧 **EWneo-Empfänger wird vorbereitet...**\n\n📋 **Vorbereitungsschritte:**\n• EWneo-Index wird ermittelt\n• Gateway-Serial wird geladen\n• Empfangsfilter wird gesetzt\n\n⚡ **Bitte warten Sie einen Moment...**"
+      },
+      "device_ewneo_receiver_learning_mode": {
+        "title": "EWneo-Transceiver in Lernmodus versetzen",
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_ewneo_receiver_join": {
+        "title": "EWneo-Empfänger verbinden",
+        "description": "🔗 **Verbindung zum EWneo-Empfänger wird hergestellt...**\n\n📡 **EWB_JOIN_DEVICE wird ausgeführt...**\n\n⚡ **Bitte warten Sie auf die Bestätigung des Geräts...**"
+      },
+      "device_ewneo_receiver_confirm": {
+        "title": "EWneo-Empfänger konfigurieren",
+        "description": "{instructions}",
+        "data": {
+          "device_name": "Gerätename",
+          "entity_type": "Entity-Typ",
+          "supports_dimming": "Unterstützt Dimmen",
+          "supports_color": "Unterstützt Farben"
+        }
+      },
+      "device_confirm": {
+        "title": "EW-Empfänger konfigurieren",
+        "description": "Konfiguration für {device_name} (Seriennummer: {serial_number})\n\nWählen Sie den Gerätetyp sowie die gewünschte Betriebsart aus. Versetzen Sie dann den Empfänger in den entsprechenden Lernmodus.",
+        "data": {
+          "receiver_kind": "Gerätetyp",
+          "operating_mode": "Betriebsart"
+        }
+      },
+      "ew_receiver_config": {
+        "title": "EW-Receiver konfigurieren",
+        "description": "Konfigurieren Sie den EW-Receiver '{device_name}' (RX11-Index: {rx11_index}):\n\n**Empfängertyp:** Bestimmt die verfügbaren Funktionen\n**Betriebsmodus:** Anzahl und Art der Steuerungsknöpfe",
+        "data": {
+          "receiver_kind": "Empfängertyp",
+          "operating_mode": "Betriebsmodus"
+        }
+      },
+      "device_ewneo_receiver": {
+        "title": "EWneo-Empfänger konfigurieren",
+        "description": "{instructions}",
+        "data": {
+          "entity_type": "Gerätetyp",
+          "supports_dimming": "Unterstützt Dimmen",
+          "supports_color": "Unterstützt Farbe"
+        }
+      },
+      "device_ewneo_receiver_learn": {
+        "title": "EWneo-Empfänger Vorbereitung",
+        "description": "⚡ **EWneo-Empfänger Vorbereitung**\n\n🔧 Automatische Einrichtung läuft...\n\n📡 Dieser Prozess wird:\n• Nächsten verfügbaren EWneo-Index finden\n• Gateway-Seriennummer laden\n• Empfangsfilter setzen\n\nBitte warten...",
+        "data": {}
+      },
+      "device_ewneo_receiver_learning_mode": {
+        "title": "EWneo-Transceiver in Lernmodus versetzen", 
+        "description": "{instructions}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_ewneo_receiver_join": {
+        "title": "EWneo-Gerät einlernen",
+        "description": "⚡ **EWneo-Gerät wird eingelernt...**\n\n🔗 `EWB_JOIN_DEVICE` wird ausgeführt...\n\nBitte warten, während das System das EWneo-Gerät erkennt und konfiguriert.",
+        "data": {}
+      },
+      "device_ewneo_receiver_confirm": {
+        "title": "EWneo-Empfänger bestätigen",
+        "description": "{instructions}",
+        "data": {
+          "device_name": "Gerätename",
+          "supports_dimming": "Unterstützt Dimmen",
+          "supports_color": "Unterstützt Farbe"
+        }
+      },
+      "ew_receiver_learn": {
+        "title": "EW-Receiver Lernmodus aktivieren",
+        "description": "**SCHRITT 1:** Empfänger in Lernmodus versetzen\n\n{mode_instructions}\n\n**Vorgehensweise:**\n1. Drücken Sie die Lerntaste am EW-Receiver\n2. LED sollte blinken (Lernmodus aktiv)\n3. Bestätigen Sie mit 'OK' wenn der Lernmodus aktiv ist\n\n**Konfiguration:**\n- Gerät: {device_name}\n- RX11-Index: {rx11_index}\n- Typ: {receiver_kind}\n- Modus: {operating_mode}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "ew_receiver_final_confirm": {
+        "title": "EW-Receiver erstellen",
+        "description": "**FINALE BESTÄTIGUNG:**\n\nDer EW-Receiver ist bereit zur Erstellung:\n\n**Gerätedaten:**\n- Name: {device_name}\n- RX11-Index: {rx11_index}\n- Typ: {receiver_kind}\n- Betriebsmodus: {operating_mode}\n- Anzahl Buttons: {button_count}\n\n**Verfügbare Funktionen:**\n{button_summary}\n\n⚠️ **Wichtig:** Der Kommunikationstest wird beim Erstellen durchgeführt.",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "show_all_devices": {
+        "title": "Alle USB-Geräte anzeigen",
+        "description": "Gefunden: {total_devices} USB-Geräte ({eldat_devices} ELDAT-Geräte).\n\n{warning}",
+        "data": {
+          "device_path": "USB-Gerät auswählen",
+          "device_name": "Name der Integration"
+        }
+      },
+      "manual": {
+        "title": "ELDAT USB Gerät manuell eingeben", 
+        "description": "Geben Sie den Pfad zu Ihrem ELDAT USB-Gerät ein:\n\n{example_paths}",
+        "data": {
+          "device_path": "Gerätepfad",
+          "device_name": "Name der Integration"
+        },
+        "data_description": {
+          "device_path": "Vollständiger Pfad zum USB-Gerät",
+          "device_name": "Anzeigename für die Integration"
+        }
+      },
+      "usb_confirm": {
+        "title": "ELDAT USB Gerät bestätigen",
+        "description": "ELDAT USB Gerät bei {device_path} gefunden. Möchten Sie es hinzufügen?",
+        "data": {
+          "device_name": "Name der Integration"
+        }
+      },
+      "device_add_select": {
+        "title": "ELDAT Gerät hinzufügen",
+        "description": "Wählen Sie den Gerätetyp, den Sie anlernen möchten.",
+        "data": {
+          "device_type": "Gerätetyp",
+          "learning_timeout": "Anlern-Timeout (Sekunden)"
+        }
+      },
+      "device_add_select_options": {
+        "title": "Gerät hinzufügen (Optionen)",
+        "description": "Gerätetyp zum Anlernen im Optionen-Flow wählen.",
+        "data": {
+          "device_type": "Gerätetyp",
+          "learning_timeout": "Anlern-Timeout (Sekunden)"
+        }
+      },
+      "device_add_learn": {
+        "title": "Lernmodus aktiv",
+        "description": "Drücken Sie jetzt eine Taste oder lösen Sie den Sensor aus. Abbrechen, falls Sie den Vorgang beenden möchten.",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_add_learn_options": {
+        "title": "Anlernen (Optionen)",
+        "description": "Warte auf Telegramm... Abbrechen zum Stoppen.",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_add_confirm": {
+        "title": "Gerät bestätigen",
+        "description": "Prüfen Sie die erkannten Gerätedaten vor dem Speichern.\n\n{details}",
+        "data": {
+          "action": "Aktion"
+        }
+      },
+      "device_add_confirm_options": {
+        "title": "Gerät bestätigen (Optionen)",
+        "description": "Erkannte Gerätedaten prüfen.\n\n{details}",
+        "data": {
+          "action": "Aktion"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum Gerät fehlgeschlagen. Prüfen Sie den Pfad und die Berechtigung.",
+      "invalid_device": "Ungültiges oder nicht unterstütztes Gerät",
+      "invalid_path": "Ungültiger Gerätepfad eingegeben",
+      "learning_timeout": "Kein Gerät innerhalb des Timeouts erkannt.",
+      "learning_aborted": "Anlernen abgebrochen.",
+      "learning_failed": "Geräte-Anlernen fehlgeschlagen.",
+      "no_coordinator": "Kein Coordinator verfügbar.",
+      "no_devices_found": "Keine ELDAT USB-Geräte gefunden. Verbinden Sie Ihr Gerät und aktualisieren Sie die Liste.",
+      "no_usb_devices_found": "Keine USB-Geräte gefunden.",
+      "no_device_selected": "Kein Gerät ausgewählt.",
+      "device_type_mismatch": "Erkannter Gerätetyp passt nicht zur Auswahl.",
+      "measurement_without_learning": "Messtelegramm empfangen, aber Sensor muss zuerst angelernt werden. Drücken Sie die Lerntaste am Sensor und versuchen Sie es erneut.",
+      "invalid_sensor_telegram": "Ungültiges Sensor-Telegramm empfangen. Bitte drücken Sie die Lerntaste am Sensor.",
+      "waiting_for_sensor": "Warten auf gültiges Sensor-Telegramm. Bitte drücken Sie die Lerntaste am Sensor (nicht am EWneo-Empfänger).",
+      "sensor_parse_error": "Fehler beim Verarbeiten des Sensor-Telegramms: {error}",
+      "communication_failed": "Kommunikationstest mit EW-Receiver fehlgeschlagen. Prüfen Sie, ob der Receiver im Lernmodus ist.",
+      "communication_error": "Fehler beim Kommunikationstest aufgetreten.",
+      "user_cancelled": "Vom Benutzer abgebrochen.",
+      "no_receivers_found": "Keine EW-Empfänger gefunden. Überprüfen Sie die Verbindung zum RX11.",
+      "scan_failed": "Fehler beim Scannen nach EW-Empfängern aufgetreten.",
+      "invalid_selection": "Ungültige Auswahl getroffen.",
+      "invalid_serial": "Ungültige Seriennummer.",
+      "device_creation_error": "Fehler beim Erstellen des Geräts.",
+      "no_available_receivers": "Keine verfügbaren EW-Empfänger gefunden (alle Indizes belegt).",
+      "receiver_load_failed": "Fehler beim Laden des nächsten verfügbaren EW-Empfängers.",
+      "no_available_ewneo_index": "Kein verfügbarer EWneo-Index gefunden. Alle 100 EWneo-Indizes sind belegt.",
+      "ewneo_learning_failed": "EWneo-Empfänger Einlernen fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
+      "ewneo_join_failed": "Verbindung zum EWneo-Empfänger fehlgeschlagen. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
+      "no_preparation_data": "Vorbereitungsdaten für EWneo-Empfänger fehlen. Bitte starten Sie den Vorgang erneut.",
+      "unknown": "Unbekannter Fehler aufgetreten"
+    },
+    "abort": {
+      "already_configured": "Gerät ist bereits konfiguriert",
+      "invalid_discovery_info": "Ungültige Discovery-Informationen",
+      "not_eldat_device": "Kein ELDAT Gerät",
+      "no_rx11_configured": "Kein RX11 Transceiver konfiguriert. Bitte richten Sie zuerst einen RX11 ein.",
+      "rx11_not_available": "RX11 Transceiver nicht verfügbar",
+      "yaml_not_supported": "YAML-Konfiguration wird nicht unterstützt. Bitte verwenden Sie die Benutzeroberfläche.",
+      "device_added": "✅ Gerät erfolgreich hinzugefügt!\n\n📡 {device_name}\n🔑 Seriennummer: ...{serial_number}\n\nDas Gerät ist jetzt verfügbar und die Entitäten wurden erstellt.",
+      "learning_timeout": "Zeitüberschreitung beim Einlernen des Geräts. Bitte versuchen Sie es erneut.",
+      "device_removed": "Gerät wurde entfernt",
+      "unknown": "Unbekannter Fehler aufgetreten",
+      "no_coordinator": "Coordinator nicht verfügbar",
+      "no_rx11_connection": "Keine RX11-Verbindung verfügbar",
+      "rx11_not_connected": "RX11 Transceiver ist nicht verbunden",
+      "no_available_ewneo_index": "Kein verfügbarer EWneo-Index gefunden. Alle Indizes (0-255) sind bereits verwendet.",
+      "no_gateway_serial": "Konnte Gateway-Seriennummer nicht laden",
+      "ewneo_join_failed": "EWneo-Empfänger konnte nicht eingelernt werden. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
+      "ewneo_learning_failed": "EWneo-Empfänger Lernvorgang fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
+      "no_learned_device": "Kein eingerlerntes Gerät verfügbar",
+      "no_preparation_data": "Keine Vorbereitungsdaten verfügbar - bitte starten Sie den Vorgang neu",
+      "user_cancelled": "Benutzer hat den Vorgang abgebrochen"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ELDAT Optionen",
+        "description": "Konfigurieren Sie die ELDAT Integration.\n\nGefundene Geräte: {device_count}\nLernmodus: {learning_status}",
+        "data": {
+          "scan_interval": "Scan-Intervall (Sekunden)",
+          "auto_discovery": "Automatische Geräteerkennung",
+          "action": "Aktion",
+          "learning_duration": "Lernmodus-Dauer (Sekunden)"
+        },
+        "data_description": {
+          "scan_interval": "Wie oft nach neuen Geräten gesucht werden soll",
+          "auto_discovery": "Automatisches Hinzufügen von Geräten durch Telegramm-Empfang"
+        }
+      },
+      "manage_devices": {
+        "title": "Geräte verwalten",
+        "description": "Verwalten Sie Ihre ELDAT Geräte.\n\nAnzahl Geräte: {device_count}\nGeräte: {devices}",
+        "data": {
+          "action": "Aktion",
+          "device_to_remove": "Gerät zum Entfernen"
+        },
+        "data_description": {
+          "device_to_remove": "Wählen Sie ein Gerät aus, um es zu entfernen"
+        }
+      }
+    },
+    "error": {
+      "remove_failed": "Das Gerät konnte nicht entfernt werden",
+      "remove_error": "Fehler beim Entfernen des Geräts",
+      "invalid_device": "Ungültiges Gerät ausgewählt",
+      "no_coordinator": "Koordinator nicht gefunden"
+    }
+  },
+  "selector": {
+    "device_path": {
+      "manual_entry": "🔧 Manueller Pfad eingeben",
+      "refresh_list": "🔄 Geräteliste aktualisieren", 
+      "show_all_devices": "📋 Alle USB-Geräte anzeigen",
+      "back_to_main": "⬅️ Zurück zur Hauptauswahl"
+    },
+    "device_type": {
+      "device_type_ew_transmitter": "🎛️ EW-Sender (Taster/Fernbedienung)",
+      "device_type_ewneo_sensor": "🌡️ EWneo-Sensor (Temperatur/Helligkeit)",
+      "device_type_ew_receiver": "📥 EW-Empfänger (Schaltaktor)",
+      "device_type_ew_transmitter_full": "🎛️ EW-Sender / EW Transmitter",
+      "device_type_ew_receiver_full": "📥 EW-Empfänger / EW Receiver (Bidi)",
+      "device_type_ewneo_transceiver_full": "📡 EWneo-Sensor / EWneo Transceiver",
+      "device_type_ew_sensor_full": "🌡️ EW-Sensor / EW Sensor",
+      "device_type_ew_transmitter_options": "🎛️ EW-Sender / Transmitter",
+      "device_type_ew_receiver_options": "📥 EW-Empfänger / Receiver",
+      "device_type_ewneo_transceiver_options": "📡 EWneo Transceiver",
+      "device_type_ew_sensor_options": "🌡️ EW Sensor"
+    },
+    "button_count": {
+      "button_count_1": "🔘 Eintaster (1 Taste)",
+      "button_count_2": "🔘🔘 Zweitaster (2 Tasten)",
+      "button_count_3": "🔘🔘🔘 Dreitaster (3 Tasten A/B/C)",
+      "button_count_4": "🔘🔘🔘🔘 Viertaster (4 Tasten A/B/C/D)"
+    },
+    "receiver_type": {
+      "switch": "🔌 Schalter",
+      "motor": "🏠 Motor/Rollo",
+      "heating_cooling": "🌡️ Heizen/Kühlen"
+    },
+    "operating_mode": {
+      "1": "🔘 1-Tast-Bedienung",
+      "2": "🔘🔘 2-Tast-Bedienung", 
+      "3": "🔘🔘🔘 3-Tast-Bedienung"
+    },
+    "action": {
+      "confirm": "✅ Bestätigen",
+      "cancel": "❌ Abbrechen",
+      "proceed": "✅ Bereit - Gerät ist im Lernmodus",
+      "wait": "⏳ Weiter warten",
+      "ok": "✅ OK",
+      "retry": "🔄 Erneut versuchen",
+      "action_add_device": "➡️ Neues Gerät hinzufügen",
+      "action_done": "✅ Fertig",
+      "action_back": "⬅️ Zurück",
+      "action_abort": "❌ Abbrechen",
+      "action_retry": "🔁 Erneut versuchen",
+      "action_save": "✅ Speichern",
+      "action_discard": "🗑️ Verwerfen",
+      "action_enable_learning": "🟢 Lernmodus aktivieren",
+      "action_disable_learning": "🛑 Lernmodus deaktivieren",
+      "action_save_settings": "💾 Speichern"
+    },
+    "receiver_kind": {
+      "options": {
+        "switch": "🔌 Zustandsloser Schalter",
+        "dimmer": "💡 Zustandsloser Dimmer", 
+        "motor": "🎚️ Zustandsloser Motor"
+      }
+    },
+    "operating_mode": {
+      "options": {
+        "1": "Betriebsart 1",
+        "2": "Betriebsart 2",
+        "3": "Betriebsart 3"
+      }
+    }
+  },
+  "description": {
+    "devices_available": "Gefundene Geräte verfügbar",
+    "no_eldat_devices_detected": "Keine ELDAT-Geräte automatisch erkannt",
+    "connect_device_and_refresh": "Bitte verbinden Sie Ihr ELDAT USB-Gerät und klicken Sie auf 'Aktualisieren'",
+    "warning_only_eldat_devices": "⚠️ Nur ELDAT-Geräte funktionieren mit dieser Integration!",
+    "select_device_type_to_add": "Wählen Sie den Gerätetyp aus, den Sie hinzufügen möchten.",
+    "transmitter_config_instructions": "**✅ EW-Sender empfangen!**\n\n📡 **Gerät:** {device_name}\n🔑 **Seriennummer:** ...{serial_number}\n🔘 **Gedrückte Taste:** {button}\n\n**⚙️ Tastenkonfiguration**\nWählen Sie die Anzahl der Tasten, die Ihr Sender hat.\nFür jeden Taster wird automatisch eine Entität erstellt.",
+    "sensor_verify_instructions": "**Telegramm empfangen!** ✅\n\n📡 **Empfangene Informationen:**\n• Gerät: {device_name}\n• Seriennummer: {serial_number}\n• {sensor_data}\n\nBestätigen Sie, um das Gerät anzulegen.",
+    "receiver_verify_instructions": "**Telegramm empfangen!** ✅\n\n📡 **Empfangene Informationen:**\n• Gerät: {device_name}\n• Seriennummer: {serial_number}\n\nBestätigen Sie, um das Gerät anzulegen.",
+    "select_device_type_hint": "Wählen Sie den Gerätetyp und drücken Sie Weiter.",
+    "learning_aborted_hint": "Abgebrochen",
+    "retry_hint": "Sie können erneut versuchen.",
+    "select_device_type_options_hint": "Gerätetyp wählen",
+    "waiting_for_telegram": "Warte auf Telegramm...",
+    "active": "aktiv",
+    "inactive": "inaktiv"
+  },
+  "entity": {
+    "cover": {
+      "eldat_switch_cover": {
+        "name": "Schalter",
+        "state_attributes": {
+          "open_description": "Einschalten",
+          "close_description": "Ausschalten", 
+          "stop_description": "Toggle"
+        }
+      },
+      "eldat_dimmer_cover": {
+        "name": "Dimmer",
+        "state_attributes": {
+          "open_description": "Heller dimmen",
+          "close_description": "Dunkler dimmen",
+          "stop_description": "Ein/Aus"
+        }
+      },
+      "eldat_motor_cover": {
+        "name": "Motor",
+        "state_attributes": {
+          "open_description": "Hochfahren",
+          "close_description": "Herunterfahren",
+          "stop_description": "Stoppen"
+        }
+      },
+      "eldat_switch_2button": {
+        "name": "Schalter (2-Tasten)",
+        "state_attributes": {
+          "open_description": "Ein schalten",
+          "close_description": "Aus schalten"
+        }
+      },
+      "eldat_switch_3button": {
+        "name": "Schalter (3-Tasten)",
+        "state_attributes": {
+          "open_description": "Ein schalten", 
+          "close_description": "Aus schalten",
+          "stop_description": "Toggle Ein/Aus"
+        }
+      },
+      "eldat_motor_2button": {
+        "name": "Motor (2-Tasten)",
+        "state_attributes": {
+          "open_description": "Motor auffahren",
+          "close_description": "Motor herunterfahren"
+        }
+      },
+      "eldat_motor_3button": {
+        "name": "Motor (3-Tasten)",
+        "state_attributes": {
+          "open_description": "Motor auffahren",
+          "close_description": "Motor herunterfahren", 
+          "stop_description": "Motor stoppen"
+        }
+      },
+      "eldat_dimmer_2button": {
+        "name": "Dimmer (2-Tasten)",
+        "state_attributes": {
+          "open_description": "Heller dimmen",
+          "close_description": "Dunkler dimmen"
+        }
+      },
+      "eldat_dimmer_3button": {
+        "name": "Dimmer (3-Tasten)",
+        "state_attributes": {
+          "open_description": "Heller dimmen",
+          "close_description": "Dunkler dimmen",
+          "stop_description": "Licht Ein/Aus"
+        }
+      }
+    },
+    "button": {
+      "eldat_toggle": {
+        "name": "Toggle"
+      }
+    },
+    "progress": {
+      "waiting_for_transmitter_telegram": {
+        "title": "📡 EW-Transmitter Einlernen",
+        "description": "**🔴 Drücken Sie JETZT eine beliebige Taste am EW-Transmitter**\n\n🔄 **Warten auf Funksignal...**\n\n⏳ Das System wartet bis zu 3 Minuten auf das Telegramm.\n\n📊 Nach erfolgreichem Empfang werden die Geräteinformationen angezeigt und Sie können das Gerät bestätigen.\n\n❌ Sie können den Vorgang jederzeit abbrechen."
+      },
+      "waiting_for_sensor_telegram": {
+        "title": "🌡️ EW-Sensor Einlernen", 
+        "description": "**🔴 Betätigen Sie JETZT die Lerntaste am EW-Sensor**\n\n🔄 **Warten auf Lerntelegramm...**\n\n⏳ Das System wartet bis zu 3 Minuten auf das Lerntelegramm.\n\n📊 Verfügbare Sensoren werden automatisch erkannt und angezeigt.\n\n📊 Nach erfolgreichem Empfang werden die Sensorinformationen angezeigt und Sie können den Sensor bestätigen.\n\n❌ Sie können den Vorgang jederzeit abbrechen."
+      }
+    }
+  },
+  "services": {
+    "add_device": {
+      "name": "Gerät hinzufügen",
+      "description": "Fügt ein Gerät manuell zur Liste hinzu",
+      "fields": {
+        "serial_number": {
+          "name": "Seriennummer", 
+          "description": "16-Byte Seriennummer des Geräts (Hex-Format)"
+        },
+        "device_type": {
+          "name": "Gerätetyp",
+          "description": "Typ des hinzuzufügenden Geräts"
+        },
+        "device_name": {
+          "name": "Gerätename",
+          "description": "Anzeigename für das Gerät (optional)"
+        },
+        "channels": {
+          "name": "Kanäle",
+          "description": "Anzahl der Kanäle des Geräts"
+        }
+      }
+    },
+    "remove_device": {
+      "name": "Gerät entfernen",
+      "description": "Entfernt ein manuell hinzugefügtes Gerät",
+      "fields": {
+        "serial_number": {
+          "name": "Seriennummer",
+          "description": "Seriennummer des zu entfernenden Geräts"
+        },
+        "force": {
+          "name": "Erzwingen",
+          "description": "Entfernt das Gerät auch wenn es nicht manuell hinzugefügt wurde"
+        }
+      }
+    },
+    "scan_devices": {
+      "name": "Nach Geräten suchen",
+      "description": "Sucht nach neuen Geräten"
+    },
+    "learn_device": {
+      "name": "Gerät anlernen",
+      "description": "Lernt ein neues Gerät durch Empfang von Telegrammen an",
+      "fields": {
+        "device_type": {
+          "name": "Gerätetyp",
+          "description": "Typ des zu anlernenden Geräts"
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Maximale Wartezeit in Sekunden"
+        }
+      }
+    },
+    "send_command": {
+      "name": "Befehl senden",
+      "description": "Sendet einen Befehl an ein Gerät",
+      "fields": {
+        "serial_number": {
+          "name": "Seriennummer",
+          "description": "Seriennummer des Zielgeräts"
+        },
+        "command": {
+          "name": "Befehl",
+          "description": "Zu sendender Befehl (Hex-Format)"
+        },
+        "button": {
+          "name": "Taste",
+          "description": "Tastennummer (0-3 für A-D)"
+        },
+        "timeout": {
+          "name": "Timeout",
+          "description": "Befehl-Timeout in Sekunden"
+        }
+      }
+    },
+    "connect_usb": {
+      "name": "USB-Gerät verbinden",
+      "description": "Verbindet ein USB-Gerät mit der Integration",
+      "fields": {
+        "device_path": {
+          "name": "Gerätepfad",
+          "description": "Pfad zum USB-Gerät (z.B. /dev/ttyUSB0)"
+        },
+        "device_name": {
+          "name": "Gerätename", 
+          "description": "Anzeigename für das Gerät"
+        }
+      }
+    },
+    "heller_dimmen": {
+      "name": "Heller dimmen",
+      "description": "Macht den ELDAT Dimmer heller",
+      "fields": {
+        "entity_id": {
+          "name": "Dimmer",
+          "description": "Die Dimmer-Entity, die heller werden soll"
+        }
+      }
+    },
+    "dunkler_dimmen": {
+      "name": "Dunkler dimmen", 
+      "description": "Macht den ELDAT Dimmer dunkler",
+      "fields": {
+        "entity_id": {
+          "name": "Dimmer",
+          "description": "Die Dimmer-Entity, die dunkler werden soll"
+        }
+      }
+    },
+    "ein_aus": {
+      "name": "Ein/Aus",
+      "description": "Schaltet den ELDAT Dimmer ein oder aus",
+      "fields": {
+        "entity_id": {
+          "name": "Dimmer",
+          "description": "Die Dimmer-Entity, die ein/aus geschaltet werden soll"
+        }
+      }
+    }
+  }
+}

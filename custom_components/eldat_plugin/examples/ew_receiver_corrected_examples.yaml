@@ -1,0 +1,195 @@
+# Korrigierte EW-Receiver Konfiguration
+# Zustandslose Button-Entitäten mit LongPress-Unterstützung basierend auf zweistufigem Dialog
+
+# BEISPIEL 1: Switch -> Eintastbedienung = Toggle-Button mit LongPress
+switch_one_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "switch"
+  operating_mode: 1  # Eintastbedienung
+  receiver_kind: "switch"
+  name: "Wohnzimmer Licht"
+  # Erstellt: "Wohnzimmer Licht - Toggle" (Button mit LongPress)
+
+# BEISPIEL 2: Switch -> Zweitastbedienung = An + Aus-Button mit LongPress
+switch_two_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "switch" 
+  operating_mode: 2  # Zweitastbedienung
+  receiver_kind: "switch"
+  name: "Küche Licht"
+  # Erstellt: "Küche Licht - Ein" (Button mit LongPress)
+  #          "Küche Licht - Aus" (Button mit LongPress)
+
+# BEISPIEL 3: Motor -> Eintastbedienung = Toggle-Button mit LongPress  
+motor_one_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "cover"
+  operating_mode: 1  # Eintastbedienung
+  receiver_kind: "motor"
+  name: "Rollo Arbeitszimmer"
+  # Erstellt: "Rollo Arbeitszimmer - Motor Toggle" (Button mit LongPress)
+
+# BEISPIEL 4: Motor -> Zweitastbedienung = Auf + Zu-Button mit LongPress
+motor_two_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "cover"
+  operating_mode: 2  # Zweitastbedienung
+  receiver_kind: "motor"  
+  name: "Rollo Wohnzimmer"
+  # Erstellt: "Rollo Wohnzimmer - Auf" (Button mit LongPress)
+  #          "Rollo Wohnzimmer - Zu" (Button mit LongPress)
+
+# BEISPIEL 5: Motor -> Dreitastbedienung = Auf, Zu, Stopp mit LongPress
+motor_three_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "cover"
+  operating_mode: 3  # Dreitastbedienung
+  receiver_kind: "motor"
+  name: "Markise Terrasse"
+  # Erstellt: "Markise Terrasse - Auf" (Button mit LongPress)
+  #          "Markise Terrasse - Zu" (Button mit LongPress)
+  #          "Markise Terrasse - Stopp" (Button mit LongPress)
+
+# BEISPIEL 6: Dimmer -> Eintastbedienung = Toggle-Button mit LongPress
+dimmer_one_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "light"
+  operating_mode: 1  # Eintastbedienung
+  receiver_kind: "dimmer"
+  name: "Dimmer Esszimmer"
+  # Erstellt: "Dimmer Esszimmer - Dimmer Toggle" (Button mit LongPress)
+
+# BEISPIEL 7: Dimmer -> Zweitastbedienung = Heller/Dunkler mit LongPress
+dimmer_two_button_example:
+  device_type: "EW-Receiver"
+  entity_type: "light"
+  operating_mode: 2  # Zweitastbedienung
+  receiver_kind: "dimmer"
+  name: "Dimmer Schlafzimmer"
+  # Erstellt: "Dimmer Schlafzimmer - Heller" (Button mit LongPress)
+  #          "Dimmer Schlafzimmer - Dunkler" (Button mit LongPress)
+
+# BEISPIEL 8: Heizung/Kühlung -> Zweitastbedienung ohne LongPress
+hvac_example:
+  device_type: "EW-Receiver"
+  entity_type: "climate"
+  operating_mode: 2  # Zweitastbedienung
+  receiver_kind: "heating"  # oder "cooling" oder "hvac"
+  name: "Thermostat Büro"
+  # Erstellt: "Thermostat Büro - Heizen/Kühlen" (Button ohne LongPress)
+  #          "Thermostat Büro - Aus" (Button ohne LongPress)
+
+# AUTOMATIONS-BEISPIEL für zustandslose Buttons
+automation_example:
+  - alias: "EW-Receiver Button Event Handler"
+    description: "Behandle EW-Receiver Button-Events"
+    trigger:
+      - platform: event
+        event_type: eldat_button_pressed
+        event_data:
+          device_id: "SERIAL_NUMBER_HERE"  # Ersetzen mit tatsächlicher Seriennummer
+    action:
+      - choose:
+          # Toggle Switch Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'toggle' and trigger.event.data.receiver_kind == 'switch' }}"
+            sequence:
+              - service: light.toggle
+                target:
+                  entity_id: light.actual_light_entity
+          
+          # Switch Ein Button  
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'turn_on' and trigger.event.data.receiver_kind == 'switch' }}"
+            sequence:
+              - service: light.turn_on
+                target:
+                  entity_id: light.actual_light_entity
+          
+          # Switch Aus Button
+          - conditions:
+              - condition: template  
+                value_template: "{{ trigger.event.data.button_type == 'turn_off' and trigger.event.data.receiver_kind == 'switch' }}"
+            sequence:
+              - service: light.turn_off
+                target:
+                  entity_id: light.actual_light_entity
+          
+          # Motor Auf Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'open' and trigger.event.data.receiver_kind == 'motor' }}"
+            sequence:
+              - service: cover.open_cover
+                target:
+                  entity_id: cover.actual_cover_entity
+          
+          # Motor Zu Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'close' and trigger.event.data.receiver_kind == 'motor' }}"
+            sequence:
+              - service: cover.close_cover
+                target:
+                  entity_id: cover.actual_cover_entity
+          
+          # Motor Stopp Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'stop' and trigger.event.data.receiver_kind == 'motor' }}"
+            sequence:
+              - service: cover.stop_cover
+                target:
+                  entity_id: cover.actual_cover_entity
+          
+          # Dimmer Heller Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'brighten' and trigger.event.data.receiver_kind == 'dimmer' }}"
+            sequence:
+              - service: light.turn_on
+                target:
+                  entity_id: light.actual_dimmer_entity
+                data:
+                  brightness_step_pct: 20
+          
+          # Dimmer Dunkler Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'darken' and trigger.event.data.receiver_kind == 'dimmer' }}"
+            sequence:
+              - service: light.turn_on
+                target:
+                  entity_id: light.actual_dimmer_entity
+                data:
+                  brightness_step_pct: -20
+          
+          # HVAC Heizen/Kühlen Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'heat_cool' and trigger.event.data.receiver_kind in ['heating', 'cooling', 'hvac'] }}"
+            sequence:
+              - service: climate.set_hvac_mode
+                target:
+                  entity_id: climate.actual_climate_entity
+                data:
+                  hvac_mode: heat_cool
+          
+          # HVAC Aus Button
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.event.data.button_type == 'turn_off' and trigger.event.data.receiver_kind in ['heating', 'cooling', 'hvac'] }}"
+            sequence:
+              - service: climate.turn_off
+                target:
+                  entity_id: climate.actual_climate_entity
+
+# KONFIGURATIONSHINWEISE:
+# 1. Alle EW-Receiver Entitäten sind jetzt zustandslose Button-Entitäten
+# 2. LongPress wird durch supports_long_press: true aktiviert (außer bei HVAC)
+# 3. Events werden für Automationen ausgelöst (eldat_button_pressed)
+# 4. receiver_kind bestimmt den Empfängertyp (switch, motor, dimmer, heating, etc.)
+# 5. operating_mode bestimmt die Anzahl der Buttons (1, 2, oder 3)
+# 6. Entitätsnamen sind jetzt aussagekräftig und beschreiben die Funktion

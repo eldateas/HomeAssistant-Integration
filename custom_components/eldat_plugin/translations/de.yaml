@@ -1,0 +1,198 @@
+eldat_plugin:
+  name: ELDAT EasyWave
+  config_flow:
+    user:
+      title: ELDAT Integration einrichten
+      description: "Es wurden {found_devices} ELDAT Geräte gefunden: {device_list}.\n\n{status}\n\nWählen Sie ein Gerät aus der Liste oder verwenden Sie die anderen Optionen."
+      data:
+        device_path: USB-Gerät
+        device_name: Name der Integration
+    show_all_devices:
+      title: Alle USB-Geräte anzeigen
+      description: "Gefunden: {total_devices} USB-Geräte ({eldat_devices} ELDAT-Geräte).\n\n{warning}"
+      data:
+        device_path: USB-Gerät auswählen
+        device_name: Name der Integration
+    manual:
+      title: ELDAT USB Gerät manuell eingeben
+      description: "Geben Sie den Pfad zu Ihrem ELDAT USB-Gerät ein:\n\n{example_paths}"
+      data:
+        device_path: Gerätepfad
+        device_name: Name der Integration
+    usb_confirm:
+      title: ELDAT USB Gerät bestätigen
+      description: "ELDAT USB Gerät bei {device_path} gefunden. Möchten Sie es hinzufügen?"
+      data:
+        device_name: Name der Integration
+    add_device:
+      title: Neues Gerät hinzufügen
+      description: "Wählen Sie den Gerätetyp und folgen Sie den Anweisungen:\n\n{instructions}"
+      data:
+        device_type: Gerätetyp
+        learning_timeout: Lernzeit (Sekunden)
+    device_options:
+      title: Geräteverwaltung
+      description: "Integration wurde erfolgreich eingerichtet. Es sind {current_devices} Geräte bekannt. Sie können weitere Geräte hinzufügen oder die Konfiguration abschließen."
+      data:
+        action: Aktion wählen
+    error:
+      cannot_connect: "Kann nicht mit dem Gerät verbinden"
+      invalid_path: "Ungültiger Gerätepfad"
+      invalid_device: "Ungültiges Gerät"
+      no_devices_found: "Keine ELDAT-Geräte gefunden"
+      no_usb_devices_found: "Keine USB-Geräte gefunden"
+      no_device_selected: "Kein Gerät ausgewählt"
+      learning_timeout: "Zeitüberschreitung beim Anlernen - kein Gerät erkannt"
+      learning_failed: "Fehler beim Anlernen des Geräts"
+    device_confirm:
+      title: EW-Empfänger konfigurieren
+      description: "Konfiguration für {device_name} (Seriennummer: {serial_number})\n\nWählen Sie den Gerätetyp sowie die gewünschte Betriebsart aus. Versetzen Sie dann den Empfänger in den entsprechenden Lernmodus."
+      data:
+        receiver_kind: Gerätetyp
+        operating_mode: Betriebsart
+    abort:
+      already_configured: "Gerät ist bereits konfiguriert"
+      cannot_connect: "Kann nicht mit dem Gerät verbinden"
+  options:
+    init:
+      title: ELDAT Optionen
+      data:
+        scan_interval: Scan-Intervall (Sekunden)
+        auto_discovery: Automatische Geräteerkennung
+  services:
+    add_device:
+      name: Gerät hinzufügen
+      description: Fügt ein Gerät manuell zur Liste hinzu
+      fields:
+        serial_number:
+          name: Seriennummer
+          description: 16-Byte Seriennummer des Geräts (Hex-Format)
+        device_type:
+          name: Gerätetyp
+          description: Typ des hinzuzufügenden Geräts
+        device_name:
+          name: Gerätename  
+          description: Anzeigename für das Gerät (optional)
+        channels:
+          name: Kanäle
+          description: Anzahl der Kanäle des Geräts
+    remove_device:
+      name: Gerät entfernen
+      description: Entfernt ein manuell hinzugefügtes Gerät
+      fields:
+        serial_number:
+          name: Seriennummer
+          description: Seriennummer des zu entfernenden Geräts
+        force:
+          name: Erzwingen
+          description: Entfernt das Gerät auch wenn es nicht manuell hinzugefügt wurde
+    scan_devices:
+      name: Nach Geräten suchen
+      description: Sucht nach neuen Geräten
+    learn_device:
+      name: Gerät anlernen
+      description: Lernt ein neues Gerät durch Empfang von Telegrammen an
+      fields:
+        device_type:
+          name: Gerätetyp
+          description: Typ des zu anlernenden Geräts
+        timeout:
+          name: Timeout
+          description: Maximale Wartezeit in Sekunden
+    learn_device_ewb_rcv:
+      name: Geräte per EWB_RCV anlernen
+      description: Lernt neue Geräte durch EWB_RCV Telegramm-Empfang an (automatische Typerkennung)
+      fields:
+        device_types:
+          name: Gerätetypen
+          description: Liste der gewünschten Gerätetypen (leer = alle)
+        timeout:
+          name: Timeout
+          description: Maximale Wartezeit in Sekunden
+        max_devices:
+          name: Maximale Geräte
+          description: Maximale Anzahl zu anlernender Geräte
+        auto_name:
+          name: Automatische Benennung
+          description: Automatische Benennung basierend auf Gerätetyp
+    send_command:
+      name: Befehl senden  
+      description: Sendet einen Befehl an ein Gerät
+      fields:
+        serial_number:
+          name: Seriennummer
+          description: Seriennummer des Zielgeräts
+        command:
+          name: Befehl
+          description: Zu sendender Befehl (Hex-Format)
+        button:
+          name: Taste
+          description: Tastennummer (0-3 für A-D)
+        timeout:
+          name: Timeout
+          description: Befehl-Timeout in Sekunden
+    connect_usb:
+      name: USB-Gerät verbinden
+      description: Verbindet ein USB-Gerät mit der Integration
+      fields:
+        device_path:
+          name: Gerätepfad
+          description: Pfad zum USB-Gerät (z.B. /dev/ttyUSB0)
+        device_name:
+          name: Gerätename
+          description: Anzeigename für das Gerät
+    export_devices:
+      name: Geräte exportieren
+      description: Exportiert die Gerätekonfiguration in eine JSON-Datei
+      fields:
+        export_path:
+          name: Export-Pfad
+          description: Pfad zur Export-Datei (z.B. /config/eldat_export.json)
+        include_backup:
+          name: Backup erstellen
+          description: Erstellt vor dem Export ein Backup der aktuellen Konfiguration
+    import_devices:
+      name: Geräte importieren
+      description: Importiert eine Gerätekonfiguration aus einer JSON-Datei
+      fields:
+        import_path:
+          name: Import-Pfad
+          description: Pfad zur Import-Datei
+        merge:
+          name: Zusammenführen
+          description: Führt importierte Geräte mit vorhandenen zusammen (false = ersetzen)
+        backup_before_import:
+          name: Backup vor Import
+          description: Erstellt vor dem Import ein Backup der aktuellen Konfiguration
+    backup_devices:
+      name: Geräte-Backup erstellen
+      description: Erstellt ein manuelles Backup der Gerätekonfiguration
+      fields:
+        backup_name:
+          name: Backup-Name
+          description: Optionaler Name für das Backup
+    update_device:
+      name: Gerät aktualisieren
+      description: Aktualisiert Eigenschaften eines Geräts
+      fields:
+        serial_number:
+          name: Seriennummer
+          description: Seriennummer des zu aktualisierenden Geräts
+        device_name:
+          name: Gerätename
+          description: Neuer Name für das Gerät
+        rx11_index:
+          name: RX11-Index
+          description: RX11-Index für Empfänger (0-65535)
+  selector:
+    receiver_kind:
+      options:
+        switch: Zustandsloser Schalter
+        dimmer: Zustandsloser Dimmer
+        motor: Zustandsloser Motor
+        heating_cooling: Heizen/Kühlen
+    operating_mode:
+      options:
+        "1": Betriebsart 1
+        "2": Betriebsart 2
+        "3": Betriebsart 3

@@ -1,0 +1,198 @@
+eldat_plugin:
+  name: ELDAT
+  config_flow:
+    user:
+      title: Setup ELDAT Integration
+      description: "Found {found_devices} ELDAT devices: {device_list}.\n\n{status}\n\nSelect a device from the list or use other options."
+      data:
+        device_path: USB Device
+        device_name: Integration Name
+    show_all_devices:
+      title: Show All USB Devices
+      description: "Found: {total_devices} USB devices ({eldat_devices} ELDAT devices).\n\n{warning}"
+      data:
+        device_path: Select USB Device
+        device_name: Integration Name
+    manual:
+      title: Enter ELDAT USB Device Manually
+      description: "Enter the path to your ELDAT USB device:\n\n{example_paths}"
+      data:
+        device_path: Device Path
+        device_name: Integration Name
+    usb_confirm:
+      title: Confirm ELDAT USB Device
+      description: "ELDAT USB device found at {device_path}. Do you want to add it?"
+      data:
+        device_name: Integration Name
+    add_device:
+      title: Add New Device
+      description: "Select the device type and follow the instructions:\n\n{instructions}"
+      data:
+        device_type: Device Type
+        learning_timeout: Learning Timeout (seconds)
+    device_options:
+      title: Device Management
+      description: "Integration successfully configured. {current_devices} devices are known. You can add more devices or complete the configuration."
+      data:
+        action: Choose Action
+    error:
+      cannot_connect: "Cannot connect to device"
+      invalid_path: "Invalid device path"
+      invalid_device: "Invalid device"
+      no_devices_found: "No ELDAT devices found"
+      no_usb_devices_found: "No USB devices found"
+      no_device_selected: "No device selected"
+      learning_timeout: "Learning timeout - no device detected"
+      learning_failed: "Error learning device"
+    device_confirm:
+      title: Configure EW Receiver
+      description: "Configuration for {device_name} (Serial number: {serial_number})\n\nSelect the device type and desired operating mode. Then put the receiver into the corresponding learning mode."
+      data:
+        receiver_kind: Device Type
+        operating_mode: Operating Mode
+    abort:
+      already_configured: "Device is already configured"
+      cannot_connect: "Cannot connect to device"
+  options:
+    init:
+      title: ELDAT Options
+      data:
+        scan_interval: Scan Interval (seconds)
+        auto_discovery: Automatic Device Discovery
+  services:
+    add_device:
+      name: Add Device
+      description: Manually adds a device to the list
+      fields:
+        serial_number:
+          name: Serial Number
+          description: 16-byte serial number of the device (hex format)
+        device_type:
+          name: Device Type
+          description: Type of device to add
+        device_name:
+          name: Device Name
+          description: Display name for the device (optional)
+        channels:
+          name: Channels
+          description: Number of channels the device has
+    remove_device:
+      name: Remove Device
+      description: Removes a manually added device
+      fields:
+        serial_number:
+          name: Serial Number
+          description: Serial number of device to remove
+        force:
+          name: Force
+          description: Remove device even if not manually added
+    scan_devices:
+      name: Scan for Devices
+      description: Scans for new devices
+    learn_device:
+      name: Learn Device
+      description: Learns a new device by receiving its telegrams
+      fields:
+        device_type:
+          name: Device Type
+          description: Type of device to learn
+        timeout:
+          name: Timeout
+          description: Maximum wait time in seconds
+    learn_device_ewb_rcv:
+      name: Learn Devices via EWB_RCV
+      description: Learns new devices through EWB_RCV telegram reception (automatic type detection)
+      fields:
+        device_types:
+          name: Device Types
+          description: List of desired device types (empty = all)
+        timeout:
+          name: Timeout
+          description: Maximum wait time in seconds
+        max_devices:
+          name: Maximum Devices
+          description: Maximum number of devices to learn
+        auto_name:
+          name: Automatic Naming
+          description: Automatic naming based on device type
+    send_command:
+      name: Send Command
+      description: Sends a command to a device
+      fields:
+        serial_number:
+          name: Serial Number
+          description: Serial number of target device
+        command:
+          name: Command
+          description: Command to send (hex format)
+        button:
+          name: Button
+          description: Button number (0-3 for A-D)
+        timeout:
+          name: Timeout
+          description: Command timeout in seconds
+    connect_usb:
+      name: Connect USB Device
+      description: Connects a USB device to the integration
+      fields:
+        device_path:
+          name: Device Path
+          description: Path to USB device (e.g. /dev/ttyUSB0)
+        device_name:
+          name: Device Name
+          description: Display name for the device
+    export_devices:
+      name: Export Devices
+      description: Exports device configuration to a JSON file
+      fields:
+        export_path:
+          name: Export Path
+          description: Path to export file (e.g. /config/eldat_export.json)
+        include_backup:
+          name: Create Backup
+          description: Creates a backup of current configuration before export
+    import_devices:
+      name: Import Devices
+      description: Imports device configuration from a JSON file
+      fields:
+        import_path:
+          name: Import Path
+          description: Path to import file
+        merge:
+          name: Merge
+          description: Merge imported devices with existing ones (false = replace)
+        backup_before_import:
+          name: Backup Before Import
+          description: Creates a backup of current configuration before import
+    backup_devices:
+      name: Backup Devices
+      description: Creates a manual backup of device configuration
+      fields:
+        backup_name:
+          name: Backup Name
+          description: Optional name for the backup
+    update_device:
+      name: Update Device
+      description: Updates device properties
+      fields:
+        serial_number:
+          name: Serial Number
+          description: Serial number of device to update
+        device_name:
+          name: Device Name
+          description: New name for the device
+        rx11_index:
+          name: RX11 Index
+          description: RX11 index for receivers (0-65535)
+  selector:
+    receiver_kind:
+      options:
+        switch: Stateless Switch
+        dimmer: Stateless Dimmer
+        motor: Stateless Motor
+        heating_cooling: Heating/Cooling
+    operating_mode:
+      options:
+        "1": Operating Mode 1
+        "2": Operating Mode 2
+        "3": Operating Mode 3

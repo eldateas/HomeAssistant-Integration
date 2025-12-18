@@ -1,0 +1,162 @@
+# Beispiel-Automationen für EW-Transmitter Button Events
+# Diese Datei zeigt, wie die neuen Press & Hold Events verwendet werden können
+
+# Automation für kurze Button-Drücke (Press Events)
+- alias: "ELDAT Button Press - Licht ein/aus"
+  description: "Schaltet Licht bei kurzem Tastendruck ein/aus"
+  trigger:
+    - platform: event
+      event_type: eldat_button_press
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"  # Ersetzen Sie mit Ihrer Geräte-Seriennummer
+        button: 0  # Button A (0=A, 1=B, 2=C, 3=D)
+  action:
+    - service: light.toggle
+      target:
+        entity_id: light.wohnzimmer_decke
+
+# Automation für Button Hold Events
+- alias: "ELDAT Button Hold - Licht dimmen"
+  description: "Startet Dimmen bei gedrücktem Halten"
+  trigger:
+    - platform: event
+      event_type: eldat_button_hold
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"
+        button: 0  # Button A
+  action:
+    - service: script.start_dimming_light
+      data:
+        entity_id: light.wohnzimmer_decke
+
+# Automation für Button Hold Release Events
+- alias: "ELDAT Button Hold Release - Dimmen stoppen"
+  description: "Stoppt Dimmen wenn Taste losgelassen"
+  trigger:
+    - platform: event
+      event_type: eldat_button_hold_release
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"
+        button: 0  # Button A
+  action:
+    - service: script.stop_dimming_light
+
+# Multi-Button Beispiel - verschiedene Aktionen für verschiedene Buttons
+- alias: "ELDAT Multi-Button Control"
+  description: "Verschiedene Aktionen je Button"
+  trigger:
+    - platform: event
+      event_type: eldat_button_press
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"
+  action:
+    - choose:
+        # Button A (0) - Wohnzimmer
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.button == 0 }}"
+          sequence:
+            - service: light.toggle
+              target:
+                entity_id: light.wohnzimmer_decke
+        
+        # Button B (1) - Küche
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.button == 1 }}"
+          sequence:
+            - service: light.toggle
+              target:
+                entity_id: light.kueche_decke
+        
+        # Button C (2) - Rollos
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.button == 2 }}"
+          sequence:
+            - service: cover.toggle
+              target:
+                entity_id: cover.wohnzimmer_rollo
+        
+        # Button D (3) - Szene
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.data.button == 3 }}"
+          sequence:
+            - service: scene.turn_on
+              target:
+                entity_id: scene.gemütlich
+
+# Erweiterte Automation mit Druckdauer-Auswertung
+- alias: "ELDAT Button Advanced - Druckdauer"
+  description: "Verschiedene Aktionen basierend auf Druckdauer"
+  trigger:
+    - platform: event
+      event_type: eldat_button_press
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"
+        button: 0
+    - platform: event
+      event_type: eldat_button_hold_release
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"
+        button: 0
+  action:
+    - choose:
+        # Kurzer Druck (< 800ms)
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.event_type == 'eldat_button_press' }}"
+            - condition: template
+              value_template: "{{ trigger.event.data.duration < 800 }}"
+          sequence:
+            - service: light.toggle
+              target:
+                entity_id: light.wohnzimmer_decke
+        
+        # Langer Druck (>= 800ms, Hold Release)
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.event.event_type == 'eldat_button_hold_release' }}"
+          sequence:
+            - service: scene.turn_on
+              target:
+                entity_id: scene.alle_lichter_aus
+
+# Logging Automation für Debugging
+- alias: "ELDAT Button Events Logger"
+  description: "Loggt alle Button Events für Debugging"
+  trigger:
+    - platform: event
+      event_type: eldat_button_press
+    - platform: event
+      event_type: eldat_button_hold
+    - platform: event
+      event_type: eldat_button_hold_release
+  action:
+    - service: system_log.write
+      data:
+        message: >
+          ELDAT Button Event: {{ trigger.event.event_type }}
+          Device: {{ trigger.event.data.device_name }} ({{ trigger.event.data.device_id }})
+          Button: {{ trigger.event.data.button_name }} ({{ trigger.event.data.button }})
+          Duration: {{ trigger.event.data.duration }}ms
+        level: info
+
+# Notification Beispiel
+- alias: "ELDAT Button Notification"
+  description: "Sendet Notification bei Button Events"
+  trigger:
+    - platform: event
+      event_type: eldat_button_hold
+      event_data:
+        device_id: "YOUR_TRANSMITTER_SERIAL"
+  action:
+    - service: notify.mobile_app_your_phone  # Ersetzen Sie mit Ihrem Notification Service
+      data:
+        title: "ELDAT Button gehalten"
+        message: >
+          {{ trigger.event.data.device_name }} - 
+          {{ trigger.event.data.button_name }} wird gehalten
+        data:
+          priority: high
