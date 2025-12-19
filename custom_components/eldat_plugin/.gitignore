@@ -177,6 +177,13 @@ cython_debug/
 /logs/
 transceivers/rx11/RxModule.so.backup*
 
+# ELDAT Plugin persistent storage files (device-specific, not for version control)
+**/registered_devices.json
+**/used_ewb_indices.json
+**/used_ew_receiver_indices.json
+**/eldat_devices.json
+**/device_whitelist.json
+**/*.json.backup*
 # OS specific
 .DS_Store
 .DS_Store?

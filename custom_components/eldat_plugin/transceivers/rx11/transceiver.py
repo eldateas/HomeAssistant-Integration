@@ -106,9 +106,9 @@ class RX11Transceiver(BaseTransceiver):
         if device_path:
             try:
                 self._rx11_wrapper = RX11Wrapper(device_path)
-                _LOGGER.info("RX11 wrapper initialized successfully")
-            except Exception as e:
-                _LOGGER.warning("RX11 C library not available, using fallback mode: %s", e)
+                _LOGGER.info("✅ RX11 wrapper initialized successfully")
+            except Exception as error:
+                _LOGGER.error("Failed to initialize RX11 wrapper: %s", error)
                 self._rx11_wrapper = None
 
         # Initialize device factory
@@ -135,6 +135,11 @@ class RX11Transceiver(BaseTransceiver):
                 "EW_Sensor", "Motor", "WinDim"
             }
         )
+    
+    @property
+    def wrapper(self) -> Optional[RX11Wrapper]:
+        """Return the RX11 wrapper instance for direct access."""
+        return self._rx11_wrapper
 
     def get_connection_health_stats(self) -> dict:
         """Get connection health and error statistics."""
@@ -1217,6 +1222,13 @@ class RX11Transceiver(BaseTransceiver):
         if self._rx11_wrapper:
             return await self._rx11_wrapper.rx11_ewb_get_serial_by_index(index)
         _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return None
+    
+    async def rx11_ew_receiver_get_serial_by_index(self, index: int) -> Optional[str]:
+        """Get EW receiver serial number by index."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ew_receiver_get_serial_by_index(index)
+        _LOGGER.warning("RX11 wrapper not available for EW receiver management")
         return None
 
     async def rx11_ewb_add_filter(self, gateway_serial: str) -> bool:

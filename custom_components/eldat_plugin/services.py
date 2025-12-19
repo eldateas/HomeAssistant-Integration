@@ -20,6 +20,7 @@ SERVICE_FIX_TRANSCEIVER = "fix_transceiver"
 SERVICE_CLEANUP_GHOST_DEVICES = "cleanup_ghost_devices"
 SERVICE_CLEANUP_ORPHANED_ENTITIES = "cleanup_orphaned_entities"
 SERVICE_REPAIR_ORPHANED_DEVICES = "repair_orphaned_devices"
+SERVICE_SAVE_DEVICES_TO_REGISTRY = "save_devices_to_registry"
 
 
 # ============================================================
@@ -247,9 +248,35 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         schema=None,
     )
     
-    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s", 
+    async def handle_save_devices_to_registry(call: ServiceCall) -> None:
+        """Save all in-memory devices to persistent registry."""
+        coordinator = _get_coordinator(hass)
+        if coordinator:
+            _LOGGER.info("💾 Saving all in-memory devices to registry...")
+            saved_count = 0
+            for serial, device_data in coordinator.devices.items():
+                try:
+                    await coordinator.register_device_permanently(serial, device_data)
+                    saved_count += 1
+                    _LOGGER.info("✅ Saved device %s (gateway: %s) to registry", 
+                               serial[-8:], device_data.get('gateway_serial', 'N/A')[-8:])
+                except Exception as e:
+                    _LOGGER.error("❌ Failed to save device %s: %s", serial[-8:], e)
+            _LOGGER.info("✅ Saved %d devices to registry", saved_count)
+        else:
+            _LOGGER.error("❌ No coordinator found")
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SAVE_DEVICES_TO_REGISTRY,
+        handle_save_devices_to_registry,
+        schema=None,
+    )
+    
+    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s, %s", 
                 SERVICE_RESET_ENTITY_REGISTRY, SERVICE_RELOAD_SENSORS, SERVICE_FIX_TRANSCEIVER, 
-                SERVICE_CLEANUP_GHOST_DEVICES, SERVICE_CLEANUP_ORPHANED_ENTITIES, SERVICE_REPAIR_ORPHANED_DEVICES)
+                SERVICE_CLEANUP_GHOST_DEVICES, SERVICE_CLEANUP_ORPHANED_ENTITIES, SERVICE_REPAIR_ORPHANED_DEVICES,
+                SERVICE_SAVE_DEVICES_TO_REGISTRY)
 
 
 async def async_unload_services(hass: HomeAssistant) -> None:
@@ -260,4 +287,5 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_CLEANUP_GHOST_DEVICES)
     hass.services.async_remove(DOMAIN, SERVICE_CLEANUP_ORPHANED_ENTITIES)
     hass.services.async_remove(DOMAIN, SERVICE_REPAIR_ORPHANED_DEVICES)
+    hass.services.async_remove(DOMAIN, SERVICE_SAVE_DEVICES_TO_REGISTRY)
     _LOGGER.info("🗑️ Unloaded ELDAT services")

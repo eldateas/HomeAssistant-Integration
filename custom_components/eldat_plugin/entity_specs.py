@@ -114,13 +114,23 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
             "icon": "mdi:light-switch"
         })
     elif receiver_kind == "heating_cooling":
-        # Heating/cooling devices get switch entities
+        # Heating/cooling devices get switch entities with 4h repetition
         entities["switch"].append({
             "type": "switch",
             "name": device_info.get("name", f"Heizung {serial_number[-6:]}"),
             "unique_id": f"{serial_number}_heating_cooling_switch",
             "device_class": "switch",
-            "icon": "mdi:thermostat"
+            "icon": "mdi:thermostat",
+            "operating_mode": operating_mode,
+            "receiver_kind": "heating_cooling",
+            "button_config": {
+                "toggle": 0 if operating_mode == 1 else 0,
+                "on": 0 if operating_mode == 2 else 0,
+                "off": 1 if operating_mode == 2 else 0
+            },
+            "supports_4h_repetition": True,
+            "entity_category": None,
+            "persistent_state": True
         })
     
     return entities
