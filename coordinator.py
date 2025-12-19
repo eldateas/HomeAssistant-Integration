@@ -64,6 +64,11 @@ class EldatCoordinator(DataUpdateCoordinator):
         self._ewb_indices_file = f"{hass.config.config_dir}/eldat_plugin/used_ewb_indices.json"
         self._next_free_ewb_index: Optional[int] = 0  # Cache for next known free index
         
+        # EW-Receiver Index Tracking - Persistent storage of used EW receiver indices
+        self._used_ew_receiver_indices: Dict[int, Dict[str, Any]] = {}  # {index: {receiver_serial, device_serial, device_name, created_at}}
+        self._ew_receiver_indices_file = f"{hass.config.config_dir}/eldat_plugin/used_ew_receiver_indices.json"
+        self._next_free_ew_receiver_index: Optional[int] = 0  # Cache for next known free index
+        
         # Device registration will happen during async_setup
         
         # Global entity tracking to prevent duplicates across all platforms
@@ -130,8 +135,10 @@ class EldatCoordinator(DataUpdateCoordinator):
                     data = json.loads(content)
                     # Convert string keys back to integers
                     self._used_ewb_indices = {int(k): v for k, v in data.get('used_indices', {}).items()}
-                    self._next_free_ewb_index = data.get('next_free_index', 0)
-                    _LOGGER.info("📋 Loaded %d used EWB indices from storage", len(self._used_ewb_indices))
+                    # Recalculate next free index based on loaded data instead of trusting saved value
+                    self._next_free_ewb_index = self._find_next_free_ewb_index() if self._used_ewb_indices else 0
+                    _LOGGER.info("📋 Loaded %d used EWB indices from storage (next free: %d)", 
+                               len(self._used_ewb_indices), self._next_free_ewb_index)
             else:
                 _LOGGER.info("📋 No EWB indices file found, starting with empty tracking")
                 self._used_ewb_indices = {}
@@ -161,6 +168,52 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("💾 Saved %d used EWB indices to storage", len(self._used_ewb_indices))
         except Exception as e:
             _LOGGER.error("❌ Failed to save used EWB indices: %s", e)
+    
+    async def _load_used_ew_receiver_indices(self) -> None:
+        """Load used EW-Receiver indices from persistent storage."""
+        import json
+        import aiofiles
+        import os
+        try:
+            if os.path.exists(self._ew_receiver_indices_file):
+                async with aiofiles.open(self._ew_receiver_indices_file, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    data = json.loads(content)
+                    # Convert string keys back to integers
+                    self._used_ew_receiver_indices = {int(k): v for k, v in data.get('used_indices', {}).items()}
+                    # Recalculate next free index based on loaded data
+                    self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index() if self._used_ew_receiver_indices else 0
+                    _LOGGER.info("📋 Loaded %d used EW-Receiver indices from storage (next free: %d)", 
+                               len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
+            else:
+                _LOGGER.info("📋 No EW-Receiver indices file found, starting with empty tracking")
+                self._used_ew_receiver_indices = {}
+                self._next_free_ew_receiver_index = 0
+        except Exception as e:
+            _LOGGER.error("❌ Failed to load used EW-Receiver indices: %s", e)
+            self._used_ew_receiver_indices = {}
+            self._next_free_ew_receiver_index = 0
+    
+    async def _save_used_ew_receiver_indices(self) -> None:
+        """Save used EW-Receiver indices to persistent storage."""
+        import json
+        import aiofiles
+        import os
+        try:
+            os.makedirs(os.path.dirname(self._ew_receiver_indices_file), exist_ok=True)
+            
+            data = {
+                'used_indices': {str(k): v for k, v in self._used_ew_receiver_indices.items()},
+                'next_free_index': self._next_free_ew_receiver_index,
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            async with aiofiles.open(self._ew_receiver_indices_file, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(data, indent=2, ensure_ascii=False))
+                
+            _LOGGER.debug("💾 Saved %d used EW-Receiver indices to storage", len(self._used_ew_receiver_indices))
+        except Exception as e:
+            _LOGGER.error("❌ Failed to save used EW-Receiver indices: %s", e)
 
     async def _load_registered_devices(self) -> None:
         """Load registered devices from persistent storage."""
@@ -448,6 +501,80 @@ class EldatCoordinator(DataUpdateCoordinator):
         """Get device information by EWB index."""
         return self._used_ewb_indices.get(index)
     
+    # ============================================================
+    # EW-Receiver Index Management (unidirectional receivers)
+    # ============================================================
+    
+    def mark_ew_receiver_index_used(self, index: int, receiver_serial: str, device_serial: str, device_name: str = None) -> None:
+        """Mark an EW-Receiver index as used by a specific device."""
+        from datetime import datetime
+        
+        self._used_ew_receiver_indices[index] = {
+            'receiver_serial': receiver_serial,  # Gateway serial from RX11
+            'device_serial': device_serial,      # Device's own serial
+            'device_name': device_name or f"EW-Receiver ({device_serial[-6:]})",
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Update next free index cache
+        if index == self._next_free_ew_receiver_index:
+            self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
+            
+        _LOGGER.info("📍 Marked EW-Receiver index %d as used (device: %s, receiver: %s)", 
+                    index, device_serial[-8:], receiver_serial[-8:])
+        
+        # Save to persistent storage
+        asyncio.create_task(self._save_used_ew_receiver_indices())
+        
+        # Update transceiver wrapper tracking if available
+        if hasattr(self.transceiver, '_rx11_wrapper') and self.transceiver._rx11_wrapper:
+            wrapper = self.transceiver._rx11_wrapper
+            wrapper.mark_receiver_used(index, receiver_serial)
+    
+    def mark_ew_receiver_index_free(self, index: int) -> None:
+        """Mark an EW-Receiver index as free/available for new devices."""
+        if index in self._used_ew_receiver_indices:
+            device_info = self._used_ew_receiver_indices.pop(index)
+            _LOGGER.info("♻️ Marked EW-Receiver index %d as free (was: %s)", index, device_info.get('device_name', 'Unknown'))
+            
+            # Update next free index cache if this becomes the new earliest free
+            if index < self._next_free_ew_receiver_index:
+                self._next_free_ew_receiver_index = index
+                
+            # Save to persistent storage
+            asyncio.create_task(self._save_used_ew_receiver_indices())
+            
+            # Update transceiver wrapper tracking if available
+            if hasattr(self.transceiver, '_rx11_wrapper') and self.transceiver._rx11_wrapper:
+                wrapper = self.transceiver._rx11_wrapper
+                wrapper.mark_receiver_available(index)
+    
+    def get_next_free_ew_receiver_index(self) -> int:
+        """Get the next free EW-Receiver index from persistent tracking."""
+        # Use cached value if available and valid
+        if self._next_free_ew_receiver_index is not None and self._next_free_ew_receiver_index not in self._used_ew_receiver_indices:
+            return self._next_free_ew_receiver_index
+            
+        # Find next free index
+        self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
+        return self._next_free_ew_receiver_index
+    
+    def _find_next_free_ew_receiver_index(self) -> int:
+        """Find the next EW-Receiver index available for assignment."""
+        used_indices = set(self._used_ew_receiver_indices.keys())
+        for index in range(255):  # EW supports indices 0-254
+            if index not in used_indices:
+                return index
+        raise ValueError("No free EW-Receiver indices available (all 0-254 in use)")
+    
+    def is_ew_receiver_index_used(self, index: int) -> bool:
+        """Check if an EW-Receiver index is already used."""
+        return index in self._used_ew_receiver_indices
+        
+    def get_used_ew_receiver_indices(self) -> Dict[int, Dict[str, Any]]:
+        """Get all used EW-Receiver indices with their device information."""
+        return self._used_ew_receiver_indices.copy()
+    
     async def _sync_ewb_indices_with_wrapper(self) -> None:
         """Synchronize EWB index tracking between coordinator and transceiver wrapper."""
         if not hasattr(self.transceiver, '_rx11_wrapper') or not self.transceiver._rx11_wrapper:
@@ -467,6 +594,40 @@ class EldatCoordinator(DataUpdateCoordinator):
                 wrapper.mark_ewb_index_used(index, gateway_serial, device_serial)
                 
         _LOGGER.info("🔄 Synchronized %d EWB indices from coordinator to wrapper", len(self._used_ewb_indices))
+    
+    async def _sync_ew_receiver_indices_with_wrapper(self) -> None:
+        """Synchronize EW-Receiver index tracking between coordinator and transceiver wrapper."""
+        if not hasattr(self.transceiver, '_rx11_wrapper') or not self.transceiver._rx11_wrapper:
+            return
+            
+        wrapper = self.transceiver._rx11_wrapper
+        
+        # Clear wrapper tracking and rebuild from coordinator's persistent data
+        wrapper._used_receivers.clear()
+        
+        for index, device_info in self._used_ew_receiver_indices.items():
+            receiver_serial = device_info.get('receiver_serial')
+            
+            if receiver_serial:
+                # Re-read actual serial from RX11 to ensure we have the correct one
+                _LOGGER.warning("🔍 Syncing index %s: stored serial=%s", index, receiver_serial)
+                actual_serial = await wrapper.rx11_ew_receiver_get_serial_by_index(int(index))
+                
+                if actual_serial and actual_serial != receiver_serial:
+                    _LOGGER.warning("⚠️ Serial mismatch for index %s! Stored: %s, Actual: %s", 
+                                  index, receiver_serial[-8:], actual_serial[-8:])
+                    # Use the actual serial from RX11
+                    receiver_serial = actual_serial
+                    # Update stored value
+                    device_info['receiver_serial'] = actual_serial
+                    self._used_ew_receiver_indices[int(index)] = device_info
+                    await self._save_used_ew_receiver_indices()
+                elif actual_serial:
+                    _LOGGER.warning("✅ Serial match for index %s: %s", index, actual_serial[-8:])
+                
+                wrapper.mark_receiver_used(int(index), receiver_serial)
+                
+        _LOGGER.info("🔄 Synchronized %d EW-Receiver indices from coordinator to wrapper", len(self._used_ew_receiver_indices))
 
     async def unregister_device_permanently(self, serial_number: str) -> bool:
         """Permanently remove device from registered list and clean up all HA entities."""
@@ -576,19 +737,25 @@ class EldatCoordinator(DataUpdateCoordinator):
         # and tracks already-fired events to prevent duplicates
 
     async def fire_pending_device_events(self) -> None:
-        """Fire device events after platforms are set up (only once per device)."""
-        # Use all loaded devices from self.devices instead of pending list
-        # This ensures we don't miss any devices and avoids duplicates
+        """Fire device events after platforms are set up (only once per device).
+        
+        NOTE: This should NOT fire events for devices loaded at startup, as those
+        are already handled by the platform setup code (e.g., binary_sensor.py lines 94-110).
+        This should only fire events for devices added AFTER startup (marked with registered_permanently flag).
+        """
+        # DO NOT fire events for restored devices - they're already created by platform setup
+        # Only fire for devices that have the registered_permanently flag (newly added after startup)
         devices_to_fire = [
             (serial, info) for serial, info in self.devices.items()
             if serial not in self._devices_with_fired_events
+            and info.get("registered_permanently", False)  # Only newly registered devices
         ]
         
         if not devices_to_fire:
-            _LOGGER.debug("No devices to fire events for (all already fired)")
+            _LOGGER.debug("No pending devices to fire events for")
             return
             
-        _LOGGER.info("🔥 Firing events for %d devices after platform setup", len(devices_to_fire))
+        _LOGGER.info("🔥 Firing events for %d newly registered devices after platform setup", len(devices_to_fire))
         
         # Fire events for all loaded devices that haven't fired yet
         for serial_number, device_info in devices_to_fire:
@@ -603,6 +770,28 @@ class EldatCoordinator(DataUpdateCoordinator):
                     "force_create": True
                 }
             )
+            
+            # Also fire platform-specific events if device has configured entities
+            entities = device_info.get("entities", [])
+            platforms = device_info.get("platforms", [])
+            
+            # Fire platform-specific events for each platform with configured entities
+            for platform in platforms:
+                platform_entities = [e for e in entities if e.get("type") == platform]
+                if platform_entities:
+                    event_name = f"eldat_plugin_{platform}_device_added"
+                    _LOGGER.info("🔥 [fire_pending] Firing %s for %s (%d entities)", 
+                               event_name, serial_number[-8:], len(platform_entities))
+                    self.hass.bus.async_fire(
+                        event_name,
+                        {
+                            "serial_number": serial_number,
+                            "device_info": device_info,
+                            "entities": platform_entities,
+                            "force_create": True
+                        }
+                    )
+            
             # Mark as fired to prevent duplicates
             self._devices_with_fired_events.add(serial_number)
             
@@ -743,6 +932,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Initialize EWB index tracking
             await self._load_used_ewb_indices()
             
+            # Initialize EW-Receiver index tracking
+            await self._load_used_ew_receiver_indices()
+            
             # Setup and connect transceiver with timeouts
             if not await asyncio.wait_for(self.transceiver.async_setup(self.hass), timeout=10.0):
                 _LOGGER.error("Failed to setup transceiver")
@@ -758,6 +950,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Synchronize EWB index tracking with transceiver wrapper
             await self._sync_ewb_indices_with_wrapper()
+            
+            # Synchronize EW-Receiver index tracking with transceiver wrapper
+            await self._sync_ew_receiver_indices_with_wrapper()
             
             # Set telegram callback
             self.transceiver.set_telegram_callback(self._handle_telegram)
@@ -1612,19 +1807,18 @@ class EldatCoordinator(DataUpdateCoordinator):
             device_type = device_info.get("type", "unknown")
             
             # Clean up EW-Receiver mapping if this was an EW-Receiver device
-            ew_receiver_index = device_info.get("ew_receiver_index")
+            ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
             ew_receiver_serial = device_info.get("ew_receiver_serial")
             
-            if ew_receiver_index is not None and ew_receiver_serial:
+            if ew_receiver_index is not None:
                 # Remove EW-Receiver mapping from device registry
-                if self.device_registry.remove_ew_receiver_mapping(ew_receiver_index):
+                if ew_receiver_serial and self.device_registry.remove_ew_receiver_mapping(ew_receiver_index):
                     _LOGGER.info("🗑️ Removed EW-Receiver mapping: Index %d, Serial %s", 
                                ew_receiver_index, ew_receiver_serial[-8:])
                 
-                # Free up receiver in transceiver for reuse
-                if hasattr(self.transceiver, '_rx11_wrapper'):
-                    self.transceiver._rx11_wrapper.mark_receiver_free(ew_receiver_index)
-                    _LOGGER.info("♻️ Freed EW-Receiver index %d for reuse", ew_receiver_index)
+                # Free up receiver index persistently
+                self.mark_ew_receiver_index_free(ew_receiver_index)
+                _LOGGER.info("♻️ Freed EW-Receiver index %d for reuse", ew_receiver_index)
             
             # Save device registry changes
             await self.device_registry.save_registry()
@@ -1722,10 +1916,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                 self._known_devices.add(serial_number)
                 loaded_count += 1
                 
+                # Mark as already fired since entities will be created by platform setup
+                # This prevents fire_pending_device_events from firing duplicate events
+                self._devices_with_fired_events.add(serial_number)
+                
                 # Register with transceiver
                 await self.transceiver.register_device(serial_number, device_info)
                 
-                # Events will be fired by fire_pending_device_events() after platform setup
+                # No events fired here - entities are created by platform setup code
             
             # Log summary
             if skipped_count > 0:
@@ -1733,6 +1931,18 @@ class EldatCoordinator(DataUpdateCoordinator):
                            loaded_count, len(saved_devices), skipped_count)
             else:
                 _LOGGER.info("✅ Loaded %d devices successfully", loaded_count)
+            
+            # Recalculate next free indices after all devices are restored
+            # This ensures the indices are correct even if devices were restored with indices
+            if self._used_ewb_indices:
+                self._next_free_ewb_index = self._find_next_free_ewb_index()
+                _LOGGER.info("📍 Recalculated next free EWB index after device restore: %d (used: %d indices)", 
+                           self._next_free_ewb_index, len(self._used_ewb_indices))
+            
+            if self._used_ew_receiver_indices:
+                self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
+                _LOGGER.info("📍 Recalculated next free EW-Receiver index after device restore: %d (used: %d indices)", 
+                           self._next_free_ew_receiver_index, len(self._used_ew_receiver_indices))
             
             # Fire event to signal that all devices are loaded and available
             self.hass.bus.async_fire(
@@ -1757,9 +1967,9 @@ class EldatCoordinator(DataUpdateCoordinator):
         try:
             device_type = device_info.get("type", device_info.get("device_type", "unknown"))
             
-            # Restore EW-Receiver serial mapping if present
+            # Restore EW-Receiver serial mapping if present (unidirectional EW devices)
             ew_receiver_serial = device_info.get("ew_receiver_serial")
-            ew_receiver_index = device_info.get("ew_receiver_index")
+            ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
             
             if ew_receiver_serial and ew_receiver_index is not None:
                 # Restore EW-Receiver mapping in device registry
@@ -1767,9 +1977,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                     ew_receiver_index, ew_receiver_serial, serial_number
                 )
                 
-                # Mark receiver as used in transceiver if available
-                if hasattr(self.transceiver, '_rx11_wrapper'):
-                    self.transceiver._rx11_wrapper.mark_receiver_used(ew_receiver_index, ew_receiver_serial)
+                # Mark receiver as used persistently in coordinator
+                device_name = device_info.get("name", f"EW-Receiver ({serial_number[-6:]})")
+                self.mark_ew_receiver_index_used(ew_receiver_index, ew_receiver_serial, serial_number, device_name)
                 
                 # Add to whitelist (memory-only during setup)
                 self._add_to_whitelist_memory(
@@ -1781,6 +1991,18 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
                 _LOGGER.info("🔄 Restored EW-Receiver mapping: Index %d, Serial %s → Device %s", 
                            ew_receiver_index, ew_receiver_serial[-8:], serial_number[-8:])
+            
+            # Restore EWneo device EWB index mapping if present (bidirectional EWB devices)
+            ewneo_index = device_info.get("ewneo_index")
+            gateway_serial = device_info.get("gateway_serial")
+            
+            if ewneo_index is not None and gateway_serial:
+                # Restore EWB index tracking persistently
+                device_name = device_info.get("name", f"EWneo Device ({serial_number[-6:]})")
+                self.mark_ewb_index_used(ewneo_index, gateway_serial, serial_number, device_name)
+                
+                _LOGGER.info("🔄 Restored EWneo EWB index: %d, Gateway: %s, Device: %s", 
+                           ewneo_index, gateway_serial[-8:], serial_number[-8:])
             
             # Ensure RX11-based devices have proper sensor configuration
             if device_type in ["ew_sensor", "ew_transceiver"] and not device_info.get("available_sensors"):

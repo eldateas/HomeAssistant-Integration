@@ -640,13 +640,20 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     _LOGGER.error("❌ No RX11 wrapper found in transceiver")
                 
-                # Get next available receiver (index, serial)
-                receiver_info = await coordinator.transceiver.get_next_available_receiver()
+                # Get next available receiver index from persistent tracking
+                try:
+                    index = coordinator.get_next_free_ew_receiver_index()
+                    _LOGGER.info("✅ Got next free EW-Receiver index from persistent tracking: %d", index)
+                except ValueError:
+                    return self.async_abort(reason="no_available_receivers")
                 
-                if receiver_info:
-                    index, serial = receiver_info
+                # Get serial for this index from RX11
+                serial = await coordinator.transceiver.rx11_ew_receiver_get_serial_by_index(index)
+                
+                if serial:
                     self._device_config = {
-                        "device_type": "EW-Receiver",
+                        "device_type": "ew_receiver",
+                        "type": "ew_receiver",
                         "serial_number": serial,
                         "rx11_index": index,
                         "name": f"EW-Receiver (Index {index})"  # Temporär, wird mit receiver_kind aktualisiert
@@ -654,7 +661,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.info("✅ Using EW-Receiver: Index %d, Serial %s", index, serial[-8:])
                     return await self.async_step_device_receiver_type()
                 else:
-                    return self.async_abort(reason="no_available_receivers")
+                    return self.async_abort(reason="no_receiver_serial")
             else:
                 return self.async_abort(reason="no_coordinator")
         except Exception as e:
@@ -814,13 +821,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         except Exception as e:
                             _LOGGER.warning("⚠️ Code A sending error (continuing): %s", e)
                         
-                        # Mark receiver as used in central management
-                        coordinator.transceiver.mark_receiver_used(rx11_index, serial)
-                        _LOGGER.info("🔒 Marked receiver as used in RX11 management: Index %d", rx11_index)
+                        # Mark receiver as used persistently in coordinator
+                        device_name = self._device_config.get("name", f"EW-Receiver (Index {rx11_index})")
+                        coordinator.mark_ew_receiver_index_used(rx11_index, serial, serial, device_name)
+                        _LOGGER.info("🔒 Marked receiver as used persistently: Index %d", rx11_index)
                     
                     # Always create the device
                     self._device_config.update({
-                        "device_type": "EW-Receiver",
+                        "device_type": "ew_receiver",
+                        "type": "ew_receiver",  # Add type field for consistency
                         "entity_type": "button"  # Always create button entities
                     })
                     _LOGGER.info("✅ Creating EW-Receiver device with serial: %s", serial[-8:] if serial else "Unknown")
@@ -970,20 +979,22 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not wrapper.is_connected():
                 return self.async_abort(reason="rx11_not_connected")
 
-            # Step 1: Get next available EWneo index
+            # Step 1: Get next available EWneo index from coordinator's persistent tracking
             _LOGGER.info("🔍 Getting next available EWneo index...")
-            ewneo_index = await coordinator.transceiver.rx11_ewb_get_next_available_index_single()
-            
-            if ewneo_index is None:
+            try:
+                ewneo_index = coordinator.get_next_free_ewb_index()
+            except ValueError:
+                # All 256 indices are used
                 return self.async_abort(reason="no_available_ewneo_index")
                 
             _LOGGER.info("✅ Using EWneo index: %d", ewneo_index)
 
             # Step 2: Get gateway serial number for this index
+            # Note: The RX11 has a fixed gateway serial for each index, even if not yet joined
             _LOGGER.info("📡 Loading gateway serial for index %d...", ewneo_index)
             gateway_serial = await coordinator.transceiver.rx11_ewb_get_serial_by_index(ewneo_index)
             
-            if not gateway_serial or gateway_serial == "00" * 16:
+            if not gateway_serial or gateway_serial == "00" * 32:
                 return self.async_abort(reason="no_gateway_serial")
                 
             _LOGGER.info("✅ Gateway serial loaded: %s", gateway_serial[-8:])
@@ -1101,8 +1112,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.info("🎯 EWneo-Receiver joined successfully (Index: %d, Type: 0x%02X)", 
                         ewneo_index, device_type_code)
             
-            # Mark the EWB index as used in the wrapper tracking
-            wrapper.mark_ewb_index_used(ewneo_index, gateway_serial, receiver_serial)
+            # Mark the EWB index as used persistently in coordinator
+            # This also updates the wrapper tracking automatically
+            device_name = f"EWneo-{device_type_name} ({receiver_serial[-6:]})"
+            coordinator.mark_ewb_index_used(ewneo_index, gateway_serial, receiver_serial, device_name)
             
             # Clean up preparation data
             delattr(self, '_ewneo_preparation')
@@ -1255,6 +1268,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.info("🔄 Device %s ready for entity creation via HA registry", serial_number[-8:])
                 
                 # Register device PERMANENTLY in the registered devices list FIRST
+                # Note: register_device_permanently will fire all necessary events
                 coordinator.devices[serial_number] = device_data
                 await coordinator.register_device_permanently(serial_number, device_data)
                 _LOGGER.info("✅ Device saved to registry: %s", serial_number[-8:])
@@ -1325,8 +1339,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                            device_data.get("name", device_data.get("device_type", "Unbekanntes Gerät")), 
                            serial_number[-8:], len(entity_info.get("entities", [])))
                 
-                # Fire device creation events with improved targeting
-                await self._fire_device_creation_events(serial_number, entity_info)
+                # SKIP: register_device_permanently already fired EVENT_DEVICE_ADDED and platform-specific events
+                # Firing again would cause duplicate entity creation
+                # await self._fire_device_creation_events(serial_number, entity_info)
                 
                 # Ensure telegram callback is properly set after device registration
                 # This is critical because device registration might override the callback
@@ -1334,54 +1349,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.info("🔗 Re-setting telegram callback after device registration")
                     coordinator.transceiver.set_telegram_callback(coordinator._handle_telegram)
                 
-                # Fire platform-specific events to ensure proper entity creation
-                platforms = entity_info.get("platforms", set())
-                
-                if "binary_sensor" in platforms and device_type == "ew_transmitter":
-                    _LOGGER.info("🔘 Firing binary_sensor creation event for EW-Transmitter %s", serial_number[-8:])
-                    self.hass.bus.async_fire(
-                        f"{EVENT_DEVICE_ADDED}_binary_sensor",
-                        {
-                            "serial_number": serial_number,
-                            "device_info": device_data,
-                            "device_type": device_type,
-                            "force_create": True,
-                            "entities": [e for e in entity_info.get("entities", []) if e.get("type") == "binary_sensor"]
-                        }
-                    )
-                
-                if "sensor" in platforms and device_type == "ew_sensor":
-                    sensor_entities = [e for e in entity_info.get("entities", []) if e.get("type") == "sensor"]
-                    _LOGGER.info("🌡️ Firing sensor creation event for EWneo-Sensor %s with %d entities: %s", 
-                               serial_number[-8:], len(sensor_entities), [e.get("sensor_type") for e in sensor_entities])
-                    self.hass.bus.async_fire(
-                        f"{EVENT_DEVICE_ADDED}_sensor",
-                        {
-                            "serial_number": serial_number,
-                            "device_info": device_data,
-                            "device_type": device_type,
-                            "force_create": True,
-                            "available_sensors": device_data.get("available_sensors", []),
-                            "sensor_capabilities": device_data.get("sensor_capabilities", []),
-                            "entities": sensor_entities
-                        }
-                    )
-                    _LOGGER.info("✅ Sensor creation event fired for EWneo-Sensor %s", serial_number[-8:])
-                
-                if "button" in platforms and not device_data.get("neo_device", False):
-                    _LOGGER.info("🔘 Firing button creation event for device %s", serial_number[-8:])
-                    self.hass.bus.async_fire(
-                        f"{EVENT_DEVICE_ADDED}_button",
-                        {
-                            "serial_number": serial_number,
-                            "device_info": device_data,
-                            "device_type": device_type,
-                            "force_create": True,
-                            "entities": [e for e in entity_info.get("entities", []) if e.get("type") == "button"]
-                        }
-                    )
-                elif "button" in platforms and device_data.get("neo_device", False):
-                    _LOGGER.info("⚡ Skipping button creation for EWneo device %s - uses switch entities only", serial_number[-8:])
+                # SKIP: register_device_permanently already fired platform-specific events
+                # Firing them again would cause duplicate entity creation
+                _LOGGER.info("✅ Skipping duplicate platform event firing (already done by register_device_permanently)")
                 
                 # Give event handlers sufficient time to process and create entities
                 # Try multiple times with delays to allow async processing
@@ -1476,6 +1446,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         device_data = self._learned_device if self._learned_device else getattr(self, '_device_config', {})
         device_type = device_data.get("device_type", device_data.get("type", "unknown"))
         entity_info = {"entities": [], "platforms": set()}
+        
+        _LOGGER.info("🔍 _determine_device_entities: device_type='%s', device_data keys: %s", 
+                    device_type, list(device_data.keys()))
         
         if device_type == "ew_transmitter":
             # EW-Transmitter: Create binary sensors for button press detection
@@ -1601,7 +1574,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "category": "sensor",
                 "available_sensors": available_sensors
             })
-        elif device_type == "EW-Receiver":
+        elif device_type == "ew_receiver" or device_type == "EW-Receiver":
             # EW-Receiver: Erstelle zustandslose Button-Entitäten basierend auf zweistufigem Dialog
             entity_type = device_data.get("entity_type", "switch")
             operating_mode = device_data.get("operating_mode", 1)
@@ -1657,6 +1630,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ])
                     
             elif receiver_kind == "motor" or receiver_kind == "cover":
+                # Motor-Geräte: Erstelle zustandslose Buttons für direkte Telegram-Befehle
                 if operating_mode == 1:  # Eintastbedienung - Toggle-Button mit LongPress
                     entities.append({
                         "type": "button",
@@ -1783,6 +1757,17 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         }
                     ])
             
+            # Add remove button entity for device management
+            entities.append({
+                "type": "button",
+                "action": "remove_device",
+                "unique_id": f"{serial}_remove",
+                "name": "Gerät entfernen",
+                "device_class": None,
+                "entity_category": "config",
+                "icon": "mdi:delete"
+            })
+            
             # Determine platforms based on entity types
             platforms = set()
             for entity in entities:
@@ -1795,7 +1780,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "platforms": platforms,
                 "type": "ew_receiver",
                 "receiver_kind": receiver_kind,
-                "operating_mode": operating_mode
+                "operating_mode": operating_mode,
+                "device_class": "garage" if receiver_kind == "motor" else "switch"
             })
             
             # Stelle sicher, dass Entitäten erstellt wurden
@@ -1858,18 +1844,30 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "supports_position": True
                 })
             
-            # NOTE: EWneo devices should NOT have button entities - they use bidirectional EWB protocol
-            # Button entities would try to use EW protocol which doesn't work for EWneo devices
+            # NOTE: EWneo devices should NOT have action button entities - they use bidirectional EWB protocol
+            # Action button entities would try to use EW protocol which doesn't work for EWneo devices
             # Only the main entity (switch/light/cover) should be created
             
-            # Determine platforms based on entity types (excluding buttons)
+            # Add remove button entity for device management (config button, not action button)
+            entities.append({
+                "type": "button",
+                "action": "remove_device",
+                "unique_id": f"{serial}_remove",
+                "name": "Gerät entfernen",
+                "device_class": None,
+                "entity_category": "config",
+                "icon": "mdi:delete"
+            })
+            
+            # Determine platforms based on entity types
+            # Note: Include button platform for the remove button
             platforms = set()
             for entity in entities:
                 entity_type_name = entity.get("type")
-                if entity_type_name and entity_type_name != "button":  # Exclude buttons
+                if entity_type_name:
                     platforms.add(entity_type_name)
             
-            _LOGGER.info("🔧 EWneo device %s: Creating %d entities without buttons (platforms: %s)", 
+            _LOGGER.info("🔧 EWneo device %s: Creating %d entities (platforms: %s)", 
                         device_name, len(entities), platforms)
             
             entity_info.update({

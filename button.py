@@ -88,8 +88,7 @@ async def async_setup_entry(
         device_type = device_info.get("type", "unknown")
         device_name = device_info.get("name", serial_number)
         
-        # Always create a remove button for every device
-        # Note: Even if entity exists in HA registry, we need to create the object for restore
+        # ALWAYS create a remove button for every device (for easy cleanup of corrupted entries)
         remove_unique_id = f"{serial_number}_remove"
         
         # Only skip if we already created it THIS SESSION (avoid duplicates in same run)
@@ -210,7 +209,7 @@ async def async_setup_entry(
             
         _LOGGER.info("🔘 Handling device added event for %s (type: %s)", serial_number, device_type)
         
-        # Always create a remove button for every new device (universal device management)
+        # ALWAYS create a remove button for every device (for easy cleanup of corrupted entries)
         # Check HomeAssistant's entity registry (single source of truth)
         from homeassistant.helpers import entity_registry as er
         ha_entity_registry = er.async_get(coordinator.hass)
@@ -230,7 +229,7 @@ async def async_setup_entry(
                 # Entity exists and this is not a forced recreation - skip
                 _LOGGER.debug("Remove button %s already exists in HA, skipping", remove_unique_id[-16:])
             else:
-                # Safe to create: either new entity OR forced recreation
+                # Create or recreate remove button
                 remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
                 new_buttons.append(remove_button)
                 entity_registry.mark_entity_created(remove_unique_id, serial_number)

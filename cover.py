@@ -148,29 +148,46 @@ class EldatCover(EldatEntity, CoverEntity):
         coordinator: EldatCoordinator,
         serial_number: str,
         device_info: dict[str, Any],
-        channel: int = 1,
+        entity_spec: dict[str, Any],
     ) -> None:
         """Initialize the cover."""
         super().__init__(coordinator, serial_number, device_info)
-        self._channel = channel
-        self._attr_device_class = CoverDeviceClass.SHUTTER
+        
+        # Extract channel from entity_spec
+        self._channel = entity_spec.get("channel", 1)
+        self._entity_spec = entity_spec
+        
+        # Get device class from entity_spec or default to SHUTTER
+        device_class_str = entity_spec.get("device_class", "blind")
+        if device_class_str == "blind":
+            self._attr_device_class = CoverDeviceClass.BLIND
+        elif device_class_str == "shutter":
+            self._attr_device_class = CoverDeviceClass.SHUTTER
+        elif device_class_str == "garage":
+            self._attr_device_class = CoverDeviceClass.GARAGE
+        else:
+            self._attr_device_class = CoverDeviceClass.SHUTTER
+        
         self._attr_supported_features = (
             CoverEntityFeature.OPEN |
             CoverEntityFeature.CLOSE |
             CoverEntityFeature.STOP
         )
         
-        # Set unique ID and name
-        if channel > 1:
-            self._attr_unique_id = f"{serial_number}_cover_ch{channel}"
-            self._attr_name = f"{device_info.get('name', 'Motor')} Channel {channel}"
-        else:
-            self._attr_unique_id = f"{serial_number}_cover"
-            self._attr_name = f"{device_info.get('name', 'Motor')} Cover"
+        # Set unique ID and name from entity_spec
+        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_cover")
+        self._attr_name = entity_spec.get("name", device_info.get('name', 'Motor'))
+        
+        # Set icon from entity_spec
+        self._attr_icon = entity_spec.get("icon", "mdi:blinds")
         
         self._attr_is_closed = None
         self._attr_is_closing = False
         self._attr_is_opening = False
+        
+        # Store operating mode for EW-Receiver
+        self._operating_mode = entity_spec.get("operating_mode", device_info.get("operating_mode", 1))
+        self._receiver_kind = entity_spec.get("receiver_kind", device_info.get("receiver_kind", "motor"))
     
     @property
     def is_closed(self) -> bool | None:

@@ -593,15 +593,9 @@ class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
             entity_type="switch"
         )
         
-        # Set name with action hints
-        base_name = device_info.get('name', serial_number)
-        self._attr_name = create_entity_name_with_action_hint(
-            base_name=base_name,
-            device_type=device_type,
-            receiver_kind=self._receiver_kind,
-            operating_mode=self._operating_mode,
-            entity_type="switch"
-        )
+        # Use name directly from entity_spec (like EldatSwitch does)
+        # This preserves the original entity name from entity_specs.py
+        self._attr_name = entity_spec.get("name", device_info.get('name', serial_number))
         
         # Set device-specific icon
         self._attr_icon = entity_spec.get("icon") or device_config.get("icon", "mdi:toggle-switch-variant")
