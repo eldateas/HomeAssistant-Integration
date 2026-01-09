@@ -4,24 +4,25 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import logging
 
-from ....base import BaseReceiver, DeviceType, DeviceSubtype, OperatingMode
+from ....base import DeviceType, DeviceSubtype, OperatingMode
+from .base import EWneoBaseDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-# Constants for telegram processing
-TELEGRAM_EWNEO_STATE_CHANGE = [0x05, 0xF2]
 
-
-class RX11EWneoTransceiver(BaseReceiver):
+class RX11EWneoTransceiver(EWneoBaseDevice):
     """EWneo transceiver implementation for RX11 transceiver.
     
     Handles bidirectional communication with EWneo transceivers.
+    Inherits common EWB state parsing from EWneoBaseDevice.
     """
     
     def __init__(self, *args, **kwargs):
         """Initialize EWneo transceiver."""
         super().__init__(*args, device_type=DeviceType.EWNEO_TRANSCEIVER, 
                         subtype=DeviceSubtype.TRANSCEIVER, **kwargs)
+        # Note: self._mode is now in base class
+        
         self._transceiver_state = {}
         self._setup_operating_mode(**kwargs)
     
@@ -34,25 +35,21 @@ class RX11EWneoTransceiver(BaseReceiver):
         """Return supported entity types."""
         return ["sensor", "button"]
     
-    def process_telegram(self, telegram_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process incoming telegram for EWneo transceiver."""
-        info_type = telegram_data.get("info_type")
+    def _parse_mode0_state(self, state_word: int) -> None:
+        """Parse Mode 0 state for transceiver (implements abstract method).
         
-        if info_type in TELEGRAM_EWNEO_STATE_CHANGE:
-            self._handle_state_change(telegram_data)
+        Transceivers may have custom state formats depending on their type.
+        This implementation stores the raw state word for generic handling.
+        """
+        # Store raw state for generic transceiver handling
+        self._transceiver_state["raw_state"] = state_word
         
-        return self.get_transceiver_data()
+        _LOGGER.debug("EWneo transceiver %s: State word=0x%08X", 
+                     self.serial_number[-6:], state_word)
     
-    def _handle_state_change(self, telegram_data: Dict[str, Any]) -> None:
-        """Handle state change telegram."""
-        data = telegram_data.get("data", {})
-        
-        # Update transceiver state
-        for key, value in data.items():
-            self._transceiver_state[key] = value
-        
-        _LOGGER.debug("EWneo transceiver %s: State updated: %s", 
-                     self.serial_number[-6:], data)
+    def _get_device_data(self) -> Dict[str, Any]:
+        """Get transceiver data for coordinator (implements abstract method)."""
+        return self.get_transceiver_data()
     
     def get_transceiver_data(self) -> Dict[str, Any]:
         """Get current transceiver data."""
@@ -91,12 +88,16 @@ class RX11EWneoTransceiver(BaseReceiver):
 
 def create_rx11_ewneo_transceiver(
     serial_number: str,
-    device_info: Dict[str, Any],
+    name: str = None,
     **kwargs
-) -> RX11EWneoTransceiver:
-    """Factory function to create EWneo transceiver."""
-    return RX11EWneoTransceiver(
-        serial_number=serial_number,
-        device_info=device_info,
-        **kwargs
-    )
+) -> Optional[RX11EWneoTransceiver]:
+    """Create RX11 EWneo transceiver instance."""
+    try:
+        return RX11EWneoTransceiver(
+            serial_number=serial_number,
+            name=name or f"EWneo Transceiver {serial_number[-6:]}",
+            **kwargs
+        )
+    except Exception as e:
+        _LOGGER.error(f"Error creating EWneo transceiver: {e}")
+        return None

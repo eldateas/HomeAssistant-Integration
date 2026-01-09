@@ -164,9 +164,15 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
             # Get the coordinator
             coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
             
-            # Run ghost device cleanup
-            await coordinator.async_cleanup_ghost_devices()
-            _LOGGER.info("✅ Ghost device cleanup completed via service call")
+            # Run ghost device cleanup using unified cleanup system
+            result = await coordinator.async_cleanup_devices(mode="ghost", dry_run=False)
+            
+            if "error" in result:
+                _LOGGER.error("❌ Ghost device cleanup failed: %s", result["error"])
+            else:
+                _LOGGER.info("✅ Ghost device cleanup completed: %d devices removed", 
+                           result.get("ghost_devices_removed", 0))
+                hass.bus.async_fire("eldat_ghost_cleanup_completed", result)
                 
         except Exception as e:
             _LOGGER.error("❌ Failed to cleanup ghost devices: %s", e)
@@ -177,8 +183,8 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
             # Get the coordinator
             coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
             
-            # Run orphaned entity cleanup
-            result = await coordinator.async_cleanup_all_orphaned_entities()
+            # Run orphaned entity cleanup using unified cleanup system
+            result = await coordinator.async_cleanup_devices(mode="orphaned", dry_run=False)
             
             if "error" in result:
                 _LOGGER.error("❌ Orphaned entity cleanup failed: %s", result["error"])
@@ -198,9 +204,15 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
             # Get the coordinator
             coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
             
-            # Run orphaned device repair
-            repaired_count = await coordinator.repair_orphaned_devices()
-            _LOGGER.info("✅ Orphaned device repair completed - %d devices repaired", repaired_count)
+            # Run orphaned device repair using unified cleanup system
+            result = await coordinator.async_cleanup_devices(mode="missing", dry_run=False)
+            
+            if "error" in result:
+                _LOGGER.error("❌ Orphaned device repair failed: %s", result["error"])
+            else:
+                repaired_count = result.get("devices_repaired", 0)
+                _LOGGER.info("✅ Orphaned device repair completed - %d devices repaired", repaired_count)
+                hass.bus.async_fire("eldat_repair_completed", result)
                 
         except Exception as e:
             _LOGGER.error("❌ Failed to repair orphaned devices: %s", e)

@@ -478,6 +478,12 @@ class RxModule:
         
         # State tracking
         self._state_good = True
+        self._connection_healthy = True
+        self._last_successful_communication = time.time()
+        self._reconnect_attempts = 0
+        self._max_reconnect_attempts = 10
+        self._reconnect_delay_base = 1.0  # seconds
+        self._health_check_interval = 30.0  # seconds
         
         # RX state
         self._rx_sop = False
@@ -494,6 +500,29 @@ class RxModule:
         self._send_cmd_loop_running = False
         self._send_cmd_loop_gateway: Optional[bytes] = None
         self._send_cmd_loop_button: Optional[int] = None
+    
+    # ================================================================================================
+    # PROPERTIES
+    # ================================================================================================
+    
+    @property
+    def is_connected(self) -> bool:
+        """Check if module is connected and healthy."""
+        with self._protocol_lock:
+            return self._connected and self._connection_healthy and self._state_good
+    
+    @property
+    def connection_status(self) -> str:
+        """Get detailed connection status."""
+        with self._protocol_lock:
+            if not self._connected:
+                return "disconnected"
+            elif not self._connection_healthy:
+                return "reconnecting"
+            elif not self._state_good:
+                return "error"
+            else:
+                return "connected"
     
     # ================================================================================================
     # CONNECTION MANAGEMENT
@@ -522,7 +551,13 @@ class RxModule:
             self._rx_sop = False
             self._rx_raw_buffer = bytearray()
             self._rx_stuffing = False
-            self._state_good = True
+            
+            # Reset health state
+            with self._protocol_lock:
+                self._state_good = True
+                self._connection_healthy = True
+                self._last_successful_communication = time.time()
+                self._reconnect_attempts = 0
             
             # Clear any existing data
             self._serial.reset_input_buffer()
@@ -575,6 +610,72 @@ class RxModule:
         
         if self.debug:
             _LOGGER.info("RxModule disconnected")
+    
+    def _reconnect(self) -> bool:
+        """Attempt to reconnect to the RX11 module with exponential backoff."""
+        if self._shutdown_requested:
+            return False
+            
+        with self._protocol_lock:
+            if not self._connection_healthy:
+                # Already reconnecting
+                return False
+            self._connection_healthy = False
+        
+        _LOGGER.warning("Connection lost - attempting reconnect...")
+        
+        # Cancel all pending requests
+        self.cancel_all_io_request()
+        
+        # Close existing connection
+        if self._serial:
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            self._serial = None
+        
+        # Attempt reconnect with exponential backoff
+        while self._reconnect_attempts < self._max_reconnect_attempts and not self._shutdown_requested:
+            delay = min(self._reconnect_delay_base * (2 ** self._reconnect_attempts), 60.0)
+            _LOGGER.info("Reconnect attempt %d/%d after %.1fs delay...", 
+                        self._reconnect_attempts + 1, 
+                        self._max_reconnect_attempts, 
+                        delay)
+            
+            time.sleep(delay)
+            
+            with self._protocol_lock:
+                self._reconnect_attempts += 1
+            
+            if self.connect():
+                _LOGGER.info("Reconnect successful!")
+                return True
+        
+        _LOGGER.error("Failed to reconnect after %d attempts", self._reconnect_attempts)
+        return False
+    
+    def _check_connection_health(self):
+        """Check if connection is healthy based on recent activity."""
+        with self._protocol_lock:
+            if not self._connection_healthy:
+                return  # Already marked unhealthy
+            
+            time_since_comm = time.time() - self._last_successful_communication
+            
+            # If no communication for too long and we have pending requests, mark unhealthy
+            if time_since_comm > self._health_check_interval and (
+                self._tx_req_sent_size > 0 or len(self._req_pending) > 0
+            ):
+                _LOGGER.warning("Connection appears unhealthy - no response for %.1fs", time_since_comm)
+                self._state_good = False
+    
+    def _mark_communication_success(self):
+        """Mark that we had a successful communication."""
+        with self._protocol_lock:
+            self._last_successful_communication = time.time()
+            if self._reconnect_attempts > 0:
+                self._reconnect_attempts = 0  # Reset backoff on success
     
     def _reset_queues(self):
         """Reset all request queues."""
@@ -693,41 +794,71 @@ class RxModule:
                     if bytes_written != len(packet):
                         _LOGGER.error("ERROR [writeToBuffer] - serial bus, %d of %d written",
                                     bytes_written, len(packet))
+                        with self._protocol_lock:
+                            self._state_good = False
+                        return
                     
                     if self.debug:
                         hex_str = ' '.join(f'{b:02x}' for b in packet)
                         _LOGGER.info("Tx-Uart: %s IRP %s", hex_str, req_str)
         
+        except (serial.SerialException, OSError) as e:
+            if not self._shutdown_requested:
+                _LOGGER.error("ERROR [writeToBuffer] - Serial error: %s", e)
+                with self._protocol_lock:
+                    self._state_good = False
+                    self._connection_healthy = False
+                # Trigger reconnect in background
+                threading.Thread(target=self._reconnect, daemon=True, name="RxModule-Reconnect").start()
         except Exception as e:
             if not self._shutdown_requested:
                 _LOGGER.error("ERROR [writeToBuffer] - %s", e)
+                with self._protocol_lock:
+                    self._state_good = False
     
     def _serial_handler(self):
         """Main serial handler thread - reads and processes incoming data."""
+        last_health_check = time.time()
+        
         while not self._shutdown_requested:
             try:
-                with self._protocol_lock:
-                    # Read available bytes
-                    while self._serial and self._serial.in_waiting > 0:
-                        byte_data = self._serial.read(1)
-                        if not byte_data:
-                            break
-                        
-                        byte = byte_data[0]
-                        if self.debug:
-                            _LOGGER.info("RX byte: 0x%02x (buf_len=%d, sop=%s, stuffing=%s)", 
-                                        byte, len(self._rx_raw_buffer), self._rx_sop, self._rx_stuffing)
-                        self._process_received_byte(byte)
+                # Check connection health periodically
+                if time.time() - last_health_check > self._health_check_interval:
+                    self._check_connection_health()
+                    last_health_check = time.time()
+                
+                # Read available bytes (no lock needed for reading)
+                while self._serial and self._serial.in_waiting > 0:
+                    byte_data = self._serial.read(1)
+                    if not byte_data:
+                        break
                     
-                    # Process queued requests
-                    self._process_queued_requests()
+                    byte = byte_data[0]
+                    if self.debug:
+                        _LOGGER.info("RX byte: 0x%02x (buf_len=%d, sop=%s, stuffing=%s)", 
+                                    byte, len(self._rx_raw_buffer), self._rx_sop, self._rx_stuffing)
+                    self._process_received_byte(byte)
+                
+                # Process queued requests (uses lock internally)
+                self._process_queued_requests()
                 
                 # Small sleep to prevent CPU spinning
                 time.sleep(0.001)
                 
+            except (serial.SerialException, OSError) as e:
+                if not self._shutdown_requested:
+                    _LOGGER.error("Serial handler error: %s", e)
+                    with self._protocol_lock:
+                        self._state_good = False
+                        self._connection_healthy = False
+                    # Attempt reconnect
+                    self._reconnect()
+                    last_health_check = time.time()  # Reset after reconnect
             except Exception as e:
                 if not self._shutdown_requested:
-                    _LOGGER.error("ERROR [serialHandler] - %s", e)
+                    _LOGGER.error("Unexpected error in serial handler: %s", e)
+                    with self._protocol_lock:
+                        self._state_good = False
                 time.sleep(0.01)
     
     def _process_received_byte(self, byte: int):
@@ -792,9 +923,13 @@ class RxModule:
         
         # Check for buffer overflow
         if len(self._rx_raw_buffer) >= 128:
-            self._state_good = False
+            _LOGGER.error("ERROR [RxHandler] - Unexpected large packet, buffer overflow")
+            # Reset packet state but don't kill connection - this might be transient
+            self._rx_raw_buffer = bytearray()
             self._rx_sop = False
-            _LOGGER.error("ERROR [RxHandler] - Unexpected large packet")
+            self._rx_stuffing = False
+            with self._protocol_lock:
+                self._state_good = False
     
     def _process_complete_packet(self):
         """Process a complete received packet."""
@@ -813,6 +948,9 @@ class RxModule:
                               len(raw_buffer), raw_buffer.hex()[:80])
             return
         
+        # Mark successful communication
+        self._mark_communication_success()
+        
         # Calculate ICP byte count (without SOP and EOP)
         icp_byte_count = len(raw_buffer) - 2
         
@@ -829,7 +967,8 @@ class RxModule:
     def _process_ipp(self, handle: int, raw_buffer: bytes):
         """Process an I/O Pending Packet (just a handle)."""
         if self._tx_req_sent_size == 0:
-            self._state_good = False
+            with self._protocol_lock:
+                self._state_good = False
             _LOGGER.error("ERROR [RxHandler] - Unexpected IPP")
             return
         
@@ -839,13 +978,15 @@ class RxModule:
             return
         
         if handle == 0:
-            self._state_good = False
+            with self._protocol_lock:
+                self._state_good = False
             _LOGGER.error("ERROR [RxHandler] - Unexpected zero handle")
             return
         
         # Check for duplicate handle
         if handle in self._req_pending:
-            self._state_good = False
+            with self._protocol_lock:
+                self._state_good = False
             _LOGGER.error("ERROR [RxHandler] - Duplicated handle: 0x%04x", handle)
             return
         
@@ -882,12 +1023,14 @@ class RxModule:
         # Validate ICP length
         if icp.result == ErrorCode.SUCCESS:
             if icp_byte_count != req.expected_icp_byte_count:
-                self._state_good = False
+                with self._protocol_lock:
+                    self._state_good = False
                 _LOGGER.error("ERROR [RxHandler] - Unexpected ICP length: %d / %d",
                             icp_byte_count, req.expected_icp_byte_count)
                 return
         elif icp_byte_count != 3:
-            self._state_good = False
+            with self._protocol_lock:
+                self._state_good = False
             _LOGGER.error("ERROR [RxHandler] - Unexpected error ICP length: %d", icp_byte_count)
             return
         
@@ -901,7 +1044,8 @@ class RxModule:
                 self._enqueue_queued(req)
                 return
             else:
-                self._state_good = False
+                with self._protocol_lock:
+                    self._state_good = False
                 _LOGGER.error("ERROR [RxHandler] - QueuedRequest full")
                 return
         
@@ -919,7 +1063,11 @@ class RxModule:
             if not req:
                 break
             
-            if not self._state_good:
+            # Check state (thread-safe read)
+            with self._protocol_lock:
+                state_good = self._state_good
+            
+            if not state_good:
                 # Fail the request
                 req.icp = ICP(handle=0, result=ErrorCode.ERR_FAILSTATE)
                 req.signal()

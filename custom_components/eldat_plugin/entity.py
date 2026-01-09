@@ -26,23 +26,35 @@ class EldatEntity(CoordinatorEntity):
         super().__init__(coordinator)
         
         self._serial_number = serial_number
-        self._device_info = device_info
+        
+        # CRITICAL: Remove ALL fields that could link to old/wrong config entries
+        # Home Assistant will automatically use the correct config_entry_id from the platform
+        cleaned_device_info = device_info.copy() if device_info else {}
+        for problematic_field in ['config_entry_id', 'via_device', 'config_subentry_id', 
+                                  'via_device_id', 'entry_id']:
+            cleaned_device_info.pop(problematic_field, None)
+        
+        self._device_info = cleaned_device_info
         self._attr_has_entity_name = True
         
         # Set coordinator context to None for default behavior
         self.coordinator_context = None
         
-        # Set device info
-        device_type = device_info.get("type", "unknown")
+        # Set device info - WICHTIG: Verwende immer die aktuelle config_entry_id
+        device_type = cleaned_device_info.get("type", "unknown")
+        
+        # Erstelle device_info OHNE via_device, um Probleme mit alten config_entry_ids zu vermeiden
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, serial_number)},
-            name=device_info.get("name", f"ELDAT Device {serial_number[-6:]}"),
+            name=cleaned_device_info.get("name", f"ELDAT Device {serial_number[-6:]}"),
             manufacturer="ELDAT EaS GmbH",
             model=device_type.replace("_", " ").title(),
             sw_version="1.0.0",
             hw_version="Unknown",
-            via_device=(DOMAIN, f"{coordinator.config_entry.entry_id}_gateway"),
         )
+        
+        # Explizit config_entry_id NICHT setzen - Home Assistant verwendet automatisch die richtige
+        # Dies verhindert Probleme mit alten/ungültigen config_entry_ids aus gespeicherten Daten
         
         # Set default icon based on device type
         if not hasattr(self, '_attr_icon'):

@@ -97,7 +97,7 @@ async def async_setup_entry(
                           device_name, device_type)
             
             # If no sensors were created but device should have sensors, log warning
-            if device_type in ["ew_sensor", "ew_transceiver"]:
+            if device_type in ["ew_sensor", "ewneo_sensor", "ew_transceiver"]:
                 _LOGGER.warning("⚠️ No sensors created for EW-Sensor device %s - may need manual intervention", serial_number[-8:])
     
     if sensors:
@@ -162,7 +162,7 @@ async def async_setup_entry(
                 return
             
             # Nur EW-Sensor devices bekommen temperature/humidity sensors
-            if device_type != "ew_sensor":
+            if device_type not in ["ew_sensor", "ewneo_sensor"]:
                 _LOGGER.debug("Skipping sensor creation for device %s - not an EW-Sensor (type: %s)", serial_number[-6:], device_type)
                 return
             
@@ -331,17 +331,23 @@ async def async_setup_entry(
 def _create_configured_sensor(coordinator: EldatCoordinator, serial_number: str, device_info: Dict[str, Any], entity_spec: Dict[str, Any]) -> SensorEntity | None:
     """Create a sensor entity based on entity specification."""
     sensor_type = entity_spec.get("sensor_type")
+    device_type = device_info.get("type", device_info.get("device_type", "unknown"))
     
+    # Use dedicated EWneoSensorEntity for ewneo_sensor devices
+    if device_type == "ewneo_sensor":
+        return EWneoSensorEntity(coordinator, serial_number, device_info, entity_spec)
+    
+    # Legacy sensor entities for other types
     if sensor_type == "temperature":
-        return EldatConfiguredTemperatureSensor(coordinator, serial_number, device_info, entity_spec)
+        return EldatEWReceiverTemperatureSensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "humidity":
-        return EldatConfiguredHumiditySensor(coordinator, serial_number, device_info, entity_spec)
+        return EldatEWReceiverHumiditySensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "battery":
-        return EldatConfiguredBatterySensor(coordinator, serial_number, device_info, entity_spec)
+        return EldatEWReceiverBatterySensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "rain":
-        return EldatConfiguredRainSensor(coordinator, serial_number, device_info, entity_spec)
+        return EldatEWReceiverRainSensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "wind":
-        return EldatConfiguredWindSensor(coordinator, serial_number, device_info, entity_spec)
+        return EldatEWReceiverWindSensor(coordinator, serial_number, device_info, entity_spec)
     else:
         _LOGGER.warning("Unknown sensor type: %s", sensor_type)
         return None
@@ -364,7 +370,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                  serial_number[-8:], device_type, sensor_types, measurement_types)
     
     # Create temperature/humidity sensors ONLY for actual EW-Sensors (EWneo devices)
-    if device_type == "ew_sensor":
+    if device_type in ["ew_sensor", "ewneo_sensor"]:
         _LOGGER.info("🌡️ Creating/restoring EW-Sensor entities for device %s (type: %s)", 
                      serial_number[-8:], device_type)
         
@@ -388,7 +394,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
             
             # Create sensor based on type (always create the entity object, regardless of registry state)
             if sensor_type == "temperature":
-                sensor = EldatConfiguredTemperatureSensor(
+                sensor = EWneoSensorEntity(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
@@ -396,14 +402,15 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                         "unique_id": unique_id,
                         "name": "Temperature",
                         "sensor_type": "temperature",
-                        "unit": UnitOfTemperature.CELSIUS,
+                        "device_class": SensorDeviceClass.TEMPERATURE,
+                        "unit_of_measurement": UnitOfTemperature.CELSIUS,
                         "icon": "mdi:thermometer",
                         "current_value": last_value,
                         "ew_receiver_serial": ew_receiver_serial
                     }
                 )
             elif sensor_type == "humidity":
-                sensor = EldatConfiguredHumiditySensor(
+                sensor = EWneoSensorEntity(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
@@ -411,27 +418,29 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                         "unique_id": unique_id,
                         "name": "Humidity",
                         "sensor_type": "humidity",
-                        "unit": PERCENTAGE,
+                        "device_class": SensorDeviceClass.HUMIDITY,
+                        "unit_of_measurement": PERCENTAGE,
                         "icon": "mdi:water-percent",
                         "current_value": last_value,
                         "ew_receiver_serial": ew_receiver_serial
                     }
                 )
             elif sensor_type == "battery":
-                    sensor = EldatConfiguredBatterySensor(
-                        coordinator=coordinator,
-                        serial_number=serial_number,
-                        device_info=device_info,
-                        entity_spec={
-                            "unique_id": unique_id,
-                            "name": "Battery",
-                            "sensor_type": "battery",
-                            "unit": PERCENTAGE,
-                            "icon": "mdi:battery",
-                            "current_value": last_value,
-                            "ew_receiver_serial": ew_receiver_serial
-                        }
-                    )
+                sensor = EWneoSensorEntity(
+                    coordinator=coordinator,
+                    serial_number=serial_number,
+                    device_info=device_info,
+                    entity_spec={
+                        "unique_id": unique_id,
+                        "name": "Battery",
+                        "sensor_type": "battery",
+                        "device_class": SensorDeviceClass.BATTERY,
+                        "unit_of_measurement": PERCENTAGE,
+                        "icon": "mdi:battery",
+                        "current_value": last_value,
+                        "ew_receiver_serial": ew_receiver_serial
+                    }
+                )
             
             sensors.append(sensor)
             
@@ -445,7 +454,8 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                            sensor_type, serial_number[-8:])
     
     # Battery sensor for devices that need battery monitoring (including EW-Transmitter for low battery warnings)
-    elif device_type in ["ew_transmitter", "ew_transceiver", "ewneo_sensor", "ewneo_transceiver", "ewneo_bidi_transmitter"]:
+    # Note: ew_sensor and ewneo_sensor get battery sensors created above in the main sensor block
+    elif device_type in ["ew_transmitter", "ew_transceiver", "ewneo_transceiver", "ewneo_bidi_transmitter"]:
         sensors.append(EldatBatterySensor(
             coordinator=coordinator,
             serial_number=serial_number,
@@ -453,7 +463,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
         ))
         _LOGGER.info("🔋 Created battery sensor for device %s", serial_number[-8:])
     
-    # Legacy sensor creation for old EWneo sensors only (not EW-Transmitters!)
+    # Legacy sensor creation for old EWneo-Sensoren only (not EW-Transmitters!)
     elif device_info.get("supports_sensors", False) and device_type not in ["ew_transmitter"]:
         if "temperature" in str(device_info.get("info_type", "")).lower():
             sensors.append(EldatTemperatureSensor(
@@ -1107,7 +1117,151 @@ class EldatDiagnosticSensor(EldatEntity, SensorEntity):
         self.schedule_update_ha_state()
 
 
-class EldatConfiguredTemperatureSensor(EldatEntity, SensorEntity):
+class EWneoSensorEntity(EldatEntity, SensorEntity):
+    """Universal sensor entity for EWneo-Sensoren.
+    
+    Communicates directly with EWneoSensor device class for readings.
+    """
+
+    def __init__(
+        self,
+        coordinator: EldatCoordinator,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        entity_spec: Dict[str, Any],
+    ) -> None:
+        """Initialize EWneo-Sensoren entity."""
+        super().__init__(coordinator, serial_number, device_info)
+        
+        self._entity_spec = entity_spec
+        self._sensor_type = entity_spec.get("sensor_type", "unknown")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{self._sensor_type}")
+        self._attr_name = entity_spec.get("name", f"{device_info['name']} {self._sensor_type.title()}")
+        self._attr_device_class = entity_spec.get("device_class")
+        
+        # Battery sensors go into diagnostics category
+        if self._sensor_type == "battery":
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            self._attr_state_class = None  # Battery is status, not measurement
+        else:
+            self._attr_entity_category = None
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            
+        self._attr_native_unit_of_measurement = entity_spec.get("unit_of_measurement")
+        self._attr_icon = entity_spec.get("icon")
+        
+        self._last_reading = None
+        self._last_update = None
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return the sensor value by querying the device class."""
+        try:
+            # PRIMARY: Get value from coordinator's device data (most reliable)
+            device_data = self.coordinator.devices.get(self._serial_number, {})
+            
+            # Battery is stored as "battery_level" in coordinator.devices
+            lookup_key = "battery_level" if self._sensor_type == "battery" else self._sensor_type
+            value = device_data.get(lookup_key)
+            
+            if value is not None:
+                self._last_reading = value
+                self._last_update = datetime.now()
+                return value
+            
+            # SECONDARY: Try to get from device instance if available
+            device = self.coordinator.get_device_instance(self._serial_number)
+            if device and hasattr(device, 'get_sensor_data'):
+                sensor_data = device.get_sensor_data()
+                value = sensor_data.get(self._sensor_type)
+                
+                if value is not None:
+                    self._last_reading = value
+                    self._last_update = datetime.now()
+                    return value
+            
+            # FALLBACK: Return last known reading
+            return self._last_reading
+            
+        except Exception as e:
+            _LOGGER.error("Error getting sensor value for %s: %s", self.entity_id, e)
+            return self._last_reading
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        # Check if we have data in coordinator (most reliable)
+        if self._serial_number in self.coordinator.devices:
+            return True
+        
+        # Check if we have any reading
+        if self._last_reading is not None:
+            return True
+        
+        # Check device instance as fallback
+        device = self.coordinator.get_device_instance(self._serial_number)
+        if device and hasattr(device, 'get_sensor_data'):
+            return True
+        
+        return self.coordinator.last_update_success
+
+    @property
+    def extra_state_attributes(self) -> Dict[str, Any]:
+        """Return extra state attributes."""
+        attributes = super().extra_state_attributes or {}
+        
+        if self._last_update:
+            attributes["last_update"] = self._last_update.isoformat()
+        
+        attributes["sensor_type"] = self._sensor_type
+        
+        # Get additional data from device
+        try:
+            device = self.coordinator.get_device_instance(self._serial_number)
+            if device and hasattr(device, 'get_sensor_data'):
+                sensor_data = device.get_sensor_data()
+                
+                # Add battery info if available
+                if "battery_level" in sensor_data:
+                    attributes["battery_level"] = sensor_data["battery_level"]
+                if "battery_status" in sensor_data:
+                    attributes["battery_status"] = sensor_data["battery_status"]
+        except Exception as e:
+            _LOGGER.debug("Could not get extra attributes for %s: %s", self.entity_id, e)
+        
+        return attributes
+
+    async def async_added_to_hass(self) -> None:
+        """Add listeners when entity is added to hass."""
+        await super().async_added_to_hass()
+        
+        # Try to get initial value from coordinator device data
+        try:
+            device_data = self.coordinator.devices.get(self._serial_number, {})
+            value = device_data.get(self._sensor_type)
+            if value is not None:
+                self._last_reading = value
+                self._last_update = datetime.now()
+                _LOGGER.info("🔄 EWneo %s: Initial %s value loaded from coordinator: %s", 
+                            self._serial_number[-6:], self._sensor_type, value)
+        except Exception as e:
+            _LOGGER.debug("Could not load initial value for %s: %s", self.entity_id, e)
+        
+        # Subscribe to coordinator updates
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
+        
+        _LOGGER.warning("✅ EWneoSensorEntity added: %s (serial=%s)", 
+                       self.entity_id, self._serial_number[:8]+"..."+self._serial_number[-8:])
+
+    async def async_update(self) -> None:
+        """Update the entity."""
+        # Trigger coordinator update which will call our native_value property
+        await self.coordinator.async_request_refresh()
+
+
+class EldatEWReceiverTemperatureSensor(EldatEntity, SensorEntity):
     """Temperature sensor created from entity specification with EW-Receiver support."""
 
     def __init__(
@@ -1469,7 +1623,7 @@ class EldatConfiguredTemperatureSensor(EldatEntity, SensorEntity):
         self.schedule_update_ha_state()
 
 
-class EldatConfiguredHumiditySensor(EldatEntity, SensorEntity):
+class EldatEWReceiverHumiditySensor(EldatEntity, SensorEntity):
     """Humidity sensor created from entity specification with EW-Receiver support."""
 
     def __init__(
@@ -1880,7 +2034,7 @@ class EldatConfiguredHumiditySensor(EldatEntity, SensorEntity):
         asyncio.create_task(self.async_write_ha_state())
 
 
-class EldatConfiguredBatterySensor(EldatEntity, SensorEntity):
+class EldatEWReceiverBatterySensor(EldatEntity, SensorEntity):
     """Battery sensor created from entity specification with EW-Receiver support."""
 
     def __init__(
@@ -2110,7 +2264,7 @@ class EldatConfiguredBatterySensor(EldatEntity, SensorEntity):
             _LOGGER.error("❌ Error processing additional telegram data: %s", e)
 
 
-class EldatConfiguredRainSensor(EldatEntity, SensorEntity):
+class EldatEWReceiverRainSensor(EldatEntity, SensorEntity):
     """Rain sensor created from entity specification."""
 
     def __init__(
@@ -2154,7 +2308,7 @@ class EldatConfiguredRainSensor(EldatEntity, SensorEntity):
         self.schedule_update_ha_state()
 
 
-class EldatConfiguredWindSensor(EldatEntity, SensorEntity):
+class EldatEWReceiverWindSensor(EldatEntity, SensorEntity):
     """Wind sensor created from entity specification."""
 
     def __init__(

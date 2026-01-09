@@ -4,15 +4,13 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import logging
 
-from ....base import BaseReceiver, DeviceType, DeviceSubtype, OperatingMode
+from ....base import DeviceType, DeviceSubtype, OperatingMode
+from .base import EWneoBaseDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-# Constants for telegram processing
-TELEGRAM_EWNEO_STATE_CHANGE = [0x05, 0xF2]
 
-
-class RX11EWneoSwitch(BaseReceiver):
+class RX11EWneoSwitch(EWneoBaseDevice):
     """EWneo switch implementation for RX11 transceiver.
     
     Handles single-channel EWneo switch devices with bidirectional communication.
@@ -23,7 +21,6 @@ class RX11EWneoSwitch(BaseReceiver):
         super().__init__(*args, device_type=DeviceType.EWNEO_SWITCH, 
                         subtype=DeviceSubtype.SWITCH, **kwargs)
         self._switch_state = False
-        self._mode = 0  # 0=On/Off state, 1=Timer mode
         self._switch_counter = 0  # Counter for switching on (bits 31-27)
         self._switch_reason = 1  # 1=off, 2=on, 5=on due to logic function
         self._timer_info = {}  # Timer information when mode=1
@@ -38,58 +35,7 @@ class RX11EWneoSwitch(BaseReceiver):
         """Return supported entity types."""
         return ["switch"]
     
-    def process_telegram(self, telegram_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process incoming telegram for EWneo switch."""
-        info_type = telegram_data.get("info_type")
-        
-        if info_type in TELEGRAM_EWNEO_STATE_CHANGE:
-            self._handle_state_change(telegram_data)
-        
-        return self.get_switch_data()
-    
-    def _handle_state_change(self, telegram_data: Dict[str, Any]) -> None:
-        """Handle state change telegram with 5-byte EWB_RCV parsing."""
-        data = telegram_data.get("data", {})
-        
-        # Parse the 5-byte response: 1 byte mode + 4 bytes state
-        raw_data = data.get("raw_data")  # Should be 5 bytes
-        if raw_data and len(raw_data) >= 5:
-            self._parse_ewneo_response(raw_data)
-        else:
-            # Fallback to simple state extraction if raw data not available
-            new_state = data.get("switch_state", self._switch_state)
-            if isinstance(new_state, bool) and new_state != self._switch_state:
-                self._switch_state = new_state
-                _LOGGER.debug("EWneo switch %s: State changed to %s (fallback)", 
-                             self.serial_number[-6:], "ON" if new_state else "OFF")
-    
-    def _parse_ewneo_response(self, raw_data: bytes) -> None:
-        """Parse 5-byte EWB_RCV response for EWneo switch.
-        
-        Format: 1 byte mode + 4 bytes state
-        """
-        if len(raw_data) < 5:
-            _LOGGER.warning("EWneo switch %s: Invalid response length %d, expected 5 bytes", 
-                           self.serial_number[-6:], len(raw_data))
-            return
-            
-        # Parse mode (byte 0)
-        self._mode = raw_data[0]
-        
-        # Parse state (bytes 1-4, little-endian 32-bit word)
-        state_word = int.from_bytes(raw_data[1:5], byteorder='little')
-        
-        if self._mode == 0:
-            # Mode 0: On/off state
-            self._parse_onoff_state(state_word)
-        elif self._mode == 1:
-            # Mode 1: Timer state
-            self._parse_timer_state(state_word)
-        else:
-            _LOGGER.warning("EWneo switch %s: Unknown mode %d", 
-                           self.serial_number[-6:], self._mode)
-    
-    def _parse_onoff_state(self, state_word: int) -> None:
+    def _parse_mode0_state(self, state_word: int) -> None:
         """Parse on/off state word (mode 0)."""
         # Extract fields from 32-bit state word
         self._switch_counter = (state_word >> 27) & 0x1F  # Bits 31-27
@@ -105,6 +51,13 @@ class RX11EWneoSwitch(BaseReceiver):
             _LOGGER.info("EWneo switch %s: State changed to %s (reason: %s, counter: %d)", 
                         self.serial_number[-6:], "ON" if self._switch_state else "OFF", 
                         reason_text, self._switch_counter)
+    
+    def _parse_extended_mode_state(self, state_word: int) -> None:
+        """Parse extended mode states (Mode 1: Timer state)."""
+        if self._mode == 1:
+            self._parse_timer_state(state_word)
+        else:
+            super()._parse_extended_mode_state(state_word)
     
     def _parse_timer_state(self, state_word: int) -> None:
         """Parse timer state word (mode 1)."""
@@ -132,6 +85,10 @@ class RX11EWneoSwitch(BaseReceiver):
         _LOGGER.info("EWneo switch %s: Timer mode - remaining %ds of %ds (warning: %s)", 
                     self.serial_number[-6:], current_duration, start_duration, 
                     "active" if warning_active else "inactive")
+    
+    def _get_device_data(self) -> Dict[str, Any]:
+        """Get switch data for coordinator (implements abstract method)."""
+        return self.get_switch_data()
 
     def get_switch_data(self) -> Dict[str, Any]:
         """Get current switch data."""

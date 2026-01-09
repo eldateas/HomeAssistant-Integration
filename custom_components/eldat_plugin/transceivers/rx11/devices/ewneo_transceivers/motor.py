@@ -4,27 +4,28 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import logging
 
-from ....base import BaseReceiver, DeviceType, DeviceSubtype, OperatingMode
+from ....base import DeviceType, DeviceSubtype, OperatingMode
+from .base import EWneoBaseDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-# Constants for telegram processing
-TELEGRAM_EWNEO_STATE_CHANGE = [0x05, 0xF2]
 
-
-class RX11EWneoMotor(BaseReceiver):
+class RX11EWneoMotor(EWneoBaseDevice):
     """EWneo motor implementation for RX11 transceiver.
     
     Handles single-channel EWneo motor devices for covers and blinds.
+    Inherits common EWB state parsing from EWneoBaseDevice.
     """
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, device_info=None, **kwargs):
         """Initialize EWneo motor."""
         super().__init__(*args, device_type=DeviceType.EWNEO_MOTOR, 
                         subtype=DeviceSubtype.MOTOR, **kwargs)
+        # Note: self._mode is now in base class
+        
+        self._device_info = device_info or {}
         self._motor_state = "stop"
         self._position = None  # None=positionless mode, 0-100=position mode
-        self._mode = 0  # Should always be 0 for motor
         
         # Motor status information (bits 31-25)
         self._motor_status_code = 126  # Default to stopped
@@ -55,76 +56,28 @@ class RX11EWneoMotor(BaseReceiver):
         """Return supported entity types."""
         return ["cover"]
     
-    def process_telegram(self, telegram_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process incoming telegram for EWneo motor."""
-        info_type = telegram_data.get("info_type")
+    def _parse_mode0_state(self, state_word: int) -> None:
+        """Parse Mode 0 state for motor (implements abstract method).
         
-        if info_type in TELEGRAM_EWNEO_STATE_CHANGE:
-            self._handle_state_change(telegram_data)
-        
-        return self.get_motor_data()
-    
-    def _handle_state_change(self, telegram_data: Dict[str, Any]) -> None:
-        """Handle state change telegram with 5-byte EWB_RCV parsing for motor."""
-        data = telegram_data.get("data", {})
-        
-        # Parse the 5-byte response: 1 byte mode + 4 bytes state
-        raw_data = data.get("raw_data")  # Should be 5 bytes
-        if raw_data and len(raw_data) >= 5:
-            self._parse_ewneo_motor_response(raw_data)
-        else:
-            # Fallback to simple state extraction if raw data not available
-            command, position = self._parse_motor_command(data.get("motor_command"))
-            
-            if command and command != self._motor_state:
-                self._motor_state = command
-                if position is not None:
-                    self._position = position
-                
-                _LOGGER.debug("EWneo motor %s: Command=%s, Position=%d%% (fallback)", 
-                             self.serial_number[-6:], command, self._position)
-    
-    def _parse_motor_command(self, motor_value: Any) -> tuple[Optional[str], Optional[int]]:
-        """Parse motor command from various input formats."""
-        if motor_value is None:
-            return None, None
-        
-        if isinstance(motor_value, str):
-            command = motor_value.lower()
-            if command in ["up", "down", "stop"]:
-                return command, None
-        
-        if isinstance(motor_value, dict):
-            command = motor_value.get("command", "stop").lower()
-            position = motor_value.get("position")
-            if position is not None:
-                position = max(0, min(100, int(position)))
-            return command, position
-        
-        return None, None
-    
-    def _parse_ewneo_motor_response(self, raw_data: bytes) -> None:
-        """Parse 5-byte EWB_RCV response for EWneo motor.
-        
-        Format: 1 byte mode + 4 bytes motor state (big-endian)
-        Mode should always be 0 for motor.
+        Motor always uses Mode 0.
+        State word format (32-bit, big-endian):
+        - Bits 31-25: Motor status code (117-126)
+        - Bit 24: Reserved
+        - Bits 23-17: Current position (0-100 or 126=unknown)
+        - Bit 16: Recently tilted to horizontal
+        - Bits 15-9: Target position (0-100 or 126=unknown)
+        - Bit 8: Auto-tilt after positioning
+        - Bit 7: Runtime measured
+        - Bit 6: Tilt measured
+        - Bits 5-3: Reserved
+        - Bit 2: Terrace function active
+        - Bits 1-0: Stored position (0-3)
         """
-        if len(raw_data) < 5:
-            _LOGGER.warning("EWneo motor %s: Invalid response length %d, expected 5 bytes", 
-                           self.serial_number[-6:], len(raw_data))
-            return
-            
-        # Parse mode (byte 0) - should always be 0 for motor
-        self._mode = raw_data[0]
-        
-        if self._mode != 0:
-            _LOGGER.warning("EWneo motor %s: Unexpected mode %d, expected 0", 
-                           self.serial_number[-6:], self._mode)
-            return
-        
-        # Parse state (bytes 1-4, BIG-ENDIAN 32-bit word for motor)
-        state_word = int.from_bytes(raw_data[1:5], byteorder='big')
         self._parse_motor_state_word(state_word)
+    
+    def _get_device_data(self) -> Dict[str, Any]:
+        """Get motor data for coordinator (implements abstract method)."""
+        return self.get_motor_data()
     
     def _parse_motor_state_word(self, state_word: int) -> None:
         """Parse motor state word with comprehensive shutter/blind information."""
@@ -233,35 +186,21 @@ class RX11EWneoMotor(BaseReceiver):
             "state": self._motor_state,
             "position": self._position,
             "last_seen": self._last_seen,
-            "mode": self._mode,
-            "motor_status_code": self._motor_status_code,
             "motor_status": self._motor_status,
-            "current_position": self._current_position,
-            "target_position": self._target_position,
-            "recent_tilt": self._recent_tilt,
-            "auto_tilt": self._auto_tilt,
-            "runtime_measured": self._runtime_measured,
-            "tilt_measured": self._tilt_measured,
-            "terrace_function": self._terrace_function,
-            "stored_position": self._stored_position,
+            "control_mode": "position" if self._runtime_measured else "positionless",
+        }
+        
+        # Add status details
+        data.update({
             "is_calibrating": self._motor_status_code in [117, 118],
             "is_moving": self._motor_status_code in [120, 121, 122, 123, 124, 125],
-            "control_mode": "position" if self._runtime_measured else "positionless",
-            "supports_position_control": self._runtime_measured
-        }
+        })
         
         # Add position-specific data only if runtime measurement is done
         if self._runtime_measured:
             data.update({
                 "current_position_pct": 100 - self._current_position if self._current_position <= 100 else None,
                 "target_position_pct": 100 - self._target_position if self._target_position <= 100 else None,
-                "position_known": self._current_position <= 100
-            })
-        else:
-            data.update({
-                "current_position_pct": None,
-                "target_position_pct": None,
-                "position_known": False
             })
             
         return data
@@ -287,7 +226,6 @@ class RX11EWneoMotor(BaseReceiver):
                 
                 _LOGGER.info("Setting EWneo motor %s to %s (positionless mode)", 
                             self.serial_number[-6:], command)
-                # TODO: Implement actual command sending via RX11
                 self._motor_state = command
                 return True
             else:
@@ -300,7 +238,6 @@ class RX11EWneoMotor(BaseReceiver):
                 _LOGGER.info("Setting EWneo motor %s to %s%s", 
                             self.serial_number[-6:], command, 
                             f" (position: {position}%)" if position is not None else "")
-                # TODO: Implement actual command sending via RX11
                 self._motor_state = command
                 if position is not None:
                     self._position = position
@@ -318,16 +255,27 @@ class RX11EWneoMotor(BaseReceiver):
             tuple: (state, position) where position is None in positionless mode
         """
         return self._motor_state, self._position
+    
+    @property
+    def gateway_serial(self) -> Optional[str]:
+        """Get gateway serial number from device info."""
+        return self._device_info.get("gateway_serial")
 
 
 def create_rx11_ewneo_motor(
     serial_number: str,
-    device_info: Dict[str, Any],
+    name: str = None,
+    device_info: Dict[str, Any] = None,
     **kwargs
-) -> RX11EWneoMotor:
-    """Factory function to create EWneo motor."""
-    return RX11EWneoMotor(
-        serial_number=serial_number,
-        device_info=device_info,
-        **kwargs
-    )
+) -> Optional[RX11EWneoMotor]:
+    """Create RX11 EWneo motor instance."""
+    try:
+        return RX11EWneoMotor(
+            serial_number=serial_number,
+            name=name or f"EWneo Motor {serial_number[-6:]}",
+            device_info=device_info,
+            **kwargs
+        )
+    except Exception as e:
+        _LOGGER.error(f"Error creating EWneo motor: {e}")
+        return None

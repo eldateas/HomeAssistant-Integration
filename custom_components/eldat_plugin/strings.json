@@ -32,7 +32,7 @@
         }
       },
       "device_transmitter_config": {
-        "title": "EW-Sender konfigurieren",
+        "title": "EW-Transmitter konfigurieren",
         "description": "{instructions}",
         "data": {
           "button_count": "Tastenanzahl"
@@ -46,48 +46,48 @@
         }
       },
       "device_sensor_description": {
-        "title": "EW-Sensor Einlernen - Anweisungen",
+        "title": "EWneo-Sensoren Einlernen - Anweisungen",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_sensor_learn_actual": {
-        "title": "EW-Sensor Einlernen",
+        "title": "EWneo-Sensoren Einlernen",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_receiver": {
-        "title": "EW-Empfänger - Automatisches Laden",
+        "title": "EW-Receiver - Automatisches Laden",
         "description": "Seriennummer wird automatisch vom RX11 geladen...",
         "data": {
         }
       },
       "device_receiver_type": {
-        "title": "EW-Empfänger - Gerätetyp auswählen",
+        "title": "EW-Receiver - Gerätetyp auswählen",
         "description": "**Schritt 1: Geraetetyp waehlen**\\n\\n- Geraet: {device_name}\\n- Serial: {serial}\\n\\n{instruction}",
         "data": {
           "receiver_type": "Gerätetyp"
         }
       },
       "device_receiver_operating_mode": {
-        "title": "EW-Empfänger - Betriebsart auswählen",
+        "title": "EW-Receiver - Betriebsart auswählen",
         "description": "**Schritt 2: Betriebsart waehlen**\\n\\n- Typ: {device_type}\\n- Serial: {serial}\\n\\n{instruction}",
         "data": {
           "operating_mode": "Betriebsart"
         }
       },
       "device_receiver_confirm": {
-        "title": "EW-Empfänger - Bestätigung",
+        "title": "EW-Receiver - Bestätigung",
         "description": "Schritt 3: Lernmodus aktivieren und bestaetigen. Geraetedaten: Name {device_name}, Serial {serial}, Index {rx11_index}, Typ {receiver_kind}, Modus {operating_mode}. Funktionen: {button_summary}. Anleitung: {instruction}. Wichtig: Nach Bestaetigung wird Code A gesendet!",
         "data": {
           "action": "Aktion"
         }
       },
       "device_receiver_manual": {
-        "title": "EW-Empfänger - Manuelle Konfiguration", 
+        "title": "EW-Receiver - Manuelle Konfiguration", 
         "description": "Fallback: Manuelle Eingabe. {instruction}",
         "data": {
           "serial_number": "Seriennummer",
@@ -96,19 +96,19 @@
         }
       },
       "device_receiver_verify": {
-        "title": "EW-Empfänger bestätigen",
+        "title": "EW-Receiver bestätigen",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_ewneo_receiver": {
-        "title": "EWneo-Empfänger hinzufügen",
+        "title": "EWneo-Switch/Motor hinzufügen",
         "description": "{instructions}"
       },
       "device_ewneo_receiver_learn": {
-        "title": "EWneo-Empfänger vorbereiten",
-        "description": "🔧 **EWneo-Empfänger wird vorbereitet...**\n\n📋 **Vorbereitungsschritte:**\n• EWneo-Index wird ermittelt\n• Gateway-Serial wird geladen\n• Empfangsfilter wird gesetzt\n\n⚡ **Bitte warten Sie einen Moment...**"
+        "title": "EWneo-Switch/Motor vorbereiten",
+        "description": "🔧 **EWneo-Switch/Motor wird vorbereitet...**\n\n📋 **Vorbereitungsschritte:**\n• EWneo-Index wird ermittelt\n• Gateway-Serial wird geladen\n• Empfangsfilter wird gesetzt\n\n⚡ **Bitte warten Sie einen Moment...**"
       },
       "device_ewneo_receiver_learning_mode": {
         "title": "EWneo-Transceiver in Lernmodus versetzen",
@@ -118,11 +118,11 @@
         }
       },
       "device_ewneo_receiver_join": {
-        "title": "EWneo-Empfänger verbinden",
-        "description": "🔗 **Verbindung zum EWneo-Empfänger wird hergestellt...**\n\n📡 **EWB_JOIN_DEVICE wird ausgeführt...**\n\n⚡ **Bitte warten Sie auf die Bestätigung des Geräts...**"
+        "title": "EWneo-Switch/Motor verbinden",
+        "description": "🔗 **Verbindung zum EWneo-Switch/Motor wird hergestellt...**\n\n📡 **EWB_JOIN_DEVICE wird ausgeführt...**\n\n⚡ **Bitte warten Sie auf die Bestätigung des Geräts...**"
       },
       "device_ewneo_receiver_confirm": {
-        "title": "EWneo-Empfänger konfigurieren",
+        "title": "EWneo-Switch/Motor konfigurieren",
         "description": "{instructions}",
         "data": {
           "device_name": "Gerätename",
@@ -132,7 +132,7 @@
         }
       },
       "device_confirm": {
-        "title": "EW-Empfänger konfigurieren",
+        "title": "EW-Receiver konfigurieren",
         "description": "Konfiguration für {device_name} (Seriennummer: {serial_number})\n\nWählen Sie den Gerätetyp sowie die gewünschte Betriebsart aus. Versetzen Sie dann den Empfänger in den entsprechenden Lernmodus.",
         "data": {
           "receiver_kind": "Gerätetyp",
@@ -148,7 +148,7 @@
         }
       },
       "device_ewneo_receiver": {
-        "title": "EWneo-Empfänger konfigurieren",
+        "title": "EWneo-Switch/Motor konfigurieren",
         "description": "{instructions}",
         "data": {
           "entity_type": "Gerätetyp",
@@ -157,8 +157,8 @@
         }
       },
       "device_ewneo_receiver_learn": {
-        "title": "EWneo-Empfänger Vorbereitung",
-        "description": "⚡ **EWneo-Empfänger Vorbereitung**\n\n🔧 Automatische Einrichtung läuft...\n\n📡 Dieser Prozess wird:\n• Nächsten verfügbaren EWneo-Index finden\n• Gateway-Seriennummer laden\n• Empfangsfilter setzen\n\nBitte warten...",
+        "title": "EWneo-Switch/Motor Vorbereitung",
+        "description": "⚡ **EWneo-Switch/Motor Vorbereitung**\n\n🔧 Automatische Einrichtung läuft...\n\n📡 Dieser Prozess wird:\n• Nächsten verfügbaren EWneo-Index finden\n• Gateway-Seriennummer laden\n• Empfangsfilter setzen\n\nBitte warten...",
         "data": {}
       },
       "device_ewneo_receiver_learning_mode": {
@@ -174,7 +174,7 @@
         "data": {}
       },
       "device_ewneo_receiver_confirm": {
-        "title": "EWneo-Empfänger bestätigen",
+        "title": "EWneo-Switch/Motor bestätigen",
         "description": "{instructions}",
         "data": {
           "device_name": "Gerätename",
@@ -282,22 +282,22 @@
       "device_type_mismatch": "Erkannter Gerätetyp passt nicht zur Auswahl.",
       "measurement_without_learning": "Messtelegramm empfangen, aber Sensor muss zuerst angelernt werden. Drücken Sie die Lerntaste am Sensor und versuchen Sie es erneut.",
       "invalid_sensor_telegram": "Ungültiges Sensor-Telegramm empfangen. Bitte drücken Sie die Lerntaste am Sensor.",
-      "waiting_for_sensor": "Warten auf gültiges Sensor-Telegramm. Bitte drücken Sie die Lerntaste am Sensor (nicht am EWneo-Empfänger).",
+      "waiting_for_sensor": "Warten auf gültiges Sensor-Telegramm. Bitte drücken Sie die Lerntaste am EWneo-Sensoren (nicht am EWneo-Switch/Motor).",,
       "sensor_parse_error": "Fehler beim Verarbeiten des Sensor-Telegramms: {error}",
       "communication_failed": "Kommunikationstest mit EW-Receiver fehlgeschlagen. Prüfen Sie, ob der Receiver im Lernmodus ist.",
       "communication_error": "Fehler beim Kommunikationstest aufgetreten.",
       "user_cancelled": "Vom Benutzer abgebrochen.",
-      "no_receivers_found": "Keine EW-Empfänger gefunden. Überprüfen Sie die Verbindung zum RX11.",
+      "no_receivers_found": "Keine EW-Receiver gefunden. Überprüfen Sie die Verbindung zum RX11.",
       "scan_failed": "Fehler beim Scannen nach EW-Empfängern aufgetreten.",
       "invalid_selection": "Ungültige Auswahl getroffen.",
       "invalid_serial": "Ungültige Seriennummer.",
       "device_creation_error": "Fehler beim Erstellen des Geräts.",
-      "no_available_receivers": "Keine verfügbaren EW-Empfänger gefunden (alle Indizes belegt).",
-      "receiver_load_failed": "Fehler beim Laden des nächsten verfügbaren EW-Empfängers.",
+      "no_available_receivers": "Keine verfügbaren EW-Receiver gefunden (alle Indizes belegt).",,
+      "receiver_load_failed": "Fehler beim Laden des nächsten verfügbaren EW-Receiver.",
       "no_available_ewneo_index": "Kein verfügbarer EWneo-Index gefunden. Alle 100 EWneo-Indizes sind belegt.",
-      "ewneo_learning_failed": "EWneo-Empfänger Einlernen fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
-      "ewneo_join_failed": "Verbindung zum EWneo-Empfänger fehlgeschlagen. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
-      "no_preparation_data": "Vorbereitungsdaten für EWneo-Empfänger fehlen. Bitte starten Sie den Vorgang erneut.",
+      "ewneo_learning_failed": "EWneo-Switch/Motor Einlernen fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
+      "ewneo_join_failed": "Verbindung zum EWneo-Switch/Motor fehlgeschlagen. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
+      "no_preparation_data": "Vorbereitungsdaten für EWneo-Switch/Motor fehlen. Bitte starten Sie den Vorgang erneut.",
       "unknown": "Unbekannter Fehler aufgetreten"
     },
     "abort": {
@@ -316,8 +316,8 @@
       "rx11_not_connected": "RX11 Transceiver ist nicht verbunden",
       "no_available_ewneo_index": "Kein verfügbarer EWneo-Index gefunden. Alle Indizes (0-255) sind bereits verwendet.",
       "no_gateway_serial": "Konnte Gateway-Seriennummer nicht laden",
-      "ewneo_join_failed": "EWneo-Empfänger konnte nicht eingelernt werden. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
-      "ewneo_learning_failed": "EWneo-Empfänger Lernvorgang fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
+      "ewneo_join_failed": "EWneo-Switch/Motor konnte nicht eingelernt werden. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
+      "ewneo_learning_failed": "EWneo-Switch/Motor Lernvorgang fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
       "no_learned_device": "Kein eingerlerntes Gerät verfügbar",
       "no_preparation_data": "Keine Vorbereitungsdaten verfügbar - bitte starten Sie den Vorgang neu",
       "user_cancelled": "Benutzer hat den Vorgang abgebrochen"
@@ -366,17 +366,17 @@
       "back_to_main": "⬅️ Zurück zur Hauptauswahl"
     },
     "device_type": {
-      "device_type_ew_transmitter": "🎛️ EW-Sender (Taster/Fernbedienung)",
-      "device_type_ewneo_sensor": "🌡️ EWneo-Sensor (Temperatur/Helligkeit)",
-      "device_type_ew_receiver": "📥 EW-Empfänger (Schaltaktor)",
-      "device_type_ew_transmitter_full": "🎛️ EW-Sender / EW Transmitter",
-      "device_type_ew_receiver_full": "📥 EW-Empfänger / EW Receiver (Bidi)",
-      "device_type_ewneo_transceiver_full": "📡 EWneo-Sensor / EWneo Transceiver",
-      "device_type_ew_sensor_full": "🌡️ EW-Sensor / EW Sensor",
-      "device_type_ew_transmitter_options": "🎛️ EW-Sender / Transmitter",
-      "device_type_ew_receiver_options": "📥 EW-Empfänger / Receiver",
+      "device_type_ew_transmitter": "🏛️ EW-Transmitter (Taster/Fernbedienung)",
+      "device_type_ewneo_sensor": "🌡️ EWneo-Sensoren (Temperatur/Helligkeit)",
+      "device_type_ew_receiver": "📥 EW-Receiver (Schaltaktor)",
+      "device_type_ew_transmitter_full": "🏛️ EW-Transmitter / EW Transmitter",
+      "device_type_ew_receiver_full": "📥 EW-Receiver / EW Receiver (Bidi)",
+      "device_type_ewneo_transceiver_full": "📡 EWneo-Sensoren / EWneo Transceiver",
+      "device_type_ew_sensor_full": "🌡️ EWneo-Sensoren / EW Sensor",
+      "device_type_ew_transmitter_options": "🏛️ EW-Transmitter / Transmitter",
+      "device_type_ew_receiver_options": "📥 EW-Receiver / Receiver",
       "device_type_ewneo_transceiver_options": "📡 EWneo Transceiver",
-      "device_type_ew_sensor_options": "🌡️ EW Sensor"
+      "device_type_ew_sensor_options": "🌡️ EWneo-Sensoren"
     },
     "button_count": {
       "button_count_1": "🔘 Eintaster (1 Taste)",
@@ -433,7 +433,7 @@
     "connect_device_and_refresh": "Bitte verbinden Sie Ihr ELDAT USB-Gerät und klicken Sie auf 'Aktualisieren'",
     "warning_only_eldat_devices": "⚠️ Nur ELDAT-Geräte funktionieren mit dieser Integration!",
     "select_device_type_to_add": "Wählen Sie den Gerätetyp aus, den Sie hinzufügen möchten.",
-    "transmitter_config_instructions": "**✅ EW-Sender empfangen!**\n\n📡 **Gerät:** {device_name}\n🔑 **Seriennummer:** ...{serial_number}\n🔘 **Gedrückte Taste:** {button}\n\n**⚙️ Tastenkonfiguration**\nWählen Sie die Anzahl der Tasten, die Ihr Sender hat.\nFür jeden Taster wird automatisch eine Entität erstellt.",
+    "transmitter_config_instructions": "**✅ EW-Transmitter empfangen!**\n\n📡 **Gerät:** {device_name}\n🔑 **Seriennummer:** ...{serial_number}\n🔘 **Gedrückte Taste:** {button}\n\n**⚙️ Tastenkonfiguration**\nWählen Sie die Anzahl der Tasten, die Ihr Sender hat.\nFür jeden Taster wird automatisch eine Entität erstellt.",
     "sensor_verify_instructions": "**Telegramm empfangen!** ✅\n\n📡 **Empfangene Informationen:**\n• Gerät: {device_name}\n• Seriennummer: {serial_number}\n• {sensor_data}\n\nBestätigen Sie, um das Gerät anzulegen.",
     "receiver_verify_instructions": "**Telegramm empfangen!** ✅\n\n📡 **Empfangene Informationen:**\n• Gerät: {device_name}\n• Seriennummer: {serial_number}\n\nBestätigen Sie, um das Gerät anzulegen.",
     "select_device_type_hint": "Wählen Sie den Gerätetyp und drücken Sie Weiter.",
@@ -527,8 +527,8 @@
         "description": "**🔴 Drücken Sie JETZT eine beliebige Taste am EW-Transmitter**\n\n🔄 **Warten auf Funksignal...**\n\n⏳ Das System wartet bis zu 3 Minuten auf das Telegramm.\n\n📊 Nach erfolgreichem Empfang werden die Geräteinformationen angezeigt und Sie können das Gerät bestätigen.\n\n❌ Sie können den Vorgang jederzeit abbrechen."
       },
       "waiting_for_sensor_telegram": {
-        "title": "🌡️ EW-Sensor Einlernen", 
-        "description": "**🔴 Betätigen Sie JETZT die Lerntaste am EW-Sensor**\n\n🔄 **Warten auf Lerntelegramm...**\n\n⏳ Das System wartet bis zu 3 Minuten auf das Lerntelegramm.\n\n📊 Verfügbare Sensoren werden automatisch erkannt und angezeigt.\n\n📊 Nach erfolgreichem Empfang werden die Sensorinformationen angezeigt und Sie können den Sensor bestätigen.\n\n❌ Sie können den Vorgang jederzeit abbrechen."
+        "title": "🌡️ EWneo-Sensoren Einlernen", 
+        "description": "**🔴 Betätigen Sie JETZT die Lerntaste am EWneo-Sensoren**\n\n🔄 **Warten auf Lerntelegramm...**\n\n⏳ Das System wartet bis zu 3 Minuten auf das Lerntelegramm.\n\n📊 Verfügbare Sensoren werden automatisch erkannt und angezeigt.\n\n📊 Nach erfolgreichem Empfang werden die Sensorinformationen angezeigt und Sie können den Sensor bestätigen.\n\n❌ Sie können den Vorgang jederzeit abbrechen."
       }
     }
   },

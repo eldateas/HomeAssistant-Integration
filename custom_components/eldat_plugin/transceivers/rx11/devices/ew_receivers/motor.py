@@ -32,6 +32,8 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
                         subtype=DeviceSubtype.MOTOR, **kwargs)
         self._channel_states = {}
         self._positions = {}
+        # Store operating mode before setup
+        self._operating_mode = kwargs.get('operating_mode', 2)  # Default to 2-Tast
         self._setup_operating_mode(**kwargs)
     
     def _setup_operating_mode(self, **kwargs) -> None:
@@ -46,11 +48,17 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
     
     @property
     def supported_entity_types(self) -> List[str]:
-        """Return supported entity types. Motors support both cover and button."""
-        return ["cover", "button"]
+        """Return supported entity types. Motors support button entities."""
+        return ["button"]
     
     def get_entity_specs(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Generate entity specifications for this motor device."""
+        """Generate entity specifications for this motor device based on operating mode.
+        
+        Operating modes:
+        - Mode 1 (Eintastbedienung): 1 Toggle button
+        - Mode 2 (Zweitastbedienung): 2 buttons (Up, Down)
+        - Mode 3 (Dreitastbedienung): 3 buttons (Up, Stop, Down)
+        """
         specs = {
             "switch": [],
             "light": [],
@@ -60,15 +68,85 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             "button": []
         }
         
-        # Create cover entities for each channel
+        # Determine operating mode from device info or kwargs
+        operating_mode = getattr(self, '_operating_mode', 2)  # Default to 2-Tast
+        
+        # Create button entities for each channel based on operating mode
         for channel in range(self.channel_count):
-            specs["cover"].append(self._create_base_entity_spec(
-                "cover",
-                channel=channel,
-                name=f"{self.name} CH{channel+1}" if self.channel_count > 1 else self.name,
-                device_class="blind",
-                icon="mdi:blinds"
-            ))
+            channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
+            
+            if operating_mode == 1:
+                # Eintastbedienung: 1 Toggle button (A)
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} A - Toggle",
+                    "unique_id": f"{self.serial_number}_toggle_ch{channel}",
+                    "channel": channel,
+                    "button_code": 0,  # TM_BUTTON_A
+                    "action": "toggle",
+                    "icon": "mdi:gesture-tap-button",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "motor"
+                })
+            elif operating_mode == 2:
+                # Zweitastbedienung: A - Auf, B - Ab
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} A - Auf",
+                    "unique_id": f"{self.serial_number}_up_ch{channel}",
+                    "channel": channel,
+                    "button_code": 0,  # TM_BUTTON_A
+                    "action": "up",
+                    "icon": "mdi:arrow-up-circle",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "motor"
+                })
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} B - Ab",
+                    "unique_id": f"{self.serial_number}_down_ch{channel}",
+                    "channel": channel,
+                    "button_code": 1,  # TM_BUTTON_B
+                    "action": "down",
+                    "icon": "mdi:arrow-down-circle",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "motor"
+                })
+            elif operating_mode == 3:
+                # Dreitastbedienung: A - Auf, B - Ab, C - Stopp
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} A - Auf",
+                    "unique_id": f"{self.serial_number}_up_ch{channel}",
+                    "channel": channel,
+                    "button_code": 0,  # TM_BUTTON_A
+                    "action": "up",
+                    "icon": "mdi:arrow-up-circle",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "motor"
+                })
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} B - Ab",
+                    "unique_id": f"{self.serial_number}_down_ch{channel}",
+                    "channel": channel,
+                    "button_code": 1,  # TM_BUTTON_B
+                    "action": "down",
+                    "icon": "mdi:arrow-down-circle",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "motor"
+                })
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} C - Stopp",
+                    "unique_id": f"{self.serial_number}_stop_ch{channel}",
+                    "channel": channel,
+                    "button_code": 2,  # TM_BUTTON_C
+                    "action": "stop",
+                    "icon": "mdi:stop-circle-outline",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "motor"
+                })
         
         return specs
     

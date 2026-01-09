@@ -14,40 +14,31 @@ receiver_imports = {}
 transmitter_imports = {}
 ewneo_imports = {}
 
-# EWneo Sensor classes only (EW has no sensors)
+# EWneo Sensor class (universal, combinable sensor types)
 try:
-    from .ewneo_sensors.temperature import create_rx11_temperature_sensor
-    sensor_imports['temperature'] = create_rx11_temperature_sensor
+    from .ewneo_sensors.ewneo_sensor import (
+        create_ewneo_sensor,
+        create_temperature_sensor,
+        create_humidity_sensor,
+        create_wind_sensor,
+        create_rain_sensor,
+        NEO_TYPE_SENSOR_MAP,
+    )
+    # Use the universal sensor creator
+    sensor_imports['ewneo'] = create_ewneo_sensor
+    # Keep individual creators for specific sensor types
+    sensor_imports['temperature'] = create_temperature_sensor
+    sensor_imports['humidity'] = create_humidity_sensor
+    sensor_imports['combined'] = create_ewneo_sensor  # Use universal for combined types
+    sensor_imports['wind'] = create_wind_sensor
+    sensor_imports['rain'] = create_rain_sensor
 except ImportError as e:
-    _LOGGER.warning(f"Could not import temperature sensor: {e}")
+    _LOGGER.warning(f"Could not import EWneo sensor: {e}")
+    sensor_imports['ewneo'] = lambda *args, **kwargs: None
     sensor_imports['temperature'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_sensors.humidity import create_rx11_humidity_sensor
-    sensor_imports['humidity'] = create_rx11_humidity_sensor
-except ImportError as e:
-    _LOGGER.warning(f"Could not import humidity sensor: {e}")
     sensor_imports['humidity'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_sensors.combined import create_rx11_combined_sensor
-    sensor_imports['combined'] = create_rx11_combined_sensor
-except ImportError as e:
-    _LOGGER.warning(f"Could not import combined sensor: {e}")
     sensor_imports['combined'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_sensors.wind import create_rx11_wind_sensor
-    sensor_imports['wind'] = create_rx11_wind_sensor
-except ImportError as e:
-    _LOGGER.warning(f"Could not import wind sensor: {e}")
     sensor_imports['wind'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_sensors.rain import create_rx11_rain_sensor
-    sensor_imports['rain'] = create_rx11_rain_sensor
-except ImportError as e:
-    _LOGGER.warning(f"Could not import rain sensor: {e}")
     sensor_imports['rain'] = lambda *args, **kwargs: None
 
 # Receiver classes
@@ -171,16 +162,17 @@ class RX11DeviceFactory:
         0x11: DeviceType.EW_TRANSMITTER,
         0x13: DeviceType.EWNEO_SENSOR,  # Only EWneo has sensors
         
-        # EasyWave Bidi (EWB) Geräte - Numeric IDs
-        0x03: DeviceType.EWNEO_BIDI_TRANSMITTER,
-        0x04: DeviceType.EWNEO_SWITCH,
-        0x05: DeviceType.EWNEO_DUAL_SWITCH,
-        0x06: DeviceType.EWNEO_QUAD_SWITCH,
-        0x07: DeviceType.EWNEO_DIMMER,
-        0x08: DeviceType.EWNEO_MOTOR,
-        0x09: DeviceType.EWNEO_DUAL_MOTOR,
-        0x0A: DeviceType.EWNEO_QUAD_MOTOR,
-        0x0B: DeviceType.EWNEO_TRANSCEIVER,
+        # EasyWave Bidi (EWB) Geräte - Numeric IDs (from rx_module.py DeviceType)
+        0x01: DeviceType.EWNEO_BIDI_TRANSMITTER,  # EWB_DT_BIDI_TR
+        0x03: DeviceType.EWNEO_SWITCH,            # EWB_DT_SWITCH
+        0x04: DeviceType.EWNEO_DIMMER,            # EWB_DT_DIMMER
+        0x05: DeviceType.EWNEO_MOTOR,             # EWB_DT_MOTOR
+        0x06: DeviceType.EWNEO_DUAL_SWITCH,       # EWB_DT_DUAL_SWITCH
+        0x07: DeviceType.EWNEO_QUAD_SWITCH,       # EWB_DT_QUAD_SWITCH
+        0x08: DeviceType.EWNEO_DUAL_MOTOR,        # EWB_DT_DUAL_MOTOR
+        0x09: DeviceType.EWNEO_QUAD_MOTOR,        # EWB_DT_QUAD_MOTOR
+        0x0A: DeviceType.EWNEO_TRANSCEIVER,       # EWB_DT_PART_SWITCH
+        0x0B: DeviceType.EWNEO_TRANSCEIVER,       # EWB_DT_PART_MOTOR
         
         # String-basierte Mappings für Kompatibilität
         "ew_receiver": DeviceType.EW_RECEIVER,
@@ -216,8 +208,9 @@ class RX11DeviceFactory:
     }
     
     # Factory function mappings for different device types and subtypes
+    # All EWneo sensors now use the universal EWneoSensor class
     SENSOR_FACTORY_FUNCTIONS = {
-        # Only EWneo Sensors exist
+        # Universal EWneo Sensor (all subtypes use the same class)
         (DeviceType.EWNEO_SENSOR, DeviceSubtype.TEMPERATURE): sensor_imports.get('temperature'),
         (DeviceType.EWNEO_SENSOR, DeviceSubtype.HUMIDITY): sensor_imports.get('humidity'),
         (DeviceType.EWNEO_SENSOR, DeviceSubtype.UNKNOWN): sensor_imports.get('combined'),
@@ -267,12 +260,19 @@ class RX11DeviceFactory:
     ) -> Optional[BaseDevice]:
         """Create a device instance based on device information and telegram data."""
         try:
+            _LOGGER.info("🏭 Creating device for %s: device_type=%s, type=%s", 
+                        serial_number[-6:], 
+                        device_info.get("device_type"), 
+                        device_info.get("type"))
+            
             # Merge telegram data with device info for better type detection
             combined_info = dict(device_info)
             if telegram_data:
                 combined_info.update(telegram_data)
             
             device_type = cls._determine_device_type(combined_info)
+            _LOGGER.info("🏭 Determined device_type: %s for %s", device_type, serial_number[-6:])
+            
             if device_type == DeviceType.UNKNOWN:
                 _LOGGER.warning("Unknown device type for device %s: device_info=%s, telegram_data=%s", 
                               serial_number[-6:], device_info, telegram_data)
@@ -282,9 +282,32 @@ class RX11DeviceFactory:
             factory_func = None
             
             if device_type == DeviceType.EWNEO_SENSOR:
-                # Handle sensors
-                subtype = cls._determine_sensor_subtype(combined_info, device_type)
-                factory_func = cls.SENSOR_FACTORY_FUNCTIONS.get((device_type, subtype))
+                # Handle EWneo sensors - determine sensor types from neo_type or device_info
+                sensor_types = cls._determine_sensor_types(combined_info)
+                _LOGGER.info("🏭 EWneo sensor types: %s for %s", sensor_types, serial_number[-6:])
+                
+                # Add sensor_types to device_info for the factory function
+                if sensor_types:
+                    device_info['sensor_types'] = sensor_types
+                    # If multiple sensor types, use combined/UNKNOWN subtype
+                    if len(sensor_types) > 1:
+                        subtype = DeviceSubtype.UNKNOWN
+                    else:
+                        # Single sensor type - determine specific subtype
+                        subtype = cls._sensor_type_to_subtype(sensor_types[0])
+                else:
+                    # Fallback to legacy behavior
+                    subtype = cls._determine_sensor_subtype(combined_info, device_type)
+                
+                # For new universal sensor, prefer the ewneo factory if available
+                factory_func = sensor_imports.get('ewneo')
+                _LOGGER.info("🏭 Using factory function: %s for %s", 
+                           factory_func.__name__ if factory_func else "None", 
+                           serial_number[-6:])
+                
+                if not factory_func:
+                    # Fallback to subtype-specific factory
+                    factory_func = cls.SENSOR_FACTORY_FUNCTIONS.get((device_type, subtype))
                 
             elif device_type in [DeviceType.EW_RECEIVER, DeviceType.EWNEO_RECEIVER]:
                 # Handle receivers - EWneo receivers use the same individual classes as EW
@@ -309,6 +332,9 @@ class RX11DeviceFactory:
                 return None
             
             # Create device using the factory function
+            _LOGGER.info("🏭 Calling factory function for %s with sensor_types=%s", 
+                        serial_number[-6:], device_info.get('sensor_types'))
+            
             device = factory_func(
                 serial_number,
                 device_info,
@@ -316,8 +342,10 @@ class RX11DeviceFactory:
             )
             
             if device:
-                _LOGGER.debug("Successfully created %s device %s", 
+                _LOGGER.info("✅ Successfully created %s device %s", 
                             device.__class__.__name__, serial_number[-6:])
+            else:
+                _LOGGER.warning("⚠️ Factory function returned None for %s", serial_number[-6:])
             
             return device
         
@@ -384,6 +412,62 @@ class RX11DeviceFactory:
             return DeviceType.EW_TRANSMITTER if button_count <= 4 else DeviceType.EW_RECEIVER
         
         return DeviceType.UNKNOWN
+    
+    @classmethod
+    def _sensor_type_to_subtype(cls, sensor_type: str) -> DeviceSubtype:
+        """Convert sensor type string to DeviceSubtype enum.
+        
+        Args:
+            sensor_type: Sensor type name (e.g., 'temperature', 'humidity')
+            
+        Returns:
+            Corresponding DeviceSubtype enum value
+        """
+        mapping = {
+            'temperature': DeviceSubtype.TEMPERATURE,
+            'humidity': DeviceSubtype.HUMIDITY,
+            'wind_speed': DeviceSubtype.WIND_SPEED,
+            'rain': DeviceSubtype.RAIN,
+        }
+        return mapping.get(sensor_type, DeviceSubtype.UNKNOWN)
+    
+    @classmethod
+    def _determine_sensor_types(cls, device_info: Dict[str, Any]) -> List[str]:
+        """Determine list of sensor types from device information.
+        
+        This is used for the new universal EWneoSensor class that can handle
+        multiple sensor types in a single device instance.
+        
+        Args:
+            device_info: Device information dictionary
+            
+        Returns:
+            List of sensor type strings (e.g., ['temperature', 'humidity'])
+        """
+        # Check if sensor_types already defined
+        if 'sensor_types' in device_info:
+            return device_info['sensor_types']
+        
+        # Check for neo_types list (from telegram data or learning)
+        neo_types = device_info.get('neo_types', [])
+        if neo_types:
+            sensor_types = []
+            for neo_type in neo_types:
+                sensor_type = NEO_TYPE_SENSOR_MAP.get(neo_type)
+                if sensor_type and sensor_type not in sensor_types:
+                    sensor_types.append(sensor_type)
+            if sensor_types:
+                return sensor_types
+        
+        # Check for single neo_type
+        neo_type = device_info.get('neo_type')
+        if neo_type:
+            sensor_type = NEO_TYPE_SENSOR_MAP.get(neo_type)
+            if sensor_type:
+                return [sensor_type]
+        
+        # No explicit sensor types found - will fall back to legacy detection
+        return []
     
     @classmethod
     def _determine_sensor_subtype(cls, device_info: Dict[str, Any], device_type: DeviceType) -> DeviceSubtype:

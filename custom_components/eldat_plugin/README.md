@@ -6,6 +6,18 @@
 
 Eine vollständige Home Assistant Integration für ELDAT EasyWave Geräte über RX11-Transceiver mit umfassender EWneo-Unterstützung.
 
+## ⚠️ Update-Sicherheit
+
+**Ihre eingelernten Geräte sind bei Updates sicher!** 
+
+Das neue DeviceManager-System (ab v2.0) garantiert:
+- ✅ **Persistente Speicherung** außerhalb des Plugin-Codes
+- ✅ **Automatische Backups** bei jedem Speichern
+- ✅ **Versionsmigration** von alten Formaten
+- ✅ **Keine Datenverluste** bei Plugin-Updates
+
+→ Siehe [UPGRADE_SAFETY.md](UPGRADE_SAFETY.md) für Details
+
 ## Installation
 
 ### HACS (empfohlen)

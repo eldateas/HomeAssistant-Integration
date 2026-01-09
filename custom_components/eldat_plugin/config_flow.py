@@ -290,7 +290,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "ew_transmitter": "🎛️ EW-Transmitter (Handsender/Fernbedienung)",
             "ew_sensor": "🌡️ EWneo-Sensor (Temperatur/Feuchtigkeit/Wetter)", 
             "ew_receiver": "📥 EW-Empfänger (konfigurieren ohne Lernen)",
-            "ewneo_receiver": "📥 EWneo-Empfänger (Neo-Schaltaktor)",
+            "ewneo_receiver": "📥 EWneo-Switch/Motor (Neo-Schaltaktor)",
         }
 
         data_schema = vol.Schema({
@@ -479,11 +479,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
             description_placeholders={
                 "instructions": (
-                    "🌡️ **EWneo-Sensor Einlernen**\n\n"
-                    "**📋 Gerätetyp:** EWneo-Sensor (Temperatur/Feuchtigkeit/Wetter)\n\n"
+                    "🌡️ **EWneo-Sensoren Einlernen**\n\n"
+                    "**📋 Gerätetyp:** EWneo-Sensoren (Temperatur/Feuchtigkeit/Wetter)\n\n"
                     "**📡 Lernvorgang:**\n\n"
                     "**1.** Klicken Sie auf 'Einlernen starten'\n"
-                    "**2.** Betätigen Sie anschließend die Lerntaste am EWneo-Sensor\n"
+                    "**2.** Betätigen Sie anschließend die Lerntaste am EWneo-Sensoren\n"
                     "**3.** Das System wartet bis zu 3 Minuten auf das Lerntelegramm\n"
                     "**4.** Nach Empfang werden die Sensorinformationen angezeigt\n"
                     "**5.** Bestätigen Sie die Erstellung des Sensors\n\n"
@@ -494,10 +494,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "• 💨 Wind-Sensor (falls verfügbar)\n"
                     "• 🔋 Batterie-Status wird überwacht\n\n"
                     "⚡ **Was wird erstellt:**\n"
-                    "• Ein EWneo-Sensor Gerät\n"
+                    "• Ein EWneo-Sensoren Gerät\n"
                     "• Automatische Sensor-Entitäten für alle erkannten Messgrößen\n"
                     "• Regelmäßige Aktualisierung bei empfangenen Telegrammen\n\n"
-                    "🔴 **Wichtig:** Halten Sie den EWneo-Sensor mit der Lerntaste bereit!"
+                    "🔴 **Wichtig:** Halten Sie den EWneo-Sensoren mit der Lerntaste bereit!"
                 )
             }
         )
@@ -524,7 +524,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _LOGGER.info("=== SENSOR LEARNING START ===")
 
         # Wait for sensor telegram using the central learning helper
-        _LOGGER.info("Waiting for EWneo sensor LEARN telegram...")
+        _LOGGER.info("Waiting for EWneo-Sensoren LEARN telegram...")
         try:
             def _match_sensor(dev: dict) -> Optional[dict]:
                 # Only accept EWneo sensor LEARN telegrams (not measurement telegrams)
@@ -537,10 +537,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 is_learn = dev.get("is_learn_telegram", False)
                 
                 if is_sensor and is_learn and not dev.get("added_manually", False):
-                    _LOGGER.info("✅ EWneo Sensor Learn-Telegramm erkannt: %s", dev.get("serial_number", "?")[-6:])
+                    _LOGGER.info("✅ EWneo-Sensoren Learn-Telegramm erkannt: %s", dev.get("serial_number", "?  ")[-6:])
                     return dev
                 elif is_sensor and not is_learn:
-                    _LOGGER.info("⏭️ EWneo Sensor Messwert-Telegramm ignoriert (nur Lerntelegramme werden akzeptiert): %s", dev.get("serial_number", "?")[-6:])
+                    _LOGGER.info("⏭️ EWneo-Sensoren Messwert-Telegramm ignoriert (nur Lerntelegramme werden akzeptiert): %s", dev.get("serial_number", "?")[-6:])
                 return None
 
             # Start setup mode for device registration
@@ -578,15 +578,23 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 received_serial = learned.get("serial_number", learned.get("serial", "?"))
                 _LOGGER.info("📡 EW-Sensor empfangen - Seriennummer: %s", received_serial)
                 
+                # Convert sensor capabilities to sensor_types for new EWneoSensor class
+                sensor_types = []
+                for sensor_cap in detected_sensors:
+                    # Skip battery - it's handled separately
+                    if sensor_cap != "battery":
+                        sensor_types.append(sensor_cap)
+                
                 self._learned_device = {
-                    "name": learned.get("name", f"EW-Sensor {received_serial[-6:] if received_serial != '?' else '?'}"),
+                    "name": learned.get("name", f"EWneo-Sensoren {received_serial[-6:] if received_serial != '?' else '?'}"),
                     "serial_number": received_serial,
-                    "type": "ew_sensor",
-                    "device_type": "ew_sensor",
+                    "type": "ewneo_sensor",  # WICHTIG: ewneo_sensor statt ew_sensor
+                    "device_type": "ewneo_sensor",
                     "is_learn_telegram": True,
                     "available_sensors": list(detected_sensors),
                     "measurement_types": measurement_types,
                     "sensor_capabilities": sensor_capabilities,
+                    "sensor_types": sensor_types,  # NEU: Für neue EWneoSensor Klasse
                     "has_battery": True,
                     "battery_level": learned.get("battery_level", 100),
                     "last_telegram": {
@@ -596,7 +604,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 }
                 
-                _LOGGER.info("EW-Sensor configured with sensors: %s", list(detected_sensors))
+                _LOGGER.info("EWneo-Sensoren configured with sensor_types: %s", sensor_types)
                 # Direkt speichern ohne Bestätigung
                 return await self.async_step_device_save()
             
@@ -619,30 +627,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if coordinator and coordinator.transceiver:
                 _LOGGER.info("🔍 Getting next available EW-Receiver from RX11...")
                 
-                # Enhanced debugging for transceiver state
-                if hasattr(coordinator.transceiver, '_rx11_wrapper'):
-                    wrapper = coordinator.transceiver._rx11_wrapper
-                    _LOGGER.info("🔧 RX11 Wrapper state - Connected: %s, Library loaded: %s", 
-                                getattr(wrapper, '_connected', 'Unknown'), 
-                                bool(getattr(wrapper, '_lib', None)))
-                    
-                    # Test the C library directly
-                    if hasattr(wrapper, '_lib') and wrapper._lib:
-                        _LOGGER.info("📚 C Library loaded successfully, testing first EW serial call...")
-                        try:
-                            # Test index 0 directly
-                            test_serial = await wrapper.rx11_ew_receiver_get_serial_by_index(0)
-                            _LOGGER.info("🧪 Test EW serial at index 0: %s", test_serial or "None")
-                        except Exception as e:
-                            _LOGGER.error("🚨 Test EW serial call failed: %s", e)
-                    else:
-                        _LOGGER.error("❌ C Library not available for testing")
-                else:
-                    _LOGGER.error("❌ No RX11 wrapper found in transceiver")
-                
                 # Get next available receiver index from persistent tracking
                 try:
-                    index = coordinator.get_next_free_ew_receiver_index()
+                    index = await coordinator.get_next_free_ew_receiver_index()
                     _LOGGER.info("✅ Got next free EW-Receiver index from persistent tracking: %d", index)
                 except ValueError:
                     return self.async_abort(reason="no_available_receivers")
@@ -707,11 +694,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "device_name": name,
                 "serial": serial[-12:] if serial else "Unbekannt",
                 "instructions": (
-                    f"📥 **EW-Empfänger Konfiguration - Schritt 1/3**\n\n"
+                    f"📥 **EW-Receiver Konfiguration - Schritt 1/3**\n\n"
                     f"**📋 Geräteinformationen:**\n"
                     f"• Gerät: {name}\n"
                     f"• Seriennummer: {serial[-12:] if serial else 'Unbekannt'}\n"
-                    f"• Typ: EW-Empfänger (Schaltaktor)\n\n"
+                    f"• Typ: EW-Receiver (Schaltaktor)\n\n"
                     f"**🎛️ Gerätetyp auswählen:**\n\n"
                     f"**🔌 Schalter:** Standard Ein/Aus-Schaltung für Beleuchtung, Steckdosen, etc.\n"
                     f"**🏠 Motor/Rollo:** Steuerung für Rollläden, Jalousien, Markisen mit Auf/Ab/Stopp\n"
@@ -789,7 +776,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "device_name": self._device_config.get("name", "EW-Receiver"),
                 "receiver_kind": type_desc,
                 "instructions": (
-                    f"📥 **EW-Empfänger Konfiguration - Schritt 2/3**\n\n"
+                    f"📥 **EW-Receiver Konfiguration - Schritt 2/3**\n\n"
                     f"**📋 Gewählter Gerätetyp:** {type_desc}\n\n"
                     f"**🎛️ Betriebsart auswählen:**\n\n"
                     f"{mode_desc_text}\n\n"
@@ -937,7 +924,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "button_summary": button_summary,
                 "learn_instructions": learn_instructions,
                 "instructions": (
-                    f"📥 **EW-Empfänger Konfiguration - Schritt 3/3**\n\n"
+                    f"📥 **EW-Receiver Konfiguration - Schritt 3/3**\n\n"
                     f"**📋 Konfiguration:**\n"
                     f"• Gerät: {name}\n"
                     f"• Seriennummer: {serial[-12:] if serial else 'Unbekannt'}\n"
@@ -982,7 +969,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Step 1: Get next available EWneo index from coordinator's persistent tracking
             _LOGGER.info("🔍 Getting next available EWneo index...")
             try:
-                ewneo_index = coordinator.get_next_free_ewb_index()
+                ewneo_index = await coordinator.get_next_free_ewb_index()
             except ValueError:
                 # All 256 indices are used
                 return self.async_abort(reason="no_available_ewneo_index")
@@ -1441,454 +1428,61 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _determine_device_entities(self) -> dict:
-        """Determine which entities to create based on device type and properties."""
+        """DEPRECATED: Determine which entities to create based on device type and properties.
+        
+        This method now delegates to entity_specs.create_entity_specs_for_device()
+        for consistency across the codebase.
+        """
+        from .entity_specs import create_entity_specs_for_device
+        
         # Use device data from either learned device or config
         device_data = self._learned_device if self._learned_device else getattr(self, '_device_config', {})
         device_type = device_data.get("device_type", device_data.get("type", "unknown"))
-        entity_info = {"entities": [], "platforms": set()}
+        serial_number = device_data.get("serial_number", "unknown")
         
-        _LOGGER.info("🔍 _determine_device_entities: device_type='%s', device_data keys: %s", 
-                    device_type, list(device_data.keys()))
+        _LOGGER.info("🔍 _determine_device_entities: device_type='%s', delegating to entity_specs", device_type)
+        
+        # Get entity specs from centralized function
+        entity_specs = create_entity_specs_for_device(serial_number, device_data)
+        
+        # Convert entity_specs format (dict of lists) to old format (single list + platforms)
+        all_entities = []
+        all_platforms = set()
+        
+        for platform, entities in entity_specs.items():
+            if entities:
+                all_platforms.add(platform)
+                all_entities.extend(entities)
+        
+        # Determine device_class and category from device type
+        device_class = "unknown"
+        category = "config"
         
         if device_type == "ew_transmitter":
-            # EW-Transmitter: Create binary sensors for button press detection
-            button_count = device_data.get("button_count", device_data.get("channels", 4))
-            entities = []
-            
-            # Create binary sensor entity for each button
-            for i in range(button_count):
-                button_letter = chr(ord("A") + i)
-                entities.append({
-                    "type": "binary_sensor",
-                    "channel": i,
-                    "button": i,
-                    "name": f"Button {button_letter}",
-                    "unique_id": f"{device_data.get('serial_number')}_btn{i}",
-                    "device_class": "remote_control",
-                    "icon": "mdi:gesture-tap-button",
-                    "button_name": button_letter
-                })
-            
-            # Add battery sensor
-            entities.append({
-                "type": "sensor",
-                "sensor_type": "battery",
-                "name": "Battery",
-                "unique_id": f"{device_data.get('serial_number')}_battery",
-                "device_class": "battery",
-                "unit_of_measurement": "%",
-                "icon": "mdi:battery",
-                "state_class": "measurement"
-            })
-            
-            # Add remove button for EW-Transmitter
-            entities.append({
-                "type": "button",
-                "button_type": "remove",
-                "action": "remove_device",  # Required for button.py to recognize it
-                "name": "Remove Device",
-                "unique_id": f"{device_data.get('serial_number')}_remove",
-                "device_class": "restart",
-                "icon": "mdi:delete",
-                "entity_category": "config"
-            })
-            
-            entity_info.update({
-                "entities": entities,
-                "platforms": {"binary_sensor", "sensor", "button"},  # Multiple platforms
-                "device_class": "remote_control", 
-                "category": "remote",
-                "button_count": button_count
-            })
-        elif device_type == "ew_sensor":
-            # EW-Sensor: Create sensor entities for temperature, humidity, etc.
-            available_sensors = device_data.get("available_sensors", ["temperature", "humidity"])
-            entities = []
-            
-            # Create sensor entities based on available sensor types
-            for sensor_type in available_sensors:
-                if sensor_type == "temperature":
-                    entities.append({
-                        "type": "sensor",
-                        "sensor_type": "temperature",
-                        "name": "Temperature",
-                        "unique_id": f"{device_data.get('serial_number')}_temperature",
-                        "device_class": "temperature",
-                        "unit_of_measurement": "°C",
-                        "icon": "mdi:thermometer",
-                        "state_class": "measurement"
-                    })
-                elif sensor_type == "humidity":
-                    entities.append({
-                        "type": "sensor",
-                        "sensor_type": "humidity",
-                        "name": "Humidity",
-                        "unique_id": f"{device_data.get('serial_number')}_humidity",
-                        "device_class": "humidity",
-                        "unit_of_measurement": "%",
-                        "icon": "mdi:water-percent",
-                        "state_class": "measurement"
-                    })
-                elif sensor_type == "battery":
-                    entities.append({
-                        "type": "sensor",
-                        "sensor_type": "battery",
-                        "name": "Battery",
-                        "unique_id": f"{device_data.get('serial_number')}_battery",
-                        "device_class": "battery",
-                        "unit_of_measurement": "%",
-                        "icon": "mdi:battery",
-                        "state_class": "measurement"
-                    })
-            
-            # Always add battery sensor if not already added
-            has_battery_sensor = any(e.get("sensor_type") == "battery" for e in entities)
-            if not has_battery_sensor:
-                entities.append({
-                    "type": "sensor",
-                    "sensor_type": "battery",
-                    "name": "Battery",
-                    "unique_id": f"{device_data.get('serial_number')}_battery",
-                    "device_class": "battery",
-                    "unit_of_measurement": "%",
-                    "icon": "mdi:battery",
-                    "state_class": "measurement"
-                })
-            
-            # Add remove button for EWneo-Sensor
-            entities.append({
-                "type": "button",
-                "button_type": "remove",
-                "action": "remove_device",  # Required for button.py to recognize it
-                "name": "Remove Device",
-                "unique_id": f"{device_data.get('serial_number')}_remove",
-                "device_class": "restart",
-                "icon": "mdi:delete",
-                "entity_category": "config"
-            })
-            
-            entity_info.update({
-                "entities": entities,
-                "platforms": {"sensor", "button"},
-                "device_class": "sensor",
-                "category": "sensor",
-                "available_sensors": available_sensors
-            })
+            device_class = "remote_control"
+            category = "remote"
+        elif device_type in ["ew_sensor", "ewneo_sensor"]:
+            device_class = "sensor"
+            category = "sensor"
         elif device_type == "ew_receiver" or device_type == "EW-Receiver":
-            # EW-Receiver: Erstelle zustandslose Button-Entitäten basierend auf zweistufigem Dialog
-            entity_type = device_data.get("entity_type", "switch")
-            operating_mode = device_data.get("operating_mode", 1)
-            receiver_kind = device_data.get("receiver_kind", entity_type)
-            device_name = device_data.get('name', 'EW-Receiver')
-            
-            # Generate unique entity ID based on timestamp and config
-            import time
-            timestamp = int(time.time())
-            serial = device_data.get('serial_number', f'MANUAL_{timestamp}')
-            
-            # Erstelle zustandslose Button-Entitäten basierend auf Betriebsart und Empfängertyp
-            entities = []
-            
-            # Standardisiere receiver_kind basierend auf entity_type falls nötig
-            if receiver_kind == "light":
-                receiver_kind = "switch"  # Light wird immer als Switch behandelt
-            
-            if receiver_kind == "switch":
-                if operating_mode == 1:  # Eintastbedienung - Toggle-Button mit LongPress
-                    entities.append({
-                        "type": "button",
-                        "channel": 1,
-                        "operating_mode": 1,
-                        "receiver_kind": "switch",
-                        "unique_id": f"{serial}_button_switch_toggle_longpress",
-                        "name": "A (Toggle)",
-                        "button_config": {"type": "toggle", "supports_long_press": True, "stateless": True},
-                        "device_class": "switch"
-                    })
-                elif operating_mode == 2:  # Zweitastbedienung - An + Aus-Button mit LongPress
-                    entities.extend([
-                        {
-                            "type": "button",
-                            "channel": 1,
-                            "operating_mode": 2,
-                            "receiver_kind": "switch",
-                            "unique_id": f"{serial}_button_switch_on_longpress",
-                            "name": "A (Ein)",
-                            "button_config": {"type": "turn_on", "supports_long_press": True, "stateless": True},
-                            "device_class": "switch"
-                        },
-                        {
-                            "type": "button",
-                            "channel": 2,
-                            "operating_mode": 2,
-                            "receiver_kind": "switch",
-                            "unique_id": f"{serial}_button_switch_off_longpress",
-                            "name": "B (Aus)",
-                            "button_config": {"type": "turn_off", "supports_long_press": True, "stateless": True},
-                            "device_class": "switch"
-                        }
-                    ])
-                    
-            elif receiver_kind == "motor" or receiver_kind == "cover":
-                # Motor-Geräte: Erstelle zustandslose Buttons für direkte Telegram-Befehle
-                if operating_mode == 1:  # Eintastbedienung - Toggle-Button mit LongPress
-                    entities.append({
-                        "type": "button",
-                        "channel": 1,
-                        "operating_mode": 1,
-                        "receiver_kind": "motor",
-                        "unique_id": f"{serial}_button_motor_toggle_longpress",
-                        "name": "A (Toggle)",
-                        "button_config": {"type": "toggle", "supports_long_press": True, "stateless": True},
-                        "device_class": "garage"
-                    })
-                elif operating_mode == 2:  # Zweitastbedienung - Auf/Zu-Button mit LongPress
-                    entities.extend([
-                        {
-                            "type": "button",
-                            "channel": 1,
-                            "operating_mode": 2,
-                            "receiver_kind": "motor",
-                            "unique_id": f"{serial}_button_motor_open_longpress",
-                            "name": "A (Auf)",
-                            "button_config": {"type": "open", "supports_long_press": True, "stateless": True},
-                            "device_class": "garage"
-                        },
-                        {
-                            "type": "button",
-                            "channel": 2,
-                            "operating_mode": 2,
-                            "receiver_kind": "motor",
-                            "unique_id": f"{serial}_button_motor_close_longpress",
-                            "name": "B (Zu)",
-                            "button_config": {"type": "close", "supports_long_press": True, "stateless": True},
-                            "device_class": "garage"
-                        }
-                    ])
-                elif operating_mode == 3:  # Dreitastbedienung - Auf, Zu, Stopp mit LongPress
-                    entities.extend([
-                        {
-                            "type": "button",
-                            "channel": 1,
-                            "operating_mode": 3,
-                            "receiver_kind": "motor",
-                            "unique_id": f"{serial}_button_motor_open_longpress",
-                            "name": "A (Auf)",
-                            "button_config": {"type": "open", "supports_long_press": True, "stateless": True},
-                            "device_class": "garage"
-                        },
-                        {
-                            "type": "button",
-                            "channel": 2,
-                            "operating_mode": 3,
-                            "receiver_kind": "motor",
-                            "unique_id": f"{serial}_button_motor_close_longpress",
-                            "name": "B (Zu)",
-                            "button_config": {"type": "close", "supports_long_press": True, "stateless": True},
-                            "device_class": "garage"
-                        },
-                        {
-                            "type": "button",
-                            "channel": 3,
-                            "operating_mode": 3,
-                            "receiver_kind": "motor",
-                            "unique_id": f"{serial}_button_motor_stop_longpress",
-                            "name": "C (Stopp)",
-                            "button_config": {"type": "stop", "supports_long_press": True, "stateless": True},
-                            "device_class": "garage"
-                        }
-                    ])
-                    
-            elif receiver_kind in ["heating_cooling"]:
-                # Heizung/Kühlung - SWITCH-Entity mit persistentem Zustand und 4h-Wiederholung
-                entities.append({
-                    "type": "switch",
-                    "name": "Heizung Ein/Aus",
-                    "unique_id": f"{serial}_heating_cooling_switch",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": receiver_kind,
-                    "button_config": {
-                        "toggle": 0 if operating_mode == 1 else 0,
-                        "on": 0 if operating_mode == 2 else 0,
-                        "off": 1 if operating_mode == 2 else 0
-                    },
-                    "icon": "mdi:thermostat",
-                    "device_class": "switch",
-                    "supports_4h_repetition": True,
-                    "entity_category": None,
-                    "persistent_state": True
-                })
+            receiver_kind = device_data.get("receiver_kind", "switch")
+            if receiver_kind == "motor" or receiver_kind == "cover":
+                device_class = "garage"
+                category = "cover"
             else:
-                # Fallback für unbekannte receiver_kinds - verwende Switch als Standard
-                _LOGGER.warning("Unbekannter receiver_kind '%s' für %s, verwende Switch als Fallback", 
-                              receiver_kind, device_name)
-                if operating_mode == 1:
-                    entities.append({
-                        "type": "button",
-                        "channel": 1,
-                        "operating_mode": 1,
-                        "receiver_kind": "switch",
-                        "unique_id": f"{serial}_button_fallback_toggle_longpress",
-                        "name": "A (Toggle)",
-                        "button_config": {"type": "toggle", "supports_long_press": True, "stateless": True},
-                        "device_class": "switch"
-                    })
-                elif operating_mode == 2:
-                    entities.extend([
-                        {
-                            "type": "button",
-                            "channel": 1,
-                            "operating_mode": 2,
-                            "receiver_kind": "switch",
-                            "unique_id": f"{serial}_button_fallback_on_longpress",
-                            "name": "A (Ein)",
-                            "button_config": {"type": "turn_on", "supports_long_press": True, "stateless": True},
-                            "device_class": "switch"
-                        },
-                        {
-                            "type": "button",
-                            "channel": 2,
-                            "operating_mode": 2,
-                            "receiver_kind": "switch",
-                            "unique_id": f"{serial}_button_fallback_off_longpress",
-                            "name": "B (Aus)",
-                            "button_config": {"type": "turn_off", "supports_long_press": True, "stateless": True},
-                            "device_class": "switch"
-                        }
-                    ])
-            
-            # Add remove button entity for device management
-            entities.append({
-                "type": "button",
-                "action": "remove_device",
-                "unique_id": f"{serial}_remove",
-                "name": "Gerät entfernen",
-                "device_class": None,
-                "entity_category": "config",
-                "icon": "mdi:delete"
-            })
-            
-            # Determine platforms based on entity types
-            platforms = set()
-            for entity in entities:
-                entity_type = entity.get("type")
-                if entity_type:
-                    platforms.add(entity_type)
-            
-            entity_info.update({
-                "entities": entities,
-                "platforms": platforms,
-                "type": "ew_receiver",
-                "receiver_kind": receiver_kind,
-                "operating_mode": operating_mode,
-                "device_class": "garage" if receiver_kind == "motor" else "switch"
-            })
-            
-            # Stelle sicher, dass Entitäten erstellt wurden
-            if not entities:
-                _LOGGER.warning("Keine Entitäten für EW-Receiver %s erstellt (receiver_kind: %s, operating_mode: %d)", 
-                              device_name, receiver_kind, operating_mode)
-            else:
-                _LOGGER.info("EW-Receiver %s: %d Entitäten erstellt (%s)", 
-                           device_name, len(entities), [e['name'] for e in entities])
+                device_class = "switch"
+                category = "switch"
         elif device_type == "ewneo_receiver":
-            # EWneo-Receiver: Bidirektionale EasyWave-Empfänger mit erweiterten Funktionen
             entity_type = device_data.get("entity_type", "switch")
-            device_name = device_data.get('name', 'EWneo-Receiver')
-            serial = device_data.get('serial_number', 'UNKNOWN')
-            device_type_code = device_data.get('device_type_code', 0)
-            supports_dimming = device_data.get('supports_dimming', False)
-            supports_color = device_data.get('supports_color', False)
-            
-            entities = []
-            
-            if entity_type == "switch":
-                # Standard Schalter
-                entities.append({
-                    "type": "switch",
-                    "channel": 1,
-                    "name": "Switch",
-                    "unique_id": f"{serial}_switch",
-                    "device_class": "switch",
-                    "icon": "mdi:light-switch",
-                    "supports_feedback": True
-                })
-            elif entity_type == "light":
-                # Licht mit erweiterten Funktionen
-                light_entity = {
-                    "type": "light",
-                    "channel": 1,
-                    "name": "Light",
-                    "unique_id": f"{serial}_light",
-                    "device_class": "light",
-                    "icon": "mdi:lightbulb",
-                    "supports_feedback": True
-                }
-                
-                if supports_dimming:
-                    light_entity["supports_brightness"] = True
-                if supports_color:
-                    light_entity["supports_color"] = True
-                    
-                entities.append(light_entity)
-            elif entity_type == "cover":
-                # Rollladen/Jalousie
-                entities.append({
-                    "type": "cover",
-                    "channel": 1,
-                    "name": "Cover",
-                    "unique_id": f"{serial}_cover",
-                    "device_class": "shutter",
-                    "icon": "mdi:window-shutter",
-                    "supports_feedback": True,
-                    "supports_position": True
-                })
-            
-            # NOTE: EWneo devices should NOT have action button entities - they use bidirectional EWB protocol
-            # Action button entities would try to use EW protocol which doesn't work for EWneo devices
-            # Only the main entity (switch/light/cover) should be created
-            
-            # Add remove button entity for device management (config button, not action button)
-            entities.append({
-                "type": "button",
-                "action": "remove_device",
-                "unique_id": f"{serial}_remove",
-                "name": "Gerät entfernen",
-                "device_class": None,
-                "entity_category": "config",
-                "icon": "mdi:delete"
-            })
-            
-            # Determine platforms based on entity types
-            # Note: Include button platform for the remove button
-            platforms = set()
-            for entity in entities:
-                entity_type_name = entity.get("type")
-                if entity_type_name:
-                    platforms.add(entity_type_name)
-            
-            _LOGGER.info("🔧 EWneo device %s: Creating %d entities (platforms: %s)", 
-                        device_name, len(entities), platforms)
-            
-            entity_info.update({
-                "entities": entities,
-                "platforms": platforms,
-                "type": "ewneo_receiver",  # Preserve device type
-                "device_type": "ewneo_receiver",  # Alternative field
-                "neo_device": True,  # Critical flag for switch creation
-                "device_class": entity_type,
-                "category": "actuator",
-                "device_type_code": device_type_code,
-                "supports_feedback": True,
-                "bidirectional": True,
-                "gateway_serial": device_data.get("gateway_serial"),  # Preserve gateway info
-                "ewneo_index": device_data.get("ewneo_index")  # Preserve index info
-            })
-            
-            _LOGGER.info("EWneo-Receiver %s: %d Entitäten erstellt (%s)", 
-                        device_name, len(entities), [e['name'] for e in entities])
+            device_class = entity_type
+            category = "actuator"
         
-        return entity_info
+        return {
+            "entities": all_entities,
+            "platforms": all_platforms,
+            "device_class": device_class,
+            "category": category,
+        }
 
     async def _fire_device_creation_events(self, serial_number: str, entity_info: dict) -> None:
         """Fire events to create appropriate entities for the device."""

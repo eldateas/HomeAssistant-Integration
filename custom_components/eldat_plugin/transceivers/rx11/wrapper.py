@@ -374,8 +374,26 @@ class RX11Wrapper:
                 _LOGGER.warning("🔄 Reset _state_good to True")
             
         try:
-            # Extract button from command
-            button = command[0] if len(command) > 0 else 0x10
+            # Extract button code from command
+            # Command format: bytes([0x01, button_code, 0x00, 0x00, 0x00]) or bytes([button_code])
+            # The button_code is at index 1 if command starts with 0x01, otherwise at index 0
+            _LOGGER.warning("📦 Command bytes received: %s (len=%d)", command.hex() if isinstance(command, bytes) else str(command), len(command))
+            
+            # Check command format and extract button code
+            if len(command) >= 2 and command[0] == 0x01:
+                # New format: bytes([0x01, button_code, ...])
+                button = command[1]
+                _LOGGER.warning("🔢 Using NEW format: button at command[1]")
+            elif len(command) > 0:
+                # Old/simple format: bytes([button_code])
+                button = command[0]
+                _LOGGER.warning("🔢 Using OLD format: button at command[0]")
+            else:
+                button = 0x00
+                _LOGGER.warning("🔢 Empty command, defaulting to button A")
+            
+            button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
+            _LOGGER.warning("🔢 Extracted button: %s (code=0x%02X)", button_letter, button)
             
             # Step 1: Check if this serial is in _used_receivers (from persistent tracking)
             short_serial = serial_number[-8:].upper()
@@ -443,16 +461,18 @@ class RX11Wrapper:
                 return False
             
             # Log command being sent
-            _LOGGER.warning("📤 RX11 Sending command: ReceiverSerial=%s (full=%s), Index=%d, Button=0x%02X", 
-                          short_serial, receiver_serial_padded, receiver_index, button)
+            button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
+            _LOGGER.warning("📤 RX11 Sending command: ReceiverSerial=%s (full=%s), Index=%d, Button=%s (0x%02X)", 
+                          short_serial, receiver_serial_padded, receiver_index, button_letter, button)
             
             result = await asyncio.get_event_loop().run_in_executor(
                 None, self._module.ew_send_cmd_request, gateway_bytes, button, 5.0
             )
             
             if result == ErrorCode.SUCCESS:
-                _LOGGER.warning("✅ RX11 Command sent successfully to receiver %s (index %d, button: 0x%02X)", 
-                              short_serial, receiver_index, button)
+                button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
+                _LOGGER.warning("✅ RX11 Command sent successfully to receiver %s (index %d, button: %s / 0x%02X)", 
+                              short_serial, receiver_index, button_letter, button)
                 return True
             else:
                 # Map error code to human-readable message
@@ -645,18 +665,25 @@ class RX11Wrapper:
                     None, self._module.ewb_rcv_request, 5.0
                 )
                 
-                if result == ErrorCode.SUCCESS and self._telegram_callback:
-                    try:
-                        # Log received telegram details
-                        serial_hex = ''.join(f'{b:02X}' for b in receiver_transmitter)
-                        data_hex = ' '.join(f'{b:02X}' for b in info_data)
-                        _LOGGER.warning("📥 RX11 Telegram received: Serial=%s, InfoType=%d, Data=[%s]", 
-                                      serial_hex[-8:], info_type, data_hex)
-                        
-                        # Call callback with raw data (matching C library signature)
-                        self._telegram_callback(info_type, receiver_transmitter, info_data)
-                    except Exception as e:
-                        _LOGGER.error("Error in telegram callback: %s", e)
+                if result == ErrorCode.SUCCESS:
+                    # Log received telegram details
+                    serial_hex = ''.join(f'{b:02X}' for b in receiver_transmitter)
+                    data_hex = ' '.join(f'{b:02X}' for b in info_data)
+                    _LOGGER.warning("📥 RX11 Telegram received: Serial=%s (full 16 bytes), InfoType=%d, Data=[%s]", 
+                                  serial_hex, info_type, data_hex)
+                    
+                    _LOGGER.warning("🔍 Checking callback: self._telegram_callback = %s", bool(self._telegram_callback))
+                    
+                    if self._telegram_callback:
+                        try:
+                            _LOGGER.warning("📞 CALLING telegram callback...")
+                            # Call callback with raw data (matching C library signature)
+                            self._telegram_callback(info_type, receiver_transmitter, info_data)
+                            _LOGGER.warning("✅ Telegram callback completed successfully")
+                        except Exception as e:
+                            _LOGGER.error("❌ Error in telegram callback: %s", e, exc_info=True)
+                    else:
+                        _LOGGER.error("⚠️ Telegram received but NO callback set! Cannot process telegram.")
                         
             except Exception as e:
                 if not self._stop_ewb_receive:
@@ -668,6 +695,8 @@ class RX11Wrapper:
     def set_telegram_callback(self, callback: Callable):
         """Set callback for received telegrams."""
         self._telegram_callback = callback
+        _LOGGER.warning("🔗 RX11 Wrapper: Telegram callback SET to: %s (type: %s)", 
+                       callback, type(callback).__name__ if callback else "None")
     
     def is_connected(self) -> bool:
         """Check if connected to RX11 device."""
@@ -711,11 +740,18 @@ class RX11Wrapper:
     ) -> bool:
         """Remove EWB device."""
         try:
+            _LOGGER.info("📤 EWB_REMOVE_DEVICE: Gateway=%s, Receiver=%s",
+                        gateway_serial[-8:], receiver_serial[-8:])
+            
             gateway_bytes = bytes.fromhex(gateway_serial)
             receiver_bytes = bytes.fromhex(receiver_serial)
             result = await asyncio.get_event_loop().run_in_executor(
                 None, self._module.ewb_remove_device_request, gateway_bytes, receiver_bytes
             )
+            
+            _LOGGER.info("📥 EWB_REMOVE_DEVICE result: %d (%s)",
+                        result, "SUCCESS" if result == ErrorCode.SUCCESS else "FAILED")
+            
             return result == ErrorCode.SUCCESS
         except Exception as e:
             _LOGGER.error("Exception removing EWB device: %s", e)

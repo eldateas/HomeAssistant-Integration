@@ -1,14 +1,31 @@
-"""EWneo sensor implementations for RX11 transceiver."""
-from .temperature import RX11TemperatureSensor
-from .humidity import RX11HumiditySensor
-from .combined import RX11CombinedSensor
-from .wind import RX11WindSensor
-from .rain import RX11RainSensor
+"""EWneo sensor implementations for RX11 transceiver.
+
+The EWneoSensor class provides a flexible, universal sensor implementation
+that can handle any combination of sensor types (temperature, humidity, wind, rain).
+Sensor capabilities are configured during initialization based on learning data.
+
+All RX11-specific telegram processing and data extraction is handled in the
+EWneoSensor class based on neo_type values.
+"""
+
+from .ewneo_sensor import (
+    EWneoSensor,
+    create_ewneo_sensor,
+    create_temperature_sensor,
+    create_humidity_sensor,
+    create_wind_sensor,
+    create_rain_sensor,
+    SENSOR_TYPE_CONFIGS,
+    NEO_TYPE_SENSOR_MAP,
+)
 
 __all__ = [
-    "RX11TemperatureSensor",
-    "RX11HumiditySensor", 
-    "RX11CombinedSensor",
-    "RX11WindSensor",
-    "RX11RainSensor",
+    "EWneoSensor",
+    "create_ewneo_sensor",
+    "create_temperature_sensor",
+    "create_humidity_sensor",
+    "create_wind_sensor",
+    "create_rain_sensor",
+    "SENSOR_TYPE_CONFIGS",
+    "NEO_TYPE_SENSOR_MAP",
 ]

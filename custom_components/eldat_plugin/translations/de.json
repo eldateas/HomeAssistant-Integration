@@ -25,21 +25,21 @@
         }
       },
       "device_transmitter": {
-        "title": "EW-Sender einlernen",
-        "description": "Drücken Sie eine beliebige Taste am EW-Sender. Warten auf Telegramm...",
+        "title": "EW-Transmitter einlernen",
+        "description": "Drücken Sie eine beliebige Taste am EW-Transmitter. Warten auf Telegramm...",
         "data": {
           "action": "Aktion"
         }
       },
       "device_transmitter_verify": {
-        "title": "EW-Sender bestätigen",
+        "title": "EW-Transmitter bestätigen",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_transmitter_config": {
-        "title": "EW-Sender konfigurieren",
+        "title": "EW-Transmitter konfigurieren",
         "description": "{instructions}",
         "data": {
           "button_count": "Tastenanzahl"
@@ -58,8 +58,8 @@
         "data": {}
       },
       "device_sensor": {
-        "title": "EWneo-Sensor einlernen",
-        "description": "Lösen Sie den EWneo-Sensor aus oder warten Sie auf eine automatische Messung. Warten auf Telegramm...",
+        "title": "EWneo-Sensoren einlernen",
+        "description": "Lösen Sie den EWneo-Sensoren aus oder warten Sie auf eine automatische Messung. Warten auf Telegramm...",
         "data": {
           "action": "Aktion"
         }
@@ -77,19 +77,19 @@
         "data": {}
       },
       "device_sensor_verify": {
-        "title": "EWneo-Sensor bestätigen",
+        "title": "EWneo-Sensoren bestätigen",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_ewneo_receiver": {
-        "title": "EWneo-Empfänger hinzufügen",
+        "title": "EWneo-Switch/Motor hinzufügen",
         "description": "{instructions}"
       },
       "device_ewneo_receiver_learn": {
-        "title": "EWneo-Empfänger vorbereiten",
-        "description": "🔧 **EWneo-Empfänger wird vorbereitet...**\n\n📋 **Vorbereitungsschritte:**\n• EWneo-Index wird ermittelt\n• Gateway-Serial wird geladen\n• Empfangsfilter wird gesetzt\n\n⚡ **Bitte warten Sie einen Moment...**"
+        "title": "EWneo-Switch/Motor vorbereiten",
+        "description": "🔧 **EWneo-Switch/Motor wird vorbereitet...**\n\n📋 **Vorbereitungsschritte:**\n• EWneo-Index wird ermittelt\n• Gateway-Serial wird geladen\n• Empfangsfilter wird gesetzt\n\n⚡ **Bitte warten Sie einen Moment...**"
       },
       "device_ewneo_receiver_learning_mode": {
         "title": "EWneo-Transceiver in Lernmodus versetzen",
@@ -99,11 +99,11 @@
         }
       },
       "device_ewneo_receiver_join": {
-        "title": "EWneo-Empfänger verbinden",
-        "description": "🔗 **Verbindung zum EWneo-Empfänger wird hergestellt...**\n\n📡 **EWB_JOIN_DEVICE wird ausgeführt...**\n\n⚡ **Bitte warten Sie auf die Bestätigung des Geräts...**"
+        "title": "EWneo-Switch/Motor verbinden",
+        "description": "🔗 **Verbindung zum EWneo-Switch/Motor wird hergestellt...**\n\n📡 **EWB_JOIN_DEVICE wird ausgeführt...**\n\n⚡ **Bitte warten Sie auf die Bestätigung des Geräts...**"
       },
       "device_ewneo_receiver_confirm": {
-        "title": "EWneo-Empfänger konfigurieren",
+        "title": "EWneo-Switch/Motor konfigurieren",
         "description": "{instructions}",
         "data": {
           "device_name": "Gerätename",
@@ -113,42 +113,42 @@
         }
       },
       "device_receiver_type": {
-        "title": "EW-Empfänger Gerätetyp",
+        "title": "EW-Receiver Gerätetyp",
         "description": "{instructions}",
         "data": {
           "receiver_type": "Gerätetyp"
         }
       },
       "device_receiver_operating_mode": {
-        "title": "EW-Empfänger Betriebsart",
+        "title": "EW-Receiver Betriebsart",
         "description": "{instructions}",
         "data": {
           "operating_mode": "Betriebsart"
         }
       },
       "device_receiver_confirm": {
-        "title": "EW-Empfänger Bestätigung",
+        "title": "EW-Receiver Bestätigung",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_receiver": {
-        "title": "EW-Empfänger einlernen",
-        "description": "Drücken Sie den Lernknopf am EW-Empfänger. Warten auf Telegramm...",
+        "title": "EW-Receiver einlernen",
+        "description": "Drücken Sie den Lernknopf am EW-Receiver. Warten auf Telegramm...",
         "data": {
           "action": "Aktion"
         }
       },
       "device_receiver_verify": {
-        "title": "EW-Empfänger bestätigen",
+        "title": "EW-Receiver bestätigen",
         "description": "{instructions}",
         "data": {
           "action": "Aktion"
         }
       },
       "device_confirm": {
-        "title": "EW-Empfänger konfigurieren",
+        "title": "EW-Receiver konfigurieren",
         "description": "Konfiguration für {device_name} (Seriennummer: {serial_number})\n\nWählen Sie den Gerätetyp sowie die gewünschte Betriebsart aus. Versetzen Sie dann den Empfänger in den entsprechenden Lernmodus.",
         "data": {
           "receiver_kind": "Gerätetyp",

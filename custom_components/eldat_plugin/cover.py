@@ -42,9 +42,20 @@ async def async_setup_entry(
             if entity_spec.get("type") == "cover":
                 try:
                     if device_info.get("neo_device"):
-                        # EWneo cover entity
-                        entities.append(EldatEWneoCover(coordinator, serial_number, device_info, entity_spec))
-                        _LOGGER.info("🔧 Created EWneo cover entity for device %s", serial_number[-8:])
+                        # EWneo-Motor entity - check for multi-motor devices
+                        device_type_code = device_info.get("device_type_code", 0)
+                        if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
+                            channel = entity_spec.get("channel", 0)
+                            entities.append(EldatEWneoDualMotorCover(coordinator, serial_number, device_info, entity_spec))
+                            _LOGGER.info("🔧 Restored EWneo-DualMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
+                        elif device_type_code == 0x09:  # EWB_DT_QUAD_MOTOR
+                            channel = entity_spec.get("channel", 0)
+                            entities.append(EldatEWneoQuadMotorCover(coordinator, serial_number, device_info, entity_spec))
+                            _LOGGER.info("🔧 Restored EWneo-QuadMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
+                        else:
+                            # Single motor or other EWneo-Motor
+                            entities.append(EldatEWneoCover(coordinator, serial_number, device_info, entity_spec))
+                            _LOGGER.info("🔧 Restored EWneo-Motor entity for device %s", serial_number[-8:])
                     else:
                         # Regular cover entity
                         entities.append(EldatCover(coordinator, serial_number, device_info, entity_spec))
@@ -74,26 +85,20 @@ async def async_setup_entry(
                         # Check for multi motor devices
                         device_type_code = device_info.get("device_type_code", 0)
                         if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
-                            # Create covers for each motor channel
-                            for channel in [1, 2]:
-                                channel_spec = entity_spec.copy()
-                                channel_spec["channel"] = channel
-                                channel_spec["name"] = f"{entity_spec.get('name', 'Motor')} CH{channel}"
-                                channel_spec["unique_id"] = f"{entity_spec.get('unique_id', serial_number)}_ch{channel}"
-                                new_covers.append(EldatEWneoDualMotorCover(coordinator, serial_number, device_info, channel_spec))
-                                _LOGGER.info("✅ Created EWneo dual motor cover CH%d for device %s", channel, serial_number[-8:])
+                            # Entity specs already contain channel info - use directly
+                            # Channel is 0-based in entity_spec, but we need 1-based for display
+                            channel = entity_spec.get("channel", 0)
+                            new_covers.append(EldatEWneoDualMotorCover(coordinator, serial_number, device_info, entity_spec))
+                            _LOGGER.info("✅ Created EWneo-DualMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
                         elif device_type_code == 0x09:  # EWB_DT_QUAD_MOTOR
-                            # Create covers for each motor channel
-                            for channel in [1, 2, 3, 4]:
-                                channel_spec = entity_spec.copy()
-                                channel_spec["channel"] = channel
-                                channel_spec["name"] = f"{entity_spec.get('name', 'Motor')} CH{channel}"
-                                channel_spec["unique_id"] = f"{entity_spec.get('unique_id', serial_number)}_ch{channel}"
-                                new_covers.append(EldatEWneoQuadMotorCover(coordinator, serial_number, device_info, channel_spec))
-                                _LOGGER.info("✅ Created EWneo quad motor cover CH%d for device %s", channel, serial_number[-8:])
+                            # Entity specs already contain channel info - use directly
+                            # Channel is 0-based in entity_spec, but we need 1-based for display
+                            channel = entity_spec.get("channel", 0)
+                            new_covers.append(EldatEWneoQuadMotorCover(coordinator, serial_number, device_info, entity_spec))
+                            _LOGGER.info("✅ Created EWneo-QuadMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
                         else:
                             new_covers.append(EldatEWneoCover(coordinator, serial_number, device_info, entity_spec))
-                            _LOGGER.info("✅ Created EWneo cover entity for device %s", serial_number[-8:])
+                            _LOGGER.info("✅ Created EWneo-Motor entity for device %s", serial_number[-8:])
                     else:
                         new_covers.append(EldatCover(coordinator, serial_number, device_info, entity_spec))
             
@@ -207,7 +212,10 @@ class EldatCover(EldatEntity, CoverEntity):
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
         try:
-            device_instance = self.coordinator.device_registry.get_device_instance(self._serial_number)
+            device_instance = None
+            if hasattr(self.coordinator.transceiver, '_device_instances'):
+                device_instance = self.coordinator.transceiver._device_instances.get(self._serial_number)
+            
             if device_instance and hasattr(device_instance, 'open_cover'):
                 self._attr_is_opening = True
                 self._attr_is_closing = False
@@ -234,7 +242,10 @@ class EldatCover(EldatEntity, CoverEntity):
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
         try:
-            device_instance = self.coordinator.device_registry.get_device_instance(self._serial_number)
+            device_instance = None
+            if hasattr(self.coordinator.transceiver, '_device_instances'):
+                device_instance = self.coordinator.transceiver._device_instances.get(self._serial_number)
+            
             if device_instance and hasattr(device_instance, 'close_cover'):
                 self._attr_is_closing = True
                 self._attr_is_opening = False
@@ -261,7 +272,10 @@ class EldatCover(EldatEntity, CoverEntity):
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
         try:
-            device_instance = self.coordinator.device_registry.get_device_instance(self._serial_number)
+            device_instance = None
+            if hasattr(self.coordinator.transceiver, '_device_instances'):
+                device_instance = self.coordinator.transceiver._device_instances.get(self._serial_number)
+            
             if device_instance and hasattr(device_instance, 'stop_cover'):
                 self._attr_is_closing = False
                 self._attr_is_opening = False
@@ -299,7 +313,7 @@ class EldatCover(EldatEntity, CoverEntity):
 
 
 class EldatEWneoCover(EldatEntity, CoverEntity):
-    """EWneo cover entity with bidirectional EWB_CHANGE_STATE control for motors."""
+    """EWneo-Motor entity with bidirectional EWB_CHANGE_STATE control for motors."""
 
     def __init__(
         self,
@@ -335,7 +349,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
         # Runtime measurement activation tracking
         self._runtime_ever_measured = False  # Tracks if runtime measurement was ever detected
         
-        _LOGGER.info("🔧 Initializing EWneo cover: %s (gateway: %s, type_code: 0x%02X)", 
+        _LOGGER.info("🔧 Initializing EWneo-Motor: %s (gateway: %s, type_code: 0x%02X)", 
                     serial_number[-8:], self._gateway_serial[-8:] if self._gateway_serial else "None", self._device_type_code)
         
         # Initialize state from device's initial_state if available
@@ -343,23 +357,24 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
         if initial_state.get("type") == "cover":
             self._current_cover_position = initial_state.get("position")
             self._runtime_measured = initial_state.get("runtime_measured", False)
-            _LOGGER.info("🎯 EWneo cover %s: Loaded initial state: position=%s, runtime_measured=%s", 
+            _LOGGER.info("🎯 EWneo-Motor %s: Loaded initial state: position=%s, runtime_measured=%s", 
                         serial_number[-8:], self._current_cover_position, self._runtime_measured)
         
         # Set up entity attributes
-        self._attr_name = entity_spec.get("name", f"EWneo Cover {serial_number[-6:]}")
+        self._attr_name = entity_spec.get("name", f"EWneo-Motor {serial_number[-6:]}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_cover_{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
+        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
         
         # Set supported features based on runtime measurement
         self._update_supported_features()
         
-        _LOGGER.info("✅ EWneo cover entity initialized: %s (%s)", self._attr_name, self._attr_unique_id)
+        _LOGGER.info("✅ EWneo-Motor entity initialized: %s (%s)", self._attr_name, self._attr_unique_id)
         
     async def _async_query_initial_state(self) -> None:
         """Query initial motor state to check for runtime measurement capability."""
         try:
-            _LOGGER.info("🔍 EWneo cover %s: Querying initial state to check runtime measurement", self._serial_number[-8:])
+            _LOGGER.info("🔍 EWneo-Motor %s: Querying initial state to check runtime measurement", self._serial_number[-8:])
             
             # Use coordinator to perform EwbQueryState
             result = await self.coordinator._query_ewneo_state(
@@ -368,12 +383,12 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
             )
             
             if result:
-                _LOGGER.info("✅ EWneo cover %s: Initial query successful, state will be processed via event", self._serial_number[-8:])
+                _LOGGER.info("✅ EWneo-Motor %s: Initial query successful, state will be processed via event", self._serial_number[-8:])
             else:
-                _LOGGER.warning("⚠️ EWneo cover %s: Initial state query failed", self._serial_number[-8:])
+                _LOGGER.warning("⚠️ EWneo-Motor %s: Initial state query failed", self._serial_number[-8:])
                 
         except Exception as e:
-            _LOGGER.error("❌ EWneo cover %s: Error during initial state query: %s", self._serial_number[-8:], e)
+            _LOGGER.error("❌ EWneo-Motor %s: Error during initial state query: %s", self._serial_number[-8:], e)
         
     def _update_supported_features(self) -> None:
         """Update supported features based on motor capabilities."""
@@ -422,10 +437,19 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
     def is_closed(self) -> Optional[bool]:
         """Return if the cover is closed.
         
-        Returns None if position is unknown.
+        Returns None if position is unknown AND motor is not moving.
+        When motor is moving, return False (not closed).
+        When motor is stopped without position info, return None.
         """
+        # If we have position information, use it
         if self._current_cover_position is not None:
             return self._current_cover_position == 0
+        
+        # If motor is moving, it's definitely not in a closed state
+        if self._is_opening or self._is_closing:
+            return False
+            
+        # Motor stopped but no position info - return None (unknown)
         return None
     
     @property
@@ -467,11 +491,27 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
         """When entity is added to hass, set up event listeners."""
         await super().async_added_to_hass()
         
+        # Add NFILTER for gateway serial to enable bidirectional communication
+        if self._gateway_serial:
+            try:
+                filter_success = await self.coordinator.transceiver.rx11_ewb_add_filter(self._gateway_serial)
+                if filter_success:
+                    _LOGGER.info("✅ EWneo-Motor %s: Added NFILTER for gateway %s", 
+                                self._serial_number[-8:], self._gateway_serial[-8:])
+                else:
+                    _LOGGER.warning("⚠️ EWneo-Motor %s: Failed to add NFILTER for gateway %s", 
+                                   self._serial_number[-8:], self._gateway_serial[-8:])
+            except Exception as e:
+                _LOGGER.error("❌ EWneo-Motor %s: Error adding NFILTER: %s", self._serial_number[-8:], e)
+        else:
+            _LOGGER.warning("⚠️ EWneo-Motor %s: No gateway serial configured, bidirectional communication may not work", 
+                           self._serial_number[-8:])
+        
         # Listen for EWneo state update events
         def handle_ewneo_state_update(event):
             """Handle EWneo state update events."""
             if event.data.get("serial_number") == self._serial_number:
-                _LOGGER.info("🔄 EWneo cover %s: Received state update event", self._serial_number[-8:])
+                _LOGGER.info("🔄 EWneo-Motor %s: Received state update event", self._serial_number[-8:])
                 parsed_state = event.data.get("parsed_state", {})
                 if parsed_state and parsed_state.get("type") == "cover":
                     # Use thread-safe add_job to schedule state update
@@ -479,7 +519,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
         
         # Register the event listener
         self.hass.bus.async_listen(f"{DOMAIN}_ewneo_state_update", handle_ewneo_state_update)
-        _LOGGER.debug("🔗 EWneo cover %s: Registered state update event listener", self._serial_number[-8:])
+        _LOGGER.debug("🔗 EWneo-Motor %s: Registered state update event listener", self._serial_number[-8:])
         
         # Perform initial state query to check for runtime measurement
         self.hass.async_create_task(self._async_query_initial_state())
@@ -501,7 +541,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
         if new_runtime_measured or new_supports_position:
             if not self._runtime_ever_measured:
                 self._runtime_ever_measured = True
-                _LOGGER.info("🎯 EWneo cover %s: Runtime measurement DETECTED and ACTIVATED! Position control now available (from state update)", self._serial_number[-8:])
+                _LOGGER.info("🎯 EWneo-Motor %s: Runtime measurement DETECTED and ACTIVATED! Position control now available (from state update)", self._serial_number[-8:])
             self._runtime_measured = True
         else:
             # Only update if we have explicit information
@@ -515,7 +555,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
             if not self._runtime_ever_measured:
                 self._runtime_ever_measured = True
                 self._runtime_measured = True
-                _LOGGER.info("🎯 EWneo cover %s: Runtime measurement DETECTED from position data! Position control activated", self._serial_number[-8:])
+                _LOGGER.info("🎯 EWneo-Motor %s: Runtime measurement DETECTED from position data! Position control activated", self._serial_number[-8:])
         elif not self._runtime_measured:
             # No runtime measurement - position unknown
             self._current_cover_position = None
@@ -920,7 +960,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
 
 
 class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
-    """EWneo dual motor cover entity with individual motor control and runtime measurement activation."""
+    """EWneo-DualMotor cover entity with individual motor control and runtime measurement activation."""
 
     def __init__(
         self,
@@ -931,8 +971,30 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
     ) -> None:
         super().__init__(coordinator, serial_number, device_info)
         self._entity_spec = entity_spec
-        self._channel = int(entity_spec.get("channel", 1))
+        # Smart channel handling: entity_spec['channel'] can be 0-based OR 1-based
+        # For dual motors: 0-based = (0,1), 1-based = (1,2)
+        # Detect and normalize to 1-based (1,2)
+        raw_channel = int(entity_spec.get("channel", 0))
+        unique_id = entity_spec.get("unique_id", "")
+        
+        # Check if 0-based by looking for _ch0 or _ch1 in unique_id
+        if "_ch0" in unique_id or "_ch1" in unique_id:
+            # 0-based detected: ch0 or ch1 suffix
+            self._channel = raw_channel + 1  # 0->1, 1->2
+            _LOGGER.warning("🆕 Dual Motor: Detected 0-based (unique_id=%s), converting %d -> %d", 
+                           unique_id, raw_channel, self._channel)
+        elif raw_channel == 0:
+            # Channel 0 without _ch0/_ch1 in unique_id: likely missing, use 1 as default
+            self._channel = 1
+            _LOGGER.warning("⚠️ Dual Motor: Channel 0 detected, defaulting to 1")
+        else:
+            # raw_channel >= 1: Assume 1-based
+            self._channel = raw_channel
+        
         self._available = True
+        
+        _LOGGER.warning("🆕 Dual Motor: entity_spec['channel']=%s (raw) -> self._channel=%d (normalized)", 
+                       raw_channel, self._channel)
         
         # EWneo specific attributes
         self._gateway_serial = device_info.get("gateway_serial")
@@ -956,29 +1018,30 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         # Runtime measurement activation tracking
         self._runtime_ever_measured = False  # Tracks if runtime measurement was ever detected
         
-        _LOGGER.info("🔧 Initializing EWneo dual motor cover CH%d: %s (gateway: %s, type_code: 0x%02X)", 
+        _LOGGER.info("🔧 Initializing EWneo-DualMotor cover CH%d: %s (gateway: %s, type_code: 0x%02X)", 
                     self._channel, serial_number[-8:], self._gateway_serial[-8:] if self._gateway_serial else "None", self._device_type_code)
         
         # Set up entity attributes
-        self._attr_name = entity_spec.get("name", f"EWneo Dual Motor CH{self._channel} {serial_number[-6:]}")
+        self._attr_name = entity_spec.get("name", f"EWneo DualMotor CH{self._channel} {serial_number[-6:]}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_dual_motor_ch{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
+        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
         
-        # Set supported features based on runtime measurement
+        # Initially no position features - will be enabled after QUERY_STATE response
         self._update_supported_features()
         
-        _LOGGER.info("✅ EWneo dual motor cover entity CH%d initialized: %s (%s)", self._channel, self._attr_name, self._attr_unique_id)
+        _LOGGER.info("✅ EWneo-DualMotor cover entity CH%d initialized: %s (%s)", self._channel, self._attr_name, self._attr_unique_id)
         
     async def _async_query_initial_state(self) -> None:
         """Query initial motor state for this specific channel to check for runtime measurement capability."""
         try:
-            _LOGGER.info("🔍 EWneo dual motor CH%d %s: Querying initial state for runtime measurement", 
+            _LOGGER.info("🔍 EWneo-DualMotor CH%d %s: Querying initial state for runtime measurement", 
                         self._channel, self._serial_number[-8:])
             
-            # Mode mapping: Mode 2 = Motor 1, Mode 10 = Motor 2
-            query_mode = 2 if self._channel == 1 else 10
+            # ALWAYS use Mode 0 for dual motors (all channels in one 32-bit word)
+            query_mode = 0
             
-            # Use coordinator to perform individual motor EwbQueryState
+            # Use coordinator to perform EwbQueryState with Mode 0
             result = await self.coordinator._query_ewneo_state_with_mode(
                 self._gateway_serial,
                 self._serial_number,
@@ -986,31 +1049,33 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             )
             
             if result:
-                _LOGGER.info("✅ EWneo dual motor CH%d %s: Individual motor query successful, state will be processed via event", 
+                _LOGGER.info("✅ EWneo-DualMotor CH%d %s: Mode 0 query successful, state will be processed via event", 
                             self._channel, self._serial_number[-8:])
             else:
-                _LOGGER.warning("⚠️ EWneo dual motor CH%d %s: Individual motor state query failed", 
+                _LOGGER.warning("⚠️ EWneo-DualMotor CH%d %s: Mode 0 state query failed", 
                                self._channel, self._serial_number[-8:])
                 
         except Exception as e:
-            _LOGGER.error("❌ EWneo dual motor CH%d %s: Error during initial state query: %s", 
+            _LOGGER.error("❌ EWneo-DualMotor CH%d %s: Error during initial state query: %s", 
                          self._channel, self._serial_number[-8:], e)
         
     def _update_supported_features(self) -> None:
-        """Update supported features based on motor capabilities."""
+        """Update supported features based on motor capabilities (DualMotor)."""
         features = (
             CoverEntityFeature.OPEN |
             CoverEntityFeature.CLOSE |
             CoverEntityFeature.STOP
         )
         
-        # Add position control if runtime measurement was ever detected
-        if self._runtime_ever_measured:
+        # Add position control ONLY if runtime measurement is currently active
+        # This requires a QUERY_STATE with Mode 2/10 to detect
+        if self._runtime_measured:
             features |= CoverEntityFeature.SET_POSITION
+            _LOGGER.debug("EWneo-DualMotor CH%d: Position control enabled (runtime_measured=True)", self._channel)
+        else:
+            _LOGGER.debug("EWneo-DualMotor CH%d: Position control disabled (runtime_measured=False)", self._channel)
             
-        # Add tilt control if tilt measurement is available (binary tilt for EWneo)
-        if self._tilt_measured:
-            features |= CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
+        # Note: Tilt features removed - EWneo motors don't support tilt control
             
         self._attr_supported_features = features
 
@@ -1067,17 +1132,41 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         """Handle entity added to hass."""
         await super().async_added_to_hass()
         
+        # Add NFILTER for gateway serial to enable bidirectional communication
+        if self._gateway_serial:
+            try:
+                filter_success = await self.coordinator.transceiver.rx11_ewb_add_filter(self._gateway_serial)
+                if filter_success:
+                    _LOGGER.info("✅ EWneo dual motor CH%d %s: Added NFILTER for gateway %s", 
+                                self._channel, self._serial_number[-8:], self._gateway_serial[-8:])
+                else:
+                    _LOGGER.warning("⚠️ EWneo dual motor CH%d %s: Failed to add NFILTER for gateway %s", 
+                                   self._channel, self._serial_number[-8:], self._gateway_serial[-8:])
+            except Exception as e:
+                _LOGGER.error("❌ EWneo dual motor CH%d %s: Error adding NFILTER: %s", 
+                             self._channel, self._serial_number[-8:], e)
+        else:
+            _LOGGER.warning("⚠️ EWneo dual motor CH%d %s: No gateway serial configured", 
+                           self._channel, self._serial_number[-8:])
+        
         # Subscribe to EWneo state updates for dual motor devices
         async def handle_ewneo_state_update(event):
             try:
                 event_data = event.data
                 if event_data.get("serial_number") == self._serial_number:
-                    # Extract channel-specific data from dual motor response
-                    parsed_state = self._extract_channel_state(event_data.get("parsed_state", {}))
-                    if parsed_state:
-                        self.hass.add_job(self._async_update_state_from_parsed, parsed_state)
+                    parsed_state = event_data.get("parsed_state", {})
+                    
+                    # DualMotor uses ONLY Mode 0 (multi_cover): All motors in one 32-bit word
+                    # Each entity extracts its own channel's state
+                    if parsed_state.get("type") == "multi_cover":
+                        channel_state = self._extract_channel_state(parsed_state)
+                        if channel_state:
+                            _LOGGER.debug("🔄 DualMotor CH%d: Updating state from multi_cover", self._channel)
+                            self.hass.add_job(self._async_update_state_from_parsed, channel_state)
+                        else:
+                            _LOGGER.warning("⚠️ DualMotor CH%d: Could not extract channel state", self._channel)
             except Exception as e:
-                _LOGGER.error("Error in dual motor state update handler: %s", e)
+                _LOGGER.error("Error in dual motor CH%d state update handler: %s", self._channel, e)
         
         self.hass.bus.async_listen(f"{DOMAIN}_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo dual motor CH%d %s: Registered state update event listener", 
@@ -1123,6 +1212,8 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
     
     async def _async_update_state_from_parsed(self, parsed_state: Dict[str, Any]) -> None:
         """Update cover state from parsed EWneo dual motor state (async for thread safety)."""
+        _LOGGER.warning("🔄 Dual Motor CH%d: Received state update: %s", self._channel, parsed_state)
+        
         old_position = self._current_cover_position
         old_is_opening = self._is_opening
         old_is_closing = self._is_closing
@@ -1132,8 +1223,13 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         if parsed_state.get("position_available", False) and "position" in parsed_state:
             self._current_cover_position = parsed_state["position"]
         elif not parsed_state.get("runtime_measured", False):
-            # No runtime measurement - position unknown
+            # No runtime measurement - position is UNKNOWN, set to None
             self._current_cover_position = None
+        else:
+            # Runtime measured but no position available (e.g., during calibration or 120s mode)
+            # Keep current position or set to None if we don't have one
+            if self._current_cover_position is None:
+                self._current_cover_position = None
         
         # Update target position
         if "target_position" in parsed_state:
@@ -1198,7 +1294,7 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             return False
         
         try:
-            _LOGGER.info("🔄 Sending EWB_CHANGE_STATE to EWneo dual motor %s CH%d: mode=%d, state_bytes=%s", 
+            _LOGGER.warning("🔄 Sending EWB_CHANGE_STATE to EWneo dual motor %s CH%d: mode=%d, state_bytes=%s", 
                         self._serial_number[-6:], self._channel, mode, [f"0x{b:02X}" for b in state_bytes])
             
             # Send command via coordinator's transceiver
@@ -1214,24 +1310,35 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
                 # Parse response for dual motor state
                 if len(response_state_bytes) >= 4:
                     parsed_state = self.coordinator._parse_ewneo_state(
-                        self._device_type_code, response_state_bytes[:4], "ewneo_dual_motor"
+                        self._device_type_code, response_state_bytes[:4], "ewneo_dual_motor", self._serial_number, mode=response_mode
                     )
                     
-                    if parsed_state and parsed_state.get("type") == "multi_cover":
-                        # Extract our channel's state from dual motor response
-                        channel_state = self._extract_channel_state(parsed_state)
-                        
-                        if channel_state:
-                            # Update state immediately
-                            await self._async_update_state_from_parsed(channel_state)
-                            _LOGGER.info("🎯 EWneo dual motor %s CH%d: State updated from EWB response - opening=%s, closing=%s, stopped=%s", 
+                    if parsed_state:
+                        if parsed_state.get("type") == "cover":
+                            # Individual motor response (Mode 2/10) - directly update state
+                            await self._async_update_state_from_parsed(parsed_state)
+                            _LOGGER.info("🎯 EWneo dual motor %s CH%d: State updated from individual response - opening=%s, closing=%s, stopped=%s", 
                                         self._serial_number[-6:], self._channel,
-                                        channel_state.get("is_opening", False),
-                                        channel_state.get("is_closing", False),
-                                        channel_state.get("is_stopped", True))
+                                        parsed_state.get("is_opening", False),
+                                        parsed_state.get("is_closing", False),
+                                        parsed_state.get("is_stopped", True))
+                        elif parsed_state.get("type") == "multi_cover":
+                            # Summary response (Mode 0) - extract our channel's state
+                            channel_state = self._extract_channel_state(parsed_state)
+                            
+                            if channel_state:
+                                await self._async_update_state_from_parsed(channel_state)
+                                _LOGGER.info("🎯 EWneo dual motor %s CH%d: State updated from summary response - opening=%s, closing=%s, stopped=%s", 
+                                            self._serial_number[-6:], self._channel,
+                                            channel_state.get("is_opening", False),
+                                            channel_state.get("is_closing", False),
+                                            channel_state.get("is_stopped", True))
+                            else:
+                                _LOGGER.warning("⚠️ EWneo dual motor %s CH%d: Could not extract channel state from summary response", 
+                                               self._serial_number[-6:], self._channel)
                         else:
-                            _LOGGER.warning("⚠️ EWneo dual motor %s CH%d: Could not extract channel state from response", 
-                                           self._serial_number[-6:], self._channel)
+                            _LOGGER.warning("⚠️ EWneo dual motor %s CH%d: Unknown response type: %s", 
+                                           self._serial_number[-6:], self._channel, parsed_state.get("type"))
                     else:
                         _LOGGER.warning("⚠️ EWneo dual motor %s CH%d: Failed to parse EWB response state", 
                                        self._serial_number[-6:], self._channel)
@@ -1253,22 +1360,43 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             return False
     
     def _create_dual_motor_command(self, channel: int, command: str) -> tuple[int, list]:
-        """Create dual motor command for specific channel.
+        """Create dual motor command for specific channel using Mode 0.
+        
+        IMPORTANT: Dual motors use Mode 0 (NOT Mode 2/10!) with channel-specific bit positioning,
+        exactly like dual switches. This ensures all channels receive commands in the same telegram.
+        
+        State word format for Mode 0 (dual motor, 32-bit big-endian):
+        - Bits 31-25: Motor #1 status code (0-100 position or 117-127 special command)
+        - Bit 24: Motor #1 auto-tilt flag
+        - Bits 23-17: Motor #2 status code
+        - Bit 16: Motor #2 auto-tilt flag
+        - Bits 15-0: Reserved
+        
+        Command codes:
+        - 0-100: Move to position (0=open, 100=closed)
+        - 126: Stop immediately
+        - 119: Stop and tilt to horizontal (requires tilt measurement)
+        - 120: Open for runtime duration
+        - 121: Close for runtime duration
+        - 122: Open for 120 seconds
+        - 123: Close for 120 seconds
         
         Args:
             channel: 1 or 2
-            command: 'stop', 'open', 'close'
+            command: 'stop', 'open', 'close', 'tilt_stop'
         """
         if channel not in [1, 2]:
             _LOGGER.error("Invalid channel %d for dual motor, must be 1 or 2", channel)
             return None, None
             
-        # Mode 0: Dual motor commands
-        # 2 bits per channel: 00=stop, 01=open, 10=close, 11=reserved
+        # Command mapping according to EWB specification
+        # SIMPLIFIED: Always use 120s commands for open/close
+        # Position commands use percentage values (handled separately in async_set_cover_position)
         command_map = {
-            "stop": 0,
-            "open": 1,
-            "close": 2
+            "stop": 126,         # Stop immediately
+            "open": 122,         # ALWAYS open for 120 seconds
+            "close": 123,        # ALWAYS close for 120 seconds
+            "tilt_stop": 119,    # Stop and tilt to horizontal
         }
         
         if command not in command_map:
@@ -1277,12 +1405,46 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             
         cmd_code = command_map[command]
         
-        # Channel 1 uses bits 1-0, Channel 2 uses bits 3-2
+        _LOGGER.warning("✅ Dual motor CH%d command='%s' -> code=%d (open=122, close=123, stop=126)", 
+                       channel, command, cmd_code)
+        
+        # **USE MODE 0** for all dual motors
+        mode = 0
+        
+        # Build state word with EXPLICIT bit positioning
+        # Bit layout (32-bit big-endian):
+        #   Bits 31-25 (7 bits): Motor #1 command code
+        #   Bit  24:             Motor #1 auto-tilt (0=off)
+        #   Bits 23-17 (7 bits): Motor #2 command code
+        #   Bit  16:             Motor #2 auto-tilt (0=off)
+        #   Bits 15-0:           Reserved (0)
+        #
+        # 127 (0x7F) = "remain at current state" for motors
+        
+        # Mask command codes to 7 bits (0-127)
+        motor1_code = 0x7F  # Default: remain at state
+        motor2_code = 0x7F  # Default: remain at state
+        
         if channel == 1:
-            state_word = cmd_code
-        else:  # channel == 2
-            state_word = cmd_code << 2
-            
+            # Channel 1 = Motor #1: Set active command, Motor #2 stays at 127
+            motor1_code = cmd_code & 0x7F  # Mask to 7 bits
+            motor2_code = 127
+            _LOGGER.warning("🎯 Dual motor CH1 ACTIVE: motor1_code=%d (0x%02X), motor2_code=%d (0x%02X)", 
+                          motor1_code, motor1_code, motor2_code, motor2_code)
+        elif channel == 2:
+            # Channel 2 = Motor #2: Set active command, Motor #1 stays at 127
+            motor1_code = 127
+            motor2_code = cmd_code & 0x7F  # Mask to 7 bits
+            _LOGGER.warning("🎯 Dual motor CH2 ACTIVE: motor1_code=%d (0x%02X), motor2_code=%d (0x%02X)", 
+                          motor1_code, motor1_code, motor2_code, motor2_code)
+        
+        # Build 32-bit state word with explicit bit positioning
+        # Auto-tilt bits (24, 16) are 0 (off)
+        state_word = ((motor1_code & 0x7F) << 25) | ((motor2_code & 0x7F) << 17)
+        
+        _LOGGER.warning("📦 State word constructed: 0x%08X (motor1=%d at bits 31-25, motor2=%d at bits 23-17)", 
+                       state_word, motor1_code, motor2_code)
+        
         # Convert to 4 bytes in big-endian order
         state_bytes = [
             (state_word >> 24) & 0xFF,
@@ -1291,26 +1453,49 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             state_word & 0xFF
         ]
         
-        _LOGGER.debug("Dual motor CH%d command - %s (bits: 0x%08X)", channel, command, state_word)
-        return (0, state_bytes)
+        _LOGGER.warning("🔧 Dual motor CH%d command=%s: mode=%d, code=%d, state_word=0x%08X, bytes=[0x%02X, 0x%02X, 0x%02X, 0x%02X]", 
+                     channel, command, mode, cmd_code, state_word, state_bytes[0], state_bytes[1], state_bytes[2], state_bytes[3])
+        return (mode, state_bytes)
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
+        _LOGGER.warning("🔼 EWneo dual motor %s: async_open_cover called for channel %d", self._serial_number[-6:], self._channel)
         mode, state_bytes = self._create_dual_motor_command(self._channel, "open")
         if mode is not None:
+            # Set optimistic state for immediate UI feedback
             self._is_opening = True
             self._is_closing = False
             self.async_write_ha_state()
-            await self._send_ewb_change_state(mode, state_bytes)
+            
+            # Send command - response will update to actual state
+            success = await self._send_ewb_change_state(mode, state_bytes)
+            
+            # If command completely failed, reset to stopped
+            if not success:
+                _LOGGER.warning("⚠️ Dual motor CH%d: Command failed, resetting to stopped", self._channel)
+                self._is_opening = False
+                self._is_closing = False
+                self.async_write_ha_state()
         
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
+        _LOGGER.warning("🔽 EWneo dual motor %s: async_close_cover called for channel %d", self._serial_number[-6:], self._channel)
         mode, state_bytes = self._create_dual_motor_command(self._channel, "close")
         if mode is not None:
+            # Set optimistic state for immediate UI feedback
             self._is_opening = False
             self._is_closing = True
             self.async_write_ha_state()
-            await self._send_ewb_change_state(mode, state_bytes)
+            
+            # Send command - response will update to actual state
+            success = await self._send_ewb_change_state(mode, state_bytes)
+            
+            # If command completely failed, reset to stopped
+            if not success:
+                _LOGGER.warning("⚠️ Dual motor CH%d: Command failed, resetting to stopped", self._channel)
+                self._is_opening = False
+                self._is_closing = False
+                self.async_write_ha_state()
         
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
@@ -1326,19 +1511,60 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         position = kwargs.get(ATTR_POSITION)
         if position is None:
             return
+        
+        _LOGGER.info("🎯 EWneo dual motor %s: async_set_cover_position called for channel %d, position %d%%", 
+                    self._serial_number[-6:], self._channel, position)
             
         if not self._runtime_ever_measured:
             _LOGGER.warning("EWneo dual motor CH%d %s: Position control requires runtime measurement activation", 
                            self._channel, self._serial_number[-6:])
             return
-            
-        _LOGGER.info("Setting EWneo dual motor CH%d %s to position %d%%", 
-                    self._channel, self._serial_number[-6:], position)
-        # TODO: Implement EWB_CHANGE_STATE command for dual motor positioning
+        
+        # Convert HA position (0=closed, 100=open) to EWB position (0=open, 100=closed)
+        ewb_position = 100 - position
+        
+        # **USE MODE 0** for position commands
+        mode = 0
+        
+        # Build state word with EXPLICIT bit positioning
+        # Bit layout same as command: Bits 31-25 (motor1), Bits 23-17 (motor2)
+        # 127 = "remain at current state"
+        
+        motor1_pos = 127  # Default: remain
+        motor2_pos = 127  # Default: remain
+        
+        if self._channel == 1:
+            # Channel 1 = Motor #1: Set position, Motor #2 stays at 127
+            motor1_pos = ewb_position & 0x7F
+            motor2_pos = 127
+            _LOGGER.warning("🎯 Dual motor CH1 position: motor1=%d%%, motor2=remain(127)", motor1_pos)
+        elif self._channel == 2:
+            # Channel 2 = Motor #2: Set position, Motor #1 stays at 127
+            motor1_pos = 127
+            motor2_pos = ewb_position & 0x7F
+            _LOGGER.warning("🎯 Dual motor CH2 position: motor1=remain(127), motor2=%d%%", motor2_pos)
+        
+        # Build 32-bit state word
+        state_word = ((motor1_pos & 0x7F) << 25) | ((motor2_pos & 0x7F) << 17)
+        
+        # Convert to 4 bytes in big-endian order
+        state_bytes = [
+            (state_word >> 24) & 0xFF,
+            (state_word >> 16) & 0xFF,
+            (state_word >> 8) & 0xFF,
+            state_word & 0xFF
+        ]
+        
+        _LOGGER.info("🎯 Dual motor CH%d position %d%% (EWB:%d): mode=%d, state_word=0x%08X, bytes=[0x%02X, 0x%02X, 0x%02X, 0x%02X]", 
+                    self._channel, position, ewb_position, mode, state_word, 
+                    state_bytes[0], state_bytes[1], state_bytes[2], state_bytes[3])
+        
+        self._target_cover_position = position
+        await self._send_ewb_change_state(mode, state_bytes)
 
 
 class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
-    """EWneo quad motor cover entity with individual motor control and runtime measurement activation."""
+    """EWneo-QuadMotor cover entity with individual motor control and runtime measurement activation."""
 
     def __init__(
         self,
@@ -1349,8 +1575,35 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
     ) -> None:
         super().__init__(coordinator, serial_number, device_info)
         self._entity_spec = entity_spec
-        self._channel = int(entity_spec.get("channel", 1))
+        # Smart channel handling: entity_spec['channel'] can be 0-based OR 1-based  
+        # For quad motors: 0-based = (0,1,2,3), 1-based = (1,2,3,4)
+        # Detect and normalize to 1-based (1,2,3,4)
+        raw_channel = int(entity_spec.get("channel", 0))
+        if raw_channel <= 3:
+            # Could be 0-based (0,1,2,3) or 1-based (1,2,3)
+            # Check unique_id for hints: _ch0, _ch1, _ch2, _ch3 indicate 0-based
+            unique_id = entity_spec.get("unique_id", "")
+            if "_ch0" in unique_id or "_ch1" in unique_id or "_ch2" in unique_id or "_ch3" in unique_id:
+                # 0-based detected
+                self._channel = raw_channel + 1  # 0->1, 1->2, 2->3, 3->4
+                _LOGGER.warning("🆕 Quad Motor: Detected 0-based channel (unique_id=%s), converting %d -> %d", 
+                               unique_id, raw_channel, self._channel)
+            else:
+                # Assume 1-based (but validate)
+                if raw_channel == 0:
+                    # Channel 0 is never valid for 1-based, so must be 0-based index
+                    self._channel = 1
+                    _LOGGER.warning("⚠️ Quad Motor: Channel 0 invalid, correcting to 1")
+                else:
+                    self._channel = raw_channel  # Keep as is
+        else:
+            # raw_channel == 4: Must be 1-based channel 4
+            self._channel = raw_channel
+        
         self._available = True
+        
+        _LOGGER.warning("🆕 Quad Motor: entity_spec['channel']=%s (raw), unique_id=%s -> self._channel=%d (normalized)", 
+                       raw_channel, entity_spec.get("unique_id", "N/A"), self._channel)
         
         # EWneo specific attributes
         self._gateway_serial = device_info.get("gateway_serial")
@@ -1374,30 +1627,30 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
         # Runtime measurement activation tracking
         self._runtime_ever_measured = False  # Tracks if runtime measurement was ever detected
         
-        _LOGGER.info("🔧 Initializing EWneo quad motor cover CH%d: %s (gateway: %s, type_code: 0x%02X)", 
+        _LOGGER.info("🔧 Initializing EWneo-QuadMotor cover CH%d: %s (gateway: %s, type_code: 0x%02X)", 
                     self._channel, serial_number[-8:], self._gateway_serial[-8:] if self._gateway_serial else "None", self._device_type_code)
         
         # Set up entity attributes
-        self._attr_name = entity_spec.get("name", f"EWneo Quad Motor CH{self._channel} {serial_number[-6:]}")
+        self._attr_name = entity_spec.get("name", f"EWneo-QuadMotor CH{self._channel} {serial_number[-6:]}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_quad_motor_ch{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
+        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
         
-        # Set supported features based on runtime measurement
+        # Initially no position features - will be enabled after QUERY_STATE response
         self._update_supported_features()
         
-        _LOGGER.info("✅ EWneo quad motor cover entity CH%d initialized: %s (%s)", self._channel, self._attr_name, self._attr_unique_id)
+        _LOGGER.info("✅ EWneo-QuadMotor cover entity CH%d initialized: %s (%s)", self._channel, self._attr_name, self._attr_unique_id)
         
     async def _async_query_initial_state(self) -> None:
         """Query initial motor state for this specific channel to check for runtime measurement capability."""
         try:
-            _LOGGER.info("🔍 EWneo quad motor CH%d %s: Querying initial state for runtime measurement", 
+            _LOGGER.info("🔍 EWneo-QuadMotor CH%d %s: Querying initial state for runtime measurement", 
                         self._channel, self._serial_number[-8:])
             
-            # Mode mapping: Mode 2/10/18/26 for motors 1/2/3/4
-            mode_map = {1: 2, 2: 10, 3: 18, 4: 26}
-            query_mode = mode_map[self._channel]
+            # ALWAYS use Mode 0 for quad motors (all channels in one 32-bit word)
+            query_mode = 0
             
-            # Use coordinator to perform individual motor EwbQueryState
+            # Use coordinator to perform EwbQueryState with Mode 0
             result = await self.coordinator._query_ewneo_state_with_mode(
                 self._gateway_serial,
                 self._serial_number,
@@ -1405,31 +1658,33 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             )
             
             if result:
-                _LOGGER.info("✅ EWneo quad motor CH%d %s: Individual motor query successful, state will be processed via event", 
+                _LOGGER.info("✅ EWneo-QuadMotor CH%d %s: Mode 0 query successful, state will be processed via event", 
                             self._channel, self._serial_number[-8:])
             else:
-                _LOGGER.warning("⚠️ EWneo quad motor CH%d %s: Individual motor state query failed", 
+                _LOGGER.warning("⚠️ EWneo-QuadMotor CH%d %s: Mode 0 state query failed", 
                                self._channel, self._serial_number[-8:])
                 
         except Exception as e:
-            _LOGGER.error("❌ EWneo quad motor CH%d %s: Error during initial state query: %s", 
+            _LOGGER.error("❌ EWneo-QuadMotor CH%d %s: Error during initial state query: %s", 
                          self._channel, self._serial_number[-8:], e)
         
     def _update_supported_features(self) -> None:
-        """Update supported features based on motor capabilities."""
+        """Update supported features based on motor capabilities (QuadMotor)."""
         features = (
             CoverEntityFeature.OPEN |
             CoverEntityFeature.CLOSE |
             CoverEntityFeature.STOP
         )
         
-        # Add position control if runtime measurement was ever detected
-        if self._runtime_ever_measured:
+        # Add position control ONLY if runtime measurement is currently active
+        # This requires a QUERY_STATE with Mode 2/10/18/26 to detect
+        if self._runtime_measured:
             features |= CoverEntityFeature.SET_POSITION
+            _LOGGER.debug("EWneo-QuadMotor CH%d: Position control enabled (runtime_measured=True)", self._channel)
+        else:
+            _LOGGER.debug("EWneo-QuadMotor CH%d: Position control disabled (runtime_measured=False)", self._channel)
             
-        # Add tilt control if tilt measurement is available (binary tilt for EWneo)
-        if self._tilt_measured:
-            features |= CoverEntityFeature.OPEN_TILT | CoverEntityFeature.CLOSE_TILT
+        # Note: Tilt features removed - EWneo motors don't support tilt control
             
         self._attr_supported_features = features
 
@@ -1486,17 +1741,41 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
         """Handle entity added to hass."""
         await super().async_added_to_hass()
         
+        # Add NFILTER for gateway serial to enable bidirectional communication
+        if self._gateway_serial:
+            try:
+                filter_success = await self.coordinator.transceiver.rx11_ewb_add_filter(self._gateway_serial)
+                if filter_success:
+                    _LOGGER.info("✅ EWneo-QuadMotor CH%d %s: Added NFILTER for gateway %s", 
+                                self._channel, self._serial_number[-8:], self._gateway_serial[-8:])
+                else:
+                    _LOGGER.warning("⚠️ EWneo quad motor CH%d %s: Failed to add NFILTER for gateway %s", 
+                                   self._channel, self._serial_number[-8:], self._gateway_serial[-8:])
+            except Exception as e:
+                _LOGGER.error("❌ EWneo quad motor CH%d %s: Error adding NFILTER: %s", 
+                             self._channel, self._serial_number[-8:], e)
+        else:
+            _LOGGER.warning("⚠️ EWneo quad motor CH%d %s: No gateway serial configured", 
+                           self._channel, self._serial_number[-8:])
+        
         # Subscribe to EWneo state updates for quad motor devices
         async def handle_ewneo_state_update(event):
             try:
                 event_data = event.data
                 if event_data.get("serial_number") == self._serial_number:
-                    # Extract channel-specific data from quad motor response
-                    parsed_state = self._extract_channel_state(event_data.get("parsed_state", {}))
-                    if parsed_state:
-                        self.hass.add_job(self._async_update_state_from_parsed, parsed_state)
+                    parsed_state = event_data.get("parsed_state", {})
+                    
+                    # QuadMotor uses ONLY Mode 0 (multi_cover): All motors in one 32-bit word
+                    # Each entity extracts its own channel's state
+                    if parsed_state.get("type") == "multi_cover":
+                        channel_state = self._extract_channel_state(parsed_state)
+                        if channel_state:
+                            _LOGGER.debug("🔄 QuadMotor CH%d: Updating state from multi_cover", self._channel)
+                            self.hass.add_job(self._async_update_state_from_parsed, channel_state)
+                        else:
+                            _LOGGER.warning("⚠️ QuadMotor CH%d: Could not extract channel state", self._channel)
             except Exception as e:
-                _LOGGER.error("Error in quad motor state update handler: %s", e)
+                _LOGGER.error("Error in quad motor CH%d state update handler: %s", self._channel, e)
         
         self.hass.bus.async_listen(f"{DOMAIN}_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo quad motor CH%d %s: Registered state update event listener", 
@@ -1542,6 +1821,8 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
     
     async def _async_update_state_from_parsed(self, parsed_state: Dict[str, Any]) -> None:
         """Update cover state from parsed EWneo quad motor state (async for thread safety)."""
+        _LOGGER.warning("🔄 Quad Motor CH%d: Received state update: %s", self._channel, parsed_state)
+        
         old_position = self._current_cover_position
         old_is_opening = self._is_opening
         old_is_closing = self._is_closing
@@ -1551,8 +1832,13 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
         if parsed_state.get("position_available", False) and "position" in parsed_state:
             self._current_cover_position = parsed_state["position"]
         elif not parsed_state.get("runtime_measured", False):
-            # No runtime measurement - position unknown
+            # No runtime measurement - position is UNKNOWN, set to None
             self._current_cover_position = None
+        else:
+            # Runtime measured but no position available (e.g., during calibration or 120s mode)
+            # Keep current position or set to None if we don't have one
+            if self._current_cover_position is None:
+                self._current_cover_position = None
         
         # Update target position
         if "target_position" in parsed_state:
@@ -1612,18 +1898,52 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
-        _LOGGER.info("Opening EWneo quad motor CH%d %s", self._channel, self._serial_number[-6:])
-        # TODO: Implement EWB_CHANGE_STATE command for quad motor opening
+        _LOGGER.warning("🔼 EWneo quad motor %s: async_open_cover called for channel %d", self._serial_number[-6:], self._channel)
+        mode, state_bytes = self._create_quad_motor_command(self._channel, "open")
+        if mode is not None:
+            # Set optimistic state for immediate UI feedback
+            self._is_opening = True
+            self._is_closing = False
+            self.async_write_ha_state()
+            
+            # Send command - response will update to actual state
+            success = await self._send_ewb_change_state(mode, state_bytes)
+            
+            # If command completely failed, reset to stopped
+            if not success:
+                _LOGGER.warning("⚠️ Quad motor CH%d: Command failed, resetting to stopped", self._channel)
+                self._is_opening = False
+                self._is_closing = False
+                self.async_write_ha_state()
         
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
-        _LOGGER.info("Closing EWneo quad motor CH%d %s", self._channel, self._serial_number[-6:])
-        # TODO: Implement EWB_CHANGE_STATE command for quad motor closing
+        _LOGGER.warning("🔽 EWneo quad motor %s: async_close_cover called for channel %d", self._serial_number[-6:], self._channel)
+        mode, state_bytes = self._create_quad_motor_command(self._channel, "close")
+        if mode is not None:
+            # Set optimistic state for immediate UI feedback
+            self._is_opening = False
+            self._is_closing = True
+            self.async_write_ha_state()
+            
+            # Send command - response will update to actual state
+            success = await self._send_ewb_change_state(mode, state_bytes)
+            
+            # If command completely failed, reset to stopped
+            if not success:
+                _LOGGER.warning("⚠️ Quad motor CH%d: Command failed, resetting to stopped", self._channel)
+                self._is_opening = False
+                self._is_closing = False
+                self.async_write_ha_state()
         
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
-        _LOGGER.info("Stopping EWneo quad motor CH%d %s", self._channel, self._serial_number[-6:])
-        # TODO: Implement EWB_CHANGE_STATE command for quad motor stop
+        mode, state_bytes = self._create_quad_motor_command(self._channel, "stop")
+        if mode is not None:
+            self._is_opening = False
+            self._is_closing = False
+            self.async_write_ha_state()
+            await self._send_ewb_change_state(mode, state_bytes)
         
     async def _send_ewb_change_state(self, mode: int, state_bytes: list) -> bool:
         """Send EWB_CHANGE_STATE command to EWneo quad motor."""
@@ -1648,24 +1968,35 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
                 # Parse response for quad motor state
                 if len(response_state_bytes) >= 4:
                     parsed_state = self.coordinator._parse_ewneo_state(
-                        self._device_type_code, response_state_bytes[:4], "ewneo_quad_motor"
+                        self._device_type_code, response_state_bytes[:4], "ewneo_quad_motor", self._serial_number, mode=response_mode
                     )
                     
-                    if parsed_state and parsed_state.get("type") == "multi_cover":
-                        # Extract our channel's state from quad motor response
-                        channel_state = self._extract_channel_state(parsed_state)
-                        
-                        if channel_state:
-                            # Update state immediately
-                            await self._async_update_state_from_parsed(channel_state)
-                            _LOGGER.info("🎯 EWneo quad motor %s CH%d: State updated from EWB response - opening=%s, closing=%s, stopped=%s", 
+                    if parsed_state:
+                        if parsed_state.get("type") == "cover":
+                            # Individual motor response (Mode 2/10/18/26) - directly update state
+                            await self._async_update_state_from_parsed(parsed_state)
+                            _LOGGER.info("🎯 EWneo quad motor %s CH%d: State updated from individual response - opening=%s, closing=%s, stopped=%s", 
                                         self._serial_number[-6:], self._channel,
-                                        channel_state.get("is_opening", False),
-                                        channel_state.get("is_closing", False),
-                                        channel_state.get("is_stopped", True))
+                                        parsed_state.get("is_opening", False),
+                                        parsed_state.get("is_closing", False),
+                                        parsed_state.get("is_stopped", True))
+                        elif parsed_state.get("type") == "multi_cover":
+                            # Summary response (Mode 0) - extract our channel's state
+                            channel_state = self._extract_channel_state(parsed_state)
+                            
+                            if channel_state:
+                                await self._async_update_state_from_parsed(channel_state)
+                                _LOGGER.info("🎯 EWneo quad motor %s CH%d: State updated from summary response - opening=%s, closing=%s, stopped=%s", 
+                                            self._serial_number[-6:], self._channel,
+                                            channel_state.get("is_opening", False),
+                                            channel_state.get("is_closing", False),
+                                            channel_state.get("is_stopped", True))
+                            else:
+                                _LOGGER.warning("⚠️ EWneo quad motor %s CH%d: Could not extract channel state from summary response", 
+                                               self._serial_number[-6:], self._channel)
                         else:
-                            _LOGGER.warning("⚠️ EWneo quad motor %s CH%d: Could not extract channel state from response", 
-                                           self._serial_number[-6:], self._channel)
+                            _LOGGER.warning("⚠️ EWneo quad motor %s CH%d: Unknown response type: %s", 
+                                           self._serial_number[-6:], self._channel, parsed_state.get("type"))
                     else:
                         _LOGGER.warning("⚠️ EWneo quad motor %s CH%d: Failed to parse EWB response state", 
                                        self._serial_number[-6:], self._channel)
@@ -1687,22 +2018,46 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             return False
     
     def _create_quad_motor_command(self, channel: int, command: str) -> tuple[int, list]:
-        """Create quad motor command for specific channel.
+        """Create quad motor command for specific channel using Mode 0.
+        
+        IMPORTANT: Quad motors use Mode 0 (NOT Mode 2/10/18/26!) with channel-specific bit positioning,
+        exactly like quad switches. This ensures all channels receive commands in the same telegram.
+        
+        State word format for Mode 0 (quad motor, 32-bit big-endian):
+        - Bits 31-25: Motor #1 status code (0-100 position or 117-127 special command)
+        - Bit 24: Motor #1 auto-tilt flag
+        - Bits 23-17: Motor #2 status code
+        - Bit 16: Motor #2 auto-tilt flag
+        - Bits 15-9: Motor #3 status code
+        - Bit 8: Motor #3 auto-tilt flag
+        - Bits 7-1: Motor #4 status code
+        - Bit 0: Motor #4 auto-tilt flag
+        
+        Command codes:
+        - 0-100: Move to position (0=open, 100=closed)
+        - 126: Stop immediately
+        - 119: Stop and tilt to horizontal (requires tilt measurement)
+        - 120: Open for runtime duration
+        - 121: Close for runtime duration
+        - 122: Open for 120 seconds
+        - 123: Close for 120 seconds
         
         Args:
             channel: 1, 2, 3, or 4
-            command: 'stop', 'open', 'close'
+            command: 'stop', 'open', 'close', 'tilt_stop'
         """
         if channel not in [1, 2, 3, 4]:
             _LOGGER.error("Invalid channel %d for quad motor, must be 1-4", channel)
             return None, None
             
-        # Mode 0: Quad motor commands
-        # 2 bits per channel: 00=stop, 01=open, 10=close, 11=reserved
+        # Command mapping according to EWB specification
+        # SIMPLIFIED: Always use 120s commands for open/close
+        # Position commands use percentage values (handled separately in async_set_cover_position)
         command_map = {
-            "stop": 0,
-            "open": 1,
-            "close": 2
+            "stop": 126,         # Stop immediately
+            "open": 122,         # ALWAYS open for 120 seconds
+            "close": 123,        # ALWAYS close for 120 seconds
+            "tilt_stop": 119,    # Stop and tilt to horizontal
         }
         
         if command not in command_map:
@@ -1711,10 +2066,57 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             
         cmd_code = command_map[command]
         
-        # Channel 1 uses bits 1-0, Channel 2 uses bits 3-2, etc.
-        bit_offset = (channel - 1) * 2
-        state_word = cmd_code << bit_offset
-            
+        _LOGGER.warning("✅ Quad motor CH%d command='%s' -> code=%d (open=122, close=123, stop=126)", 
+                       channel, command, cmd_code)
+        
+        # **USE MODE 0** for all quad motors
+        mode = 0
+        
+        # Build state word with EXPLICIT bit positioning
+        # Bit layout (32-bit big-endian):
+        #   Bits 31-25 (7 bits): Motor #1 command code
+        #   Bit  24:             Motor #1 auto-tilt (0=off)
+        #   Bits 23-17 (7 bits): Motor #2 command code
+        #   Bit  16:             Motor #2 auto-tilt (0=off)
+        #   Bits 15-9  (7 bits): Motor #3 command code
+        #   Bit  8:              Motor #3 auto-tilt (0=off)
+        #   Bits 7-1   (7 bits): Motor #4 command code
+        #   Bit  0:              Motor #4 auto-tilt (0=off)
+        #
+        # 127 (0x7F) = "remain at current state" for motors
+        
+        # Initialize all motors to "remain at state" (127)
+        motor1_code = 127
+        motor2_code = 127
+        motor3_code = 127
+        motor4_code = 127
+        
+        # Set the active channel's command code
+        if channel == 1:
+            motor1_code = cmd_code & 0x7F
+            _LOGGER.warning("🎯 Quad motor CH1 ACTIVE: code=%d, others=127", motor1_code)
+        elif channel == 2:
+            motor2_code = cmd_code & 0x7F
+            _LOGGER.warning("🎯 Quad motor CH2 ACTIVE: code=%d, others=127", motor2_code)
+        elif channel == 3:
+            motor3_code = cmd_code & 0x7F
+            _LOGGER.warning("🎯 Quad motor CH3 ACTIVE: code=%d, others=127", motor3_code)
+        elif channel == 4:
+            motor4_code = cmd_code & 0x7F
+            _LOGGER.warning("🎯 Quad motor CH4 ACTIVE: code=%d, others=127", motor4_code)
+        
+        # Build 32-bit state word with explicit bit positioning
+        # Auto-tilt bits (24, 16, 8, 0) are all 0 (off)
+        state_word = (
+            ((motor1_code & 0x7F) << 25) |  # Bits 31-25: Motor #1
+            ((motor2_code & 0x7F) << 17) |  # Bits 23-17: Motor #2
+            ((motor3_code & 0x7F) << 9)  |  # Bits 15-9:  Motor #3
+            ((motor4_code & 0x7F) << 1)     # Bits 7-1:   Motor #4
+        )
+        
+        _LOGGER.warning("📦 State word: 0x%08X (m1=%d, m2=%d, m3=%d, m4=%d)", 
+                       state_word, motor1_code, motor2_code, motor3_code, motor4_code)
+        
         # Convert to 4 bytes in big-endian order
         state_bytes = [
             (state_word >> 24) & 0xFF,
@@ -1723,26 +2125,49 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             state_word & 0xFF
         ]
         
-        _LOGGER.debug("Quad motor CH%d command - %s (bits: 0x%08X)", channel, command, state_word)
-        return (0, state_bytes)
+        _LOGGER.info("🔧 Quad motor CH%d command=%s: mode=%d, code=%d, state_word=0x%08X, bytes=[0x%02X, 0x%02X, 0x%02X, 0x%02X]", 
+                     channel, command, mode, cmd_code, state_word, state_bytes[0], state_bytes[1], state_bytes[2], state_bytes[3])
+        return (mode, state_bytes)
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
+        _LOGGER.info("🔼 EWneo quad motor %s: async_open_cover called for channel %d", self._serial_number[-6:], self._channel)
         mode, state_bytes = self._create_quad_motor_command(self._channel, "open")
         if mode is not None:
+            # Set optimistic state for immediate UI feedback
             self._is_opening = True
             self._is_closing = False
             self.async_write_ha_state()
-            await self._send_ewb_change_state(mode, state_bytes)
+            
+            # Send command - response will update to actual state
+            success = await self._send_ewb_change_state(mode, state_bytes)
+            
+            # If command completely failed, reset to stopped
+            if not success:
+                _LOGGER.warning("⚠️ Quad motor CH%d: Command failed, resetting to stopped", self._channel)
+                self._is_opening = False
+                self._is_closing = False
+                self.async_write_ha_state()
         
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
+        _LOGGER.info("🔽 EWneo quad motor %s: async_close_cover called for channel %d", self._serial_number[-6:], self._channel)
         mode, state_bytes = self._create_quad_motor_command(self._channel, "close")
         if mode is not None:
+            # Set optimistic state for immediate UI feedback
             self._is_opening = False
             self._is_closing = True
             self.async_write_ha_state()
-            await self._send_ewb_change_state(mode, state_bytes)
+            
+            # Send command - response will update to actual state
+            success = await self._send_ewb_change_state(mode, state_bytes)
+            
+            # If command completely failed, reset to stopped
+            if not success:
+                _LOGGER.warning("⚠️ Quad motor CH%d: Command failed, resetting to stopped", self._channel)
+                self._is_opening = False
+                self._is_closing = False
+                self.async_write_ha_state()
         
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
@@ -1758,17 +2183,61 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
         position = kwargs.get(ATTR_POSITION)
         if position is None:
             return
+        
+        _LOGGER.info("🎯 EWneo quad motor %s: async_set_cover_position called for channel %d, position %d%%", 
+                    self._serial_number[-6:], self._channel, position)
             
         if not self._runtime_ever_measured:
             _LOGGER.warning("EWneo quad motor CH%d %s: Position control requires runtime measurement activation", 
                            self._channel, self._serial_number[-6:])
-            # Fallback to simple open/close
-            if position >= 50:
-                await self.async_open_cover()
-            else:
-                await self.async_close_cover()
             return
-            
-        _LOGGER.info("Setting EWneo quad motor CH%d %s to position %d%%", 
-                    self._channel, self._serial_number[-6:], position)
-        # TODO: Implement positioning for quad motors when specification is available
+        
+        # Convert HA position (0=closed, 100=open) to EWB position (0=open, 100=closed)
+        ewb_position = 100 - position
+        
+        # **USE MODE 0** for position commands
+        mode = 0
+        
+        # Build state word with EXPLICIT bit positioning
+        # Initialize all motors to "remain at state" (127)
+        motor1_pos = 127
+        motor2_pos = 127
+        motor3_pos = 127
+        motor4_pos = 127
+        
+        # Set the active channel's position
+        if self._channel == 1:
+            motor1_pos = ewb_position & 0x7F
+            _LOGGER.warning("🎯 Quad CH1 position: m1=%d%%, others=127", motor1_pos)
+        elif self._channel == 2:
+            motor2_pos = ewb_position & 0x7F
+            _LOGGER.warning("🎯 Quad CH2 position: m2=%d%%, others=127", motor2_pos)
+        elif self._channel == 3:
+            motor3_pos = ewb_position & 0x7F
+            _LOGGER.warning("🎯 Quad CH3 position: m3=%d%%, others=127", motor3_pos)
+        elif self._channel == 4:
+            motor4_pos = ewb_position & 0x7F
+            _LOGGER.warning("🎯 Quad CH4 position: m4=%d%%, others=127", motor4_pos)
+        
+        # Build 32-bit state word
+        state_word = (
+            ((motor1_pos & 0x7F) << 25) |
+            ((motor2_pos & 0x7F) << 17) |
+            ((motor3_pos & 0x7F) << 9)  |
+            ((motor4_pos & 0x7F) << 1)
+        )
+        
+        # Convert to 4 bytes in big-endian order
+        state_bytes = [
+            (state_word >> 24) & 0xFF,
+            (state_word >> 16) & 0xFF,
+            (state_word >> 8) & 0xFF,
+            state_word & 0xFF
+        ]
+        
+        _LOGGER.info("🎯 Quad motor CH%d position %d%% (EWB:%d): mode=%d, state_word=0x%08X, bytes=[0x%02X, 0x%02X, 0x%02X, 0x%02X]", 
+                    self._channel, position, ewb_position, mode, state_word, 
+                    state_bytes[0], state_bytes[1], state_bytes[2], state_bytes[3])
+        
+        self._target_cover_position = position
+        await self._send_ewb_change_state(mode, state_bytes)

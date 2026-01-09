@@ -6,7 +6,7 @@ import logging
 import serial
 import serial.tools.list_ports
 import time
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from ..base import BaseTransceiver, TransceiverType, TransceiverCapabilities, DeviceInfo
 from .wrapper import RX11Wrapper
@@ -92,6 +92,9 @@ class RX11Transceiver(BaseTransceiver):
         """Initialize RX11 transceiver."""
         super().__init__(device_path)
         
+        # Home Assistant reference (set during async_setup)
+        self._hass = None
+        
         # RX11-specific attributes
         self._rx11_wrapper: Optional[RX11Wrapper] = None
         self._hw_version: Optional[str] = None
@@ -165,6 +168,9 @@ class RX11Transceiver(BaseTransceiver):
 
     async def async_setup(self, hass) -> bool:
         """Set up the RX11 transceiver."""
+        # Store hass reference for proper event loop access
+        self._hass = hass
+        
         if not self.device_path:
             _LOGGER.info("RX11 transceiver in offline mode - skipping device validation")
             return True
@@ -627,30 +633,48 @@ class RX11Transceiver(BaseTransceiver):
         # Erstelle einen Wrapper-Callback für den RX11 Wrapper
         if self._rx11_wrapper and hasattr(self._rx11_wrapper, 'set_telegram_callback'):
             def wrapper_callback(info_type: int, receiver_transmitter: bytes, info_data: bytes) -> None:
+                _LOGGER.warning("🚀 WRAPPER_CALLBACK STARTED! info_type=%s, receiver_len=%d, data_len=%d", 
+                              info_type, len(receiver_transmitter), len(info_data))
                 try:
-                    _LOGGER.info("📨 Telegram wrapper callback triggered: info_type=%s", info_type)
                     # Parse rohe Daten zu strukturiertem Dictionary
                     telegram_data = self._parse_telegram_data(info_type, receiver_transmitter, info_data)
                     
+                    if not telegram_data:
+                        _LOGGER.error("❌ Failed to parse telegram data!")
+                        return
+                    
+                    _LOGGER.warning("📨 Parsed telegram: Serial=%s (full), Type=%s", 
+                                  telegram_data.get("serial_number", "unknown"),
+                                  telegram_data.get("type"))
+                    
                     # Verify callback is still available
                     current_callback = self._telegram_callback
-                    _LOGGER.info("🔍 Current callback state: %s (type: %s)", bool(current_callback), type(current_callback) if current_callback else "None")
+                    if not current_callback:
+                        _LOGGER.error("❌ No callback registered!")
+                        return
                     
-                    if telegram_data and current_callback:
-                        _LOGGER.info("📤 Calling coordinator callback with telegram: %s", telegram_data.get("serial_number", "unknown")[-8:])
-                        # Schedule async callback in event loop
-                        import asyncio
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(current_callback(telegram_data))
-                        else:
-                            loop.run_until_complete(current_callback(telegram_data))
-                    else:
-                        _LOGGER.warning("⚠️ Skipping callback: telegram_data=%s, callback=%s", bool(telegram_data), bool(current_callback))
+                    _LOGGER.warning("📤 Scheduling coordinator callback...")
+                    
+                    # CRITICAL: Use asyncio.ensure_future for guaranteed execution
+                    import asyncio
+                    try:
+                        # Ensure the coroutine is scheduled on the event loop
+                        future = asyncio.ensure_future(current_callback(telegram_data))
+                        _LOGGER.warning("✅ Future created and scheduled: %s", future)
+                        
+                        # Add done callback to log completion
+                        def log_done(f):
+                            if f.exception():
+                                _LOGGER.error("❌ Callback failed: %s", f.exception())
+                            else:
+                                _LOGGER.warning("✅ Callback completed successfully")
+                        future.add_done_callback(log_done)
+                        
+                    except Exception as e:
+                        _LOGGER.error("❌ Failed to schedule callback: %s", e, exc_info=True)
+                        
                 except Exception as e:
-                    _LOGGER.error("Error in telegram callback wrapper: %s", e)
-                    import traceback
-                    _LOGGER.error("Full traceback: %s", traceback.format_exc())
+                    _LOGGER.error("❌ Error in telegram callback wrapper: %s", e, exc_info=True)
             
             self._rx11_wrapper.set_telegram_callback(wrapper_callback)
             _LOGGER.info("🔗 Telegram callback weitergegeben an RX11 Wrapper")
@@ -662,10 +686,14 @@ class RX11Transceiver(BaseTransceiver):
     def _parse_telegram_data(self, info_type: int, receiver_transmitter: bytes, info_data: bytes) -> Optional[Dict[str, Any]]:
         """Parse raw telegram data into structured format."""
         try:
+            _LOGGER.warning("🔬 PARSING: receiver_transmitter length=%d, bytes=%s", 
+                          len(receiver_transmitter), receiver_transmitter.hex().upper() if receiver_transmitter else "None")
+            
             # Extrahiere Seriennummer aus receiver_transmitter (16 bytes)
             if len(receiver_transmitter) >= 16:
                 serial_hex = receiver_transmitter[:16].hex().upper()
                 serial_number = serial_hex
+                _LOGGER.warning("🔬 PARSED SERIAL: %s (from %d bytes)", serial_number, len(receiver_transmitter))
             else:
                 _LOGGER.warning("Invalid receiver_transmitter length: %d", len(receiver_transmitter))
                 return None
@@ -680,6 +708,10 @@ class RX11Transceiver(BaseTransceiver):
             elif info_type == 2:
                 device_type = "ew_sensor" 
                 type_name = "sensor"
+            elif info_type == 3:
+                # EWB-Telegramm (EWneo bidirectional device)
+                device_type = "ewneo_receiver"
+                type_name = "ewb_rcv"
             else:
                 device_type = "unknown"
                 type_name = "unknown"
@@ -820,6 +852,9 @@ class RX11Transceiver(BaseTransceiver):
                 telegram_data["measurement_types"] = available_sensors
                 telegram_data["sensor_capabilities"] = available_sensors + ["battery"]
                 
+                # Add raw data bytes for device instance processing
+                telegram_data["data"] = list(info_data) if info_data else []
+                
                 # Parse tatsächliche Sensor-Messwerte aus info_data
                 if len(info_data) >= 7:
                     # EWneo-Sensor Telegramm-Format (offiziell dokumentiert):
@@ -941,6 +976,18 @@ class RX11Transceiver(BaseTransceiver):
                 else:
                     _LOGGER.debug("EW-Sensor telegram too short for measurement data: %d bytes", len(info_data))
             
+            # Handle EWB telegrams (info_type == 3) for EWneo devices
+            if info_type == 3:
+                _LOGGER.info("📡 EWB telegram received: Serial=%s, Data=%s", 
+                           serial_number, info_data.hex() if info_data else "")
+                
+                # EWB telegrams contain state updates for EWneo devices
+                # The info_data contains the state bytes that need to be parsed by the coordinator
+                telegram_data["is_ewb_telegram"] = True
+                telegram_data["state_bytes"] = list(info_data) if info_data else []
+                
+                _LOGGER.info("✅ EWB telegram parsed for coordinator processing")
+            
             # Generiere Gerätename
             device_name = f"{device_type.replace('_', ' ').title()} {serial_number[-6:]}"
             telegram_data["name"] = device_name
@@ -981,6 +1028,10 @@ class RX11Transceiver(BaseTransceiver):
         
         if not hasattr(self, '_telegram_callback') or not self._telegram_callback:
             _LOGGER.warning("❌ No main telegram callback set: %s", telegram_data.hex() if telegram_data else "None")
+
+    def get_device(self, serial_number: str) -> Optional[Any]:
+        """Get device instance by serial number."""
+        return self._device_instances.get(serial_number)
 
     async def register_device(self, serial_number: str, device_info: dict) -> None:
         """Register a device with the RX11 transceiver."""
@@ -1273,3 +1324,191 @@ class RX11Transceiver(BaseTransceiver):
             return await self._rx11_wrapper.rx11_ewb_receive_telegram()
         _LOGGER.warning("RX11 wrapper not available for EWB management")
         return None
+
+    # ==================== RX11 Device Helper Functions ====================
+    # These functions handle RX11-specific device creation, cleanup and restoration
+    # Moved from coordinator.py to maintain proper architectural boundaries
+    
+    async def create_rx11_ew_device_info(
+        self,
+        serial_number: str,
+        device_type: str,
+        device_name: str = None,
+        channels: int = 1,
+        detected_via: str = "manual",
+        info_type: int = None,
+        timestamp: float = None,
+        device_registry = None,
+        ew_receiver_allocator: Callable = None
+    ) -> Dict[str, Any] | None:
+        """Create simplified device info for RX11-based devices with persistent serial storage.
+        
+        Args:
+            serial_number: Device serial number
+            device_type: Type of device (e.g., 'EW_Receiver', 'ew_sensor')
+            device_name: Optional device name
+            channels: Number of channels (default 1)
+            detected_via: Detection method (default 'manual')
+            info_type: Optional info type
+            timestamp: Optional timestamp
+            device_registry: DeviceRegistry instance for persistent storage
+            ew_receiver_allocator: Callback to allocate EW-Receiver (returns Dict with receiver data)
+            
+        Returns:
+            Device info dictionary or None on error
+        """
+        try:
+            from datetime import datetime
+            
+            # Base device info
+            device_info = {
+                "serial_number": serial_number,
+                "type": device_type,
+                "name": device_name or f"ELDAT {device_type} {serial_number[-6:]}",
+                "channels": channels,
+                "detected_via": detected_via,
+                "added_manually": True,
+                "timestamp": timestamp or time.time(),
+                "last_seen": datetime.now().isoformat(),
+                "persistent_storage": True,  # Mark for enhanced persistence
+            }
+            
+            # Special handling for EW-Receiver devices with persistent serial storage
+            if device_type == "EW_Receiver" or device_type.lower() == "ew_receiver":
+                if ew_receiver_allocator:
+                    ew_receiver_data = await ew_receiver_allocator(serial_number)
+                    if ew_receiver_data:
+                        device_info.update(ew_receiver_data)
+                        _LOGGER.info("📝 EW-Receiver serial %s permanently stored for device %s", 
+                                   ew_receiver_data.get("ew_receiver_serial", "unknown")[-8:], 
+                                   serial_number[-8:])
+                    else:
+                        _LOGGER.error("Failed to allocate EW-Receiver for device %s", serial_number)
+                        return None
+                else:
+                    _LOGGER.warning("No EW-Receiver allocator provided for device %s", serial_number)
+            
+            # For sensor devices, ensure they have sensor capabilities
+            elif device_type in ["ew_sensor", "ew_transceiver"]:
+                device_info.update({
+                    "available_sensors": ["temperature", "humidity"],
+                    "measurement_types": ["temperature", "humidity"],
+                    "sensor_types": ["temperature", "humidity"],
+                    "supports_sensors": True,
+                })
+            
+            if info_type is not None:
+                device_info["info_type"] = info_type
+                
+            return device_info
+            
+        except Exception as e:
+            _LOGGER.error("Error creating RX11 device info: %s", e)
+            return None
+
+    async def cleanup_rx11_device(
+        self,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        device_registry = None,
+        index_free_callback: Callable = None
+    ) -> None:
+        """Clean up RX11-based device resources including EW-Receiver mappings.
+        
+        Args:
+            serial_number: Device serial number
+            device_info: Device information dictionary
+            device_registry: DeviceRegistry instance
+            index_free_callback: Callback to free EW-Receiver index (func(index))
+        """
+        try:
+            device_type = device_info.get("type", "unknown")
+            
+            # Clean up EW-Receiver mapping if this was an EW-Receiver device
+            ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
+            ew_receiver_serial = device_info.get("ew_receiver_serial")
+            
+            if ew_receiver_index is not None:
+                # Remove EW-Receiver mapping from device registry
+                if device_registry and ew_receiver_serial:
+                    if device_registry.remove_ew_receiver_mapping(ew_receiver_index):
+                        _LOGGER.info("🗑️ Removed EW-Receiver mapping: Index %d, Serial %s", 
+                                   ew_receiver_index, ew_receiver_serial[-8:])
+                
+                # Free up receiver index persistently
+                if index_free_callback:
+                    index_free_callback(ew_receiver_index)
+                    _LOGGER.info("♻️ Freed EW-Receiver index %d for reuse", ew_receiver_index)
+            
+            # Save device manager changes
+            if device_registry and hasattr(device_registry, 'save'):
+                await device_registry.save()
+            
+            _LOGGER.info("🧹 RX11 device cleanup completed for %s (%s)", serial_number[-8:], device_type)
+            
+        except Exception as e:
+            _LOGGER.error("Error cleaning up RX11 device %s: %s", serial_number, e)
+
+    async def restore_rx11_device(
+        self,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        device_registry = None,
+        index_used_callback: Callable = None,
+        whitelist_callback: Callable = None
+    ) -> None:
+        """Restore RX11-based device with persistent EW-Receiver serial handling.
+        
+        Args:
+            serial_number: Device serial number
+            device_info: Device information dictionary
+            device_registry: DeviceRegistry instance
+            index_used_callback: Callback to mark index as used (func(index, serial, device_serial, name))
+            whitelist_callback: Callback to add to whitelist (func(serial, index, type, source))
+        """
+        try:
+            from datetime import datetime
+            
+            device_type = device_info.get("type", device_info.get("device_type", "unknown"))
+            
+            # Restore EW-Receiver serial mapping if present (unidirectional EW devices)
+            ew_receiver_serial = device_info.get("ew_receiver_serial")
+            ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
+            
+            if ew_receiver_serial and ew_receiver_index is not None:
+                # Restore EW-Receiver mapping in device registry
+                if device_registry:
+                    device_registry.store_ew_receiver_mapping(
+                        ew_receiver_index, ew_receiver_serial, serial_number
+                    )
+                
+                # Mark receiver as used persistently
+                if index_used_callback:
+                    device_name = device_info.get("name", f"EW-Receiver ({serial_number[-6:]})")
+                    index_used_callback(ew_receiver_index, ew_receiver_serial, serial_number, device_name)
+                
+                # Add to whitelist (memory-only during setup)
+                if whitelist_callback:
+                    whitelist_callback(
+                        serial_number=serial_number,
+                        rx11_index=ew_receiver_index,
+                        device_type=device_type,
+                        source="GetFdSerial"
+                    )
+                
+                _LOGGER.info("🔄 Restored EW-Receiver mapping: Index %d, Serial %s → Device %s", 
+                           ew_receiver_index, ew_receiver_serial[-8:], serial_number[-8:])
+            
+            # Ensure RX11-based devices have proper sensor configuration
+            if device_type in ["ew_sensor", "ew_transceiver"] and not device_info.get("available_sensors"):
+                device_info.update({
+                    "available_sensors": ["temperature", "humidity"],
+                    "measurement_types": ["temperature", "humidity"],
+                    "sensor_types": ["temperature", "humidity"],
+                    "supports_sensors": True,
+                    "rx11_based": True,
+                })
+                _LOGGER.info("🎯 Enhanced RX11 sensor configuration for device %s", serial_number[-8:])
+                
+        except Exception as e:
+            _LOGGER.error("Error restoring RX11 device %s: %s", serial_number, e)

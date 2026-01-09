@@ -33,6 +33,9 @@ async def async_setup_entry(
     coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
     switches: List[SwitchEntity] = []
+    
+    # Track which devices have had entities created to prevent duplicates
+    created_device_serials = set()
 
     # Restore switches from saved devices (both legacy and registered)
     for serial_number, device_info in coordinator.get_all_devices().items():
@@ -45,23 +48,31 @@ async def async_setup_entry(
             switch_entities = entity_specs.get("switch", [])
             
             for entity_spec in switch_entities:
-                switches.append(EldatConfiguredSwitch(coordinator, serial_number, device_info, entity_spec))
+                switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
             
+            created_device_serials.add(serial_number)
             _LOGGER.info("🌡️ Restored %d heating/cooling switch entities for device %s", 
                        len([e for e in switches if e._serial_number == serial_number]), serial_number[-8:])
             continue
         
         # Skip devices that already have configured entities of any type (non-heating_cooling and non-EWneo)
         device_entities = device_info.get("entities", [])
-        is_neo_device = device_info.get("neo_device", False)
+        is_neo_device = device_info.get("neo_device", False) or device_info.get("device_type_code") in [0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B]
         has_configured_entities = any(entity.get("type") in ["button", "light", "cover", "switch"] for entity in device_entities)
         
-        # EWneo devices must always go through _create_switches_for_device for proper entity creation
-        if not has_configured_entities or is_neo_device:
+        # Create EWneo switches during setup - they need to be created here for startup
+        if is_neo_device:
             device_switches = _create_switches_for_device(coordinator, serial_number, device_info)
             switches.extend(device_switches)
-            if is_neo_device:
-                _LOGGER.info("🔧 Created %d EWneo switch entities for device %s", len(device_switches), serial_number[-8:])
+            created_device_serials.add(serial_number)
+            if device_switches:
+                _LOGGER.info("🔧 Created %d EWneo switch entities for device %s during setup", len(device_switches), serial_number[-8:])
+            continue
+        
+        # For non-EWneo devices without configured entities, use legacy creation
+        if not has_configured_entities:
+            device_switches = _create_switches_for_device(coordinator, serial_number, device_info)
+            switches.extend(device_switches)
         else:
             _LOGGER.debug("Skipping legacy switch creation for %s - device has %d configured entities", serial_number[-8:], len(device_entities))
 
@@ -74,27 +85,51 @@ async def async_setup_entry(
         try:
             serial_number = event.data.get("serial_number")
             device_info = event.data.get("device_info")
-            entity_info = event.data.get("entity_info", {})
-            platforms = entity_info.get("platforms", set())
+            entities = event.data.get("entities", [])
+            platforms = event.data.get("platforms", set())
 
             if not serial_number or not device_info:
                 _LOGGER.debug("Device added event missing data, skipping")
                 return
-
-            # Skip if this device has platform-specific handler OR any configured entities
-            device_entities = device_info.get("entities", [])
-            has_configured_entities = any(entity.get("type") in ["button", "light", "cover", "switch"] for entity in device_entities)
             
-            if "switch" in platforms or has_configured_entities:
+            # Skip if this device already had entities created during setup
+            if serial_number in created_device_serials:
+                _LOGGER.debug("Skipping switch creation for %s - already created during setup", serial_number[-8:])
                 return
 
-            new_switches = _create_switches_for_device(coordinator, serial_number, device_info)
+            # Check if we have switch entities in the entities list
+            switch_entities = [e for e in entities if e.get("type") == "switch"]
+            
+            if not switch_entities and "switch" not in platforms:
+                _LOGGER.debug("No switch entities or platform for device %s, skipping", serial_number[-8:])
+                return
+
+            # Check if this is an EWneo device - skip here, will be handled by platform-specific handler
+            device_type_code = device_info.get("device_type_code", 0)
+            is_neo_device = device_type_code in [0x03, 0x06, 0x07] or device_info.get("neo_device", False)
+            
+            if is_neo_device:
+                _LOGGER.debug("Skipping EWneo device %s in generic handler - will be handled by platform-specific handler", serial_number[-8:])
+                return
+            
+            _LOGGER.info("🔧 Creating switch entities for device %s: neo=%s, entities=%d", 
+                        serial_number[-8:], is_neo_device, len(switch_entities))
+
+            new_switches = []
+            if switch_entities:
+                # Use entity specs from the event (non-EWneo devices only)
+                for entity_spec in switch_entities:
+                    new_switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
+            else:
+                # Fallback to legacy creation
+                new_switches = _create_switches_for_device(coordinator, serial_number, device_info)
+
             if new_switches:
                 async_add_entities(new_switches)
-                _LOGGER.info("Added %d legacy switch entities for device %s", len(new_switches), serial_number)
+                _LOGGER.info("✅ Added %d switch entities for device %s", len(new_switches), serial_number[-8:])
 
-        except Exception:  # log inside
-            _LOGGER.exception("Error handling generic device added event for switches")
+        except Exception:
+            _LOGGER.exception("Error handling device added event for switches")
 
     # Platform-specific handler
     async def _handle_switch_device_added(event):
@@ -107,9 +142,16 @@ async def async_setup_entry(
             if not serial_number or not entities:
                 _LOGGER.debug("Switch-specific device added event missing data")
                 return
+            
+            # Skip if this device already had entities created during setup
+            if serial_number in created_device_serials and not force_create:
+                _LOGGER.debug("Skipping switch creation for %s - already created during setup", serial_number[-8:])
+                return
 
             # Check if this is an EWneo device - if so, create EWneo switch entities
-            is_neo_device = device_info.get("neo_device", False)
+            device_type_code = device_info.get("device_type_code", 0)
+            is_neo_device = device_type_code in [0x03, 0x06, 0x07] or device_info.get("neo_device", False)
+            
             if is_neo_device:
                 _LOGGER.info("🔧 Creating EWneo switch entities from event for device %s", serial_number[-8:])
                 new_switches = []
@@ -119,6 +161,7 @@ async def async_setup_entry(
                 
                 if new_switches:
                     async_add_entities(new_switches)
+                    created_device_serials.add(serial_number)
                     _LOGGER.info("✅ Created %d EWneo switch entities for device %s", len(new_switches), serial_number[-8:])
                 return
 
@@ -127,7 +170,7 @@ async def async_setup_entry(
             for entity_spec in entities:
                 if entity_spec.get("type") == "switch":
                     new_switches.append(
-                        EldatConfiguredSwitch(
+                        EldatEWReceiverSwitch(
                             coordinator=coordinator,
                             serial_number=serial_number,
                             device_info=device_info,
@@ -165,7 +208,7 @@ async def async_setup_entry(
             new_switches = []
             for entity_spec in switch_entities:
                 new_switches.append(
-                    EldatConfiguredSwitch(
+                    EldatEWReceiverSwitch(
                         coordinator=coordinator,
                         serial_number=serial_number,
                         device_info=device_info,
@@ -205,7 +248,7 @@ async def async_setup_entry(
                 new_switches = []
                 for entity_spec in switch_entities:
                     new_switches.append(
-                        EldatConfiguredSwitch(
+                        EldatEWReceiverSwitch(
                             coordinator=coordinator,
                             serial_number=serial_number,
                             device_info=device_info,
@@ -220,10 +263,8 @@ async def async_setup_entry(
         except Exception:
             _LOGGER.exception("Error handling registered device for switches")
 
+    # Register event listeners (only once!)
     config_entry.async_on_unload(hass.bus.async_listen(EVENT_DEVICE_ADDED, _handle_device_added))
-    config_entry.async_on_unload(hass.bus.async_listen(f"{EVENT_DEVICE_ADDED}_switch", _handle_switch_device_added))
-    config_entry.async_on_unload(hass.bus.async_listen(EVENT_FORCE_CREATE, _handle_force_create))
-    config_entry.async_on_unload(hass.bus.async_listen(f"{DOMAIN}_device_registered", _handle_registered_device_added))
     config_entry.async_on_unload(hass.bus.async_listen(f"{EVENT_DEVICE_ADDED}_switch", _handle_switch_device_added))
     config_entry.async_on_unload(hass.bus.async_listen(EVENT_FORCE_CREATE, _handle_force_create))
     config_entry.async_on_unload(hass.bus.async_listen(f"{DOMAIN}_device_registered", _handle_registered_device_added))
@@ -244,11 +285,13 @@ def _create_switches_for_device(coordinator: EldatCoordinator, serial_number: st
                 serial_number[-8:], device_type, is_neo_device)
     
     # Skip sensors entirely - they should not have switch entities
-    if device_type == "ew_sensor":
+    if device_type in ["ew_sensor", "ewneo_sensor"]:
+        _LOGGER.debug("Skipping switch creation for sensor device %s (type: %s)", serial_number[-8:], device_type)
         return switches
     
     # Skip EW transmitters entirely - they should only have binary sensor entities
     if device_type == "ew_transmitter":
+        _LOGGER.debug("Skipping switch creation for transmitter device %s", serial_number[-8:])
         return switches
     
     # For EW-Receivers, only create switches if explicitly configured as switches
@@ -260,7 +303,7 @@ def _create_switches_for_device(coordinator: EldatCoordinator, serial_number: st
             # Only create switch entities that are explicitly configured
             for spec in entity_specs:
                 if spec.get("type") == "switch":
-                    switches.append(EldatConfiguredSwitch(coordinator, serial_number, device_info, spec))
+                    switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, spec))
                     
             # For heating/cooling receivers, always create a switch even if not explicitly configured
             # but only if no switch entities were already created
@@ -318,10 +361,17 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
     ) -> None:
+        # Initialize parent without automatic coordinator updates
+        # We manage state updates manually from command responses
         super().__init__(coordinator, serial_number, device_info)
+        
+        # Disable automatic coordinator updates
+        self._attr_should_poll = False
+        
         self._entity_spec = entity_spec
-        self._channel = int(entity_spec.get("channel", 1))
+        self._channel = int(entity_spec.get("channel", 0))  # 0-based channel index
         self._available = True
+        self._initial_state_queried = False  # Track if initial state query completed
         
         # EWneo specific attributes
         self._gateway_serial = device_info.get("gateway_serial")
@@ -351,12 +401,41 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
     
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return self._available and self.coordinator.last_update_success
+        """Return if entity is available.
+        
+        EWneo devices are always available if the transceiver is connected,
+        since they communicate bidirectionally and maintain their own state.
+        """
+        # Check if transceiver is connected
+        if hasattr(self.coordinator, 'transceiver') and self.coordinator.transceiver:
+            return self.coordinator.transceiver.is_connected
+        
+        # Fallback to coordinator availability
+        return self._available
     
     async def async_added_to_hass(self) -> None:
-        """When entity is added to hass, set up event listeners."""
-        await super().async_added_to_hass()
+        """When entity is added to hass."""
+        # Don't call super() to avoid subscribing to coordinator updates
+        # EWneo switches manage their own state from command responses
+        
+        # Only register with the entity registry
+        await self.async_internal_added_to_hass()
+        
+        # Add NFILTER for gateway serial to enable bidirectional communication
+        if self._gateway_serial:
+            try:
+                filter_success = await self.coordinator.transceiver.rx11_ewb_add_filter(self._gateway_serial)
+                if filter_success:
+                    _LOGGER.info("✅ EWneo switch %s: Added NFILTER for gateway %s", 
+                                self._serial_number[-8:], self._gateway_serial[-8:])
+                else:
+                    _LOGGER.warning("⚠️ EWneo switch %s: Failed to add NFILTER for gateway %s", 
+                                   self._serial_number[-8:], self._gateway_serial[-8:])
+            except Exception as e:
+                _LOGGER.error("❌ EWneo switch %s: Error adding NFILTER: %s", self._serial_number[-8:], e)
+        else:
+            _LOGGER.warning("⚠️ EWneo switch %s: No gateway serial configured, bidirectional communication may not work", 
+                           self._serial_number[-8:])
         
         # Listen for EWneo state update events
         def handle_ewneo_state_update(event):
@@ -371,21 +450,122 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         # Register the event listener
         self.hass.bus.async_listen(f"{DOMAIN}_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo switch %s: Registered state update event listener", self._serial_number[-8:])
+        
+        # Query initial state from device
+        if self._gateway_serial:
+            self.hass.async_create_task(self._query_initial_state())
+    
+    async def _query_initial_state(self) -> None:
+        """Query initial state from device using EWB_QUERY_STATE."""
+        try:
+            # Skip if a command has already been sent (prevents race condition)
+            if self._initial_state_queried:
+                _LOGGER.debug("⏭️ Skipping initial state query for EWneo switch %s CH%d (command already sent)", 
+                            self._serial_number[-6:], self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1)
+                return
+            
+            _LOGGER.info("🔍 Querying initial state for EWneo switch %s CH%d", 
+                        self._serial_number[-6:], self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1)
+            
+            # Query with mode 0 (on/off state)
+            result = await self.coordinator.transceiver.rx11_ewb_query_state(
+                self._gateway_serial, self._serial_number, mode=0
+            )
+            
+            if result:
+                recent_mode, recent_state_bytes = result
+                _LOGGER.debug("EWneo switch %s: Query state successful, mode=%d, state=%s", 
+                             self._serial_number[-6:], recent_mode, 
+                             [f"0x{b:02X}" for b in recent_state_bytes])
+                
+                # Parse the state
+                parsed_state = self.coordinator._parse_ewneo_state(
+                    self._device_type_code, recent_state_bytes, "ewneo_switch", self._serial_number
+                )
+                
+                if parsed_state and parsed_state.get("type") == "switch":
+                    # For dual/quad switches, extract the channel-specific state
+                    if self._device_type_code in [0x06, 0x07]:
+                        channel_key = f"channel_{self._channel + 1}"
+                        channel_state = parsed_state.get(channel_key, {})
+                        self._is_on = channel_state.get("on", False)
+                        _LOGGER.info("✅ EWneo dual/quad switch %s CH%d: Initial state is %s", 
+                                    self._serial_number[-6:], self._channel + 1, "ON" if self._is_on else "OFF")
+                    else:
+                        # Single switch
+                        self._is_on = parsed_state.get("on", False)
+                        _LOGGER.info("✅ EWneo switch %s: Initial state is %s", 
+                                    self._serial_number[-6:], "ON" if self._is_on else "OFF")
+                    
+                    self._initial_state_queried = True
+                    self.async_write_ha_state()
+                else:
+                    _LOGGER.warning("⚠️ Could not parse initial state for EWneo switch %s", self._serial_number[-6:])
+            else:
+                _LOGGER.warning("⚠️ Failed to query initial state for EWneo switch %s", self._serial_number[-6:])
+                
+        except Exception as e:
+            _LOGGER.error("Error querying initial state for EWneo switch %s: %s", self._serial_number[-6:], e)
+    
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator.
+        
+        For EWneo switches, we completely ignore coordinator updates because the state
+        comes directly from command responses, not from polling.
+        We don't even call async_write_ha_state() to avoid any state changes.
+        """
+        # Do nothing - don't update anything from coordinator
+        pass
     
     async def _async_update_state_from_parsed(self, parsed_state: Dict[str, Any]) -> None:
         """Update switch state from parsed EWneo state (async for thread safety)."""
         old_state = self._is_on
-        self._is_on = parsed_state.get("on", self._is_on)
         
-        if old_state != self._is_on:
-            _LOGGER.info("🎯 EWneo switch %s: State updated to %s (from event)", 
-                       self._serial_number[-8:], "ON" if self._is_on else "OFF")
-            self.async_write_ha_state()
-    
+        # For dual/quad switches, extract the channel-specific state
+        if self._device_type_code in [0x06, 0x07]:
+            channel_key = f"channel_{self._channel + 1}"  # Coordinator uses 1-based channel keys
+            channel_state = parsed_state.get(channel_key, {})
+            self._is_on = channel_state.get("on", self._is_on)
+            
+            # Log state change
+            if old_state != self._is_on:
+                _LOGGER.info("🎯 EWneo dual/quad switch %s CH%d: State updated from telegram - %s -> %s (reason: %s, counter: %s)", 
+                            self._serial_number[-6:], self._channel + 1,
+                            "ON" if old_state else "OFF",
+                            "ON" if self._is_on else "OFF",
+                            channel_state.get("reason", "?"),
+                            channel_state.get("counter", "?"))
+                self.async_write_ha_state()
+        else:
+            # Single switch
+            self._is_on = parsed_state.get("on", self._is_on)
+            
+            # Log state change
+            if old_state != self._is_on:
+                _LOGGER.info("🎯 EWneo switch %s: State updated from telegram - %s -> %s (reason: %s, counter: %s)", 
+                            self._serial_number[-6:],
+                            "ON" if old_state else "OFF",
+                            "ON" if self._is_on else "OFF",
+                            parsed_state.get("reason", "?"),
+                            parsed_state.get("counter", "?"))
+                self.async_write_ha_state()
+
+
     def _create_switch_state_command(self, turn_on: bool, timer_duration: Optional[int] = None) -> tuple[int, list]:
-        """Create state command for EWneo switch according to EWB_CHANGE_STATE specification."""
+        """Create state command for EWneo switch according to EWB_CHANGE_STATE specification.
+        
+        For dual/quad switches (0x06, 0x07), the state word has different layouts:
+        - Single switch (0x03): Bits 26-24 for switch state
+        - Dual switch (0x06): Bits 26-24 for switch #1, Bits 18-16 for switch #2
+        - Quad switch (0x07): Similar pattern for 4 channels
+        """
+        # Determine if this is a dual/quad switch
+        is_dual_quad = self._device_type_code in [0x06, 0x07]
+        
         if timer_duration is not None:
             # Mode 1: Timer with specific duration
+            # Note: Timer mode is not well-defined for dual/quad switches in the spec
+            # Using single-channel approach for now
             if timer_duration <= 0:
                 _LOGGER.warning("Invalid timer duration %d, using simple on/off", timer_duration)
                 return self._create_switch_state_command(turn_on, None)
@@ -416,21 +596,51 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
             return (1, state_bytes)
         else:
             # Mode 0: Simple on/off
-            reason_code = 2 if turn_on else 1  # 2=on, 1=off
+            reason_code = 2 if turn_on else 1  # 2=on, 1=off, 0=remain at state
+            
+            if is_dual_quad:
+                # For dual/quad switches, position the reason code based on channel
+                # Channel 0 (CH1): Bits 26-24, Channel 1 (CH2): Bits 18-16, etc.
+                # We only change our channel, others get 0 (remain at state)
+                state_word = 0
                 
-            # Create state word (big-endian)
-            state_word = (reason_code << 24)
+                if self._channel == 0:
+                    # Channel 0 = Switch #1: Bits 26-24
+                    state_word = (reason_code << 24)
+                    _LOGGER.debug("EWneo dual/quad switch %s CH1: Command - %s (reason: %d, bits 26-24)", 
+                                 self._serial_number[-6:], "ON" if turn_on else "OFF", reason_code)
+                elif self._channel == 1:
+                    # Channel 1 = Switch #2: Bits 18-16
+                    state_word = (reason_code << 16)
+                    _LOGGER.debug("EWneo dual/quad switch %s CH2: Command - %s (reason: %d, bits 18-16)", 
+                                 self._serial_number[-6:], "ON" if turn_on else "OFF", reason_code)
+                elif self._channel == 2:
+                    # Channel 2 = Switch #3: Bits 10-8 (quad only)
+                    state_word = (reason_code << 8)
+                    _LOGGER.debug("EWneo quad switch %s CH3: Command - %s (reason: %d, bits 10-8)", 
+                                 self._serial_number[-6:], "ON" if turn_on else "OFF", reason_code)
+                elif self._channel == 3:
+                    # Channel 3 = Switch #4: Bits 2-0 (quad only)
+                    state_word = reason_code
+                    _LOGGER.debug("EWneo quad switch %s CH4: Command - %s (reason: %d, bits 2-0)", 
+                                 self._serial_number[-6:], "ON" if turn_on else "OFF", reason_code)
+                else:
+                    _LOGGER.error("Invalid channel %d for dual/quad switch", self._channel)
+                    state_word = (reason_code << 24)  # Fallback to channel 0 (CH1)
+            else:
+                # Single switch: Bits 26-24
+                state_word = (reason_code << 24)
+                _LOGGER.debug("EWneo switch %s: Simple command - %s (reason: %d)", 
+                             self._serial_number[-6:], "ON" if turn_on else "OFF", reason_code)
             
             # Convert to 4 bytes in big-endian order
+            # All EWneo communication uses big-endian byte order
             state_bytes = [
                 (state_word >> 24) & 0xFF,
                 (state_word >> 16) & 0xFF,
-                (state_word >> 8) & 0xFF, 
+                (state_word >> 8) & 0xFF,
                 state_word & 0xFF
             ]
-            
-            _LOGGER.debug("EWneo switch %s: Simple command - %s (reason: %d)", 
-                         self._serial_number[-6:], "ON" if turn_on else "OFF", reason_code)
             
             return (0, state_bytes)
     
@@ -441,6 +651,15 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
             return False
         
         try:
+            # Mark that we've had a command (prevents initial state query from overwriting)
+            self._initial_state_queried = True
+            
+            # Log current state before command
+            old_state = self._is_on
+            _LOGGER.debug("🔵 EWneo switch %s CH%d: State BEFORE command: %s, requesting: %s",
+                         self._serial_number[-6:], self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1,
+                         "ON" if old_state else "OFF", "ON" if turn_on else "OFF")
+            
             # Create state command
             mode, state_bytes = self._create_switch_state_command(turn_on, timer_duration)
             
@@ -455,27 +674,49 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
             
             if result:
                 recent_mode, recent_state_bytes = result
-                _LOGGER.debug("EWneo switch %s: Change state successful, parsing response...", 
-                             self._serial_number[-6:])
+                _LOGGER.info("📥 EWneo switch %s: Received response - mode=%d, bytes=%s", 
+                             self._serial_number[-6:], recent_mode,
+                             [f"0x{b:02X}" for b in recent_state_bytes])
                 
                 # Parse the response to update local state
+                # The response contains the UPDATED state from the device
                 parsed_state = self.coordinator._parse_ewneo_state(
-                    self._device_type_code, recent_state_bytes, "ewneo_switch"
+                    self._device_type_code, recent_state_bytes, "ewneo_switch", self._serial_number
                 )
                 
+                _LOGGER.info("🔍 EWneo switch %s: Parsed state = %s", 
+                             self._serial_number[-6:], parsed_state)
+                
                 if parsed_state and parsed_state.get("type") == "switch":
-                    self._is_on = parsed_state.get("on", turn_on)
-                    _LOGGER.debug("EWneo switch %s: State updated to %s from response", 
-                                 self._serial_number[-6:], "ON" if self._is_on else "OFF")
+                    # For dual/quad switches, extract the channel-specific state
+                    if self._device_type_code in [0x06, 0x07]:
+                        channel_key = f"channel_{self._channel + 1}"  # Coordinator uses 1-based channel keys
+                        channel_state = parsed_state.get(channel_key, {})
+                        new_state = channel_state.get("on", turn_on)
+                        _LOGGER.info("🎯 EWneo dual/quad switch %s CH%d: Extracted channel state - key=%s, state_dict=%s, new_state=%s", 
+                                    self._serial_number[-6:], self._channel + 1, channel_key, channel_state, new_state)
+                        self._is_on = new_state
+                        _LOGGER.info("✅ EWneo dual/quad switch %s CH%d: State confirmed as %s from device response", 
+                                    self._serial_number[-6:], self._channel + 1, "ON" if self._is_on else "OFF")
+                    else:
+                        # Single switch
+                        self._is_on = parsed_state.get("on", turn_on)
+                        _LOGGER.info("✅ EWneo switch %s: State confirmed as %s from device response", 
+                                    self._serial_number[-6:], "ON" if self._is_on else "OFF")
                 else:
-                    # Fallback to assume command worked
+                    # Fallback: optimistic update
                     self._is_on = turn_on
+                    _LOGGER.warning("⚠️ EWneo switch %s CH%d: Could not parse response, using optimistic state: %s", 
+                                  self._serial_number[-6:], self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1, "ON" if turn_on else "OFF")
                     
                 # Update Home Assistant state
+                _LOGGER.debug("🟢 EWneo switch %s CH%d: State AFTER update: %s",
+                             self._serial_number[-6:], self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1,
+                             "ON" if self._is_on else "OFF")
                 self.async_write_ha_state()
                 return True
             else:
-                _LOGGER.error("EWneo switch %s: Failed to change state", self._serial_number[-6:])
+                _LOGGER.error("EWneo switch %s: Failed to send change state command", self._serial_number[-6:])
                 return False
                 
         except Exception as e:
@@ -492,25 +733,9 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         """Turn the EWneo switch off."""
         await self._send_ewb_change_state(False)
     
-    def process_state_update(self, telegram_data: Dict[str, Any]) -> None:
-        """Process incoming state updates from EWB telegrams."""
-        try:
-            parsed_state = self.coordinator._parse_ewneo_state(
-                self._device_type_code, 
-                telegram_data.get("state_bytes", []), 
-                "ewneo_switch"
-            )
-            
-            if parsed_state and parsed_state.get("type") == "switch":
-                # Use thread-safe add_job for state update
-                self.hass.add_job(self._async_update_state_from_parsed, parsed_state)
-                    
-        except Exception as e:
-            _LOGGER.error("Error processing EWneo switch %s state update: %s", 
-                         self._serial_number[-6:], e)
 
 
-class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
+class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
     """Switch entity created from an entity specification saved in device store."""
 
     def __init__(
@@ -682,7 +907,7 @@ class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
             return
             
         try:
-            success = await self.coordinator.send_command_to_device(
+            success = await self.coordinator.send_command(
                 self._serial_number, self._last_command_code
             )
             if success:
@@ -843,7 +1068,10 @@ class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
         try:
             button = None
             
-            if self._operating_mode == 1:
+            if self._is_heating_cooling:
+                # Heating/cooling: Always send 0x00 (Command A for ON)
+                button = 0x00
+            elif self._operating_mode == 1:
                 # Mode 1: Toggle with button A
                 button = self._button_config.get("toggle", 0)
             elif self._operating_mode == 2:
@@ -873,7 +1101,10 @@ class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
         try:
             button = None
             
-            if self._operating_mode == 1:
+            if self._is_heating_cooling:
+                # Heating/cooling: Always send 0x01 (Command B for OFF)
+                button = 0x01
+            elif self._operating_mode == 1:
                 # Mode 1: Toggle with button A (same as turn_on)
                 button = self._button_config.get("toggle", 0)
             elif self._operating_mode == 2:
@@ -968,34 +1199,45 @@ class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
         # Cancel existing timer
         self._cancel_repeat_timer()
         
-        if self._last_command_code and self.hass:
-            async def _repeat_last_command():
-                """Repeat the last command."""
-                try:
-                    await asyncio.sleep(self._repeat_interval)
-                    
-                    if self._last_command_code:
-                        _LOGGER.info("🔁 Repeating last command for EW-Receiver heating/cooling %s: Code %s (%s)", 
-                                   self._serial_number[-6:], self._last_command_code,
-                                   "ON" if self._last_command_code == "A" else "OFF")
-                        
-                        # Send the same command again
-                        if self._last_command_code == "A":
-                            # Repeat "on" command based on operating mode
-                            if self._operating_mode == 1:
-                                button = self._button_config.get("toggle", 0)
-                            elif self._operating_mode == 2:
-                                button = self._button_config.get("on", 0)
-                            else:
-                                button = 0
-                        else:  # Code B
-                            # Repeat "off" command based on operating mode  
-                            if self._operating_mode == 1:
-                                button = self._button_config.get("toggle", 0)
-                            elif self._operating_mode == 2:
-                                button = self._button_config.get("off", 1)
-                            else:
-                                button = 1
+        # Only schedule timer if we have a command and hass is available
+        if not self._last_command_code or not self.hass:
+            return
+        
+        # Don't start timer during startup - wait until entity is added to hass
+        if not self.hass.is_running:
+            _LOGGER.debug("⏰ Skipping timer schedule during startup for %s", self._serial_number[-6:])
+            return
+        
+        async def _repeat_last_command():
+            """Repeat the last command."""
+            try:
+                await asyncio.sleep(self._repeat_interval)
+                
+                # Check if we're still active before sending
+                if not self._last_command_code or not self.hass or not self.hass.is_running:
+                    return
+                
+                _LOGGER.info("🔁 Repeating last command for EW-Receiver heating/cooling %s: Code %s (%s)", 
+                           self._serial_number[-6:], self._last_command_code,
+                           "ON" if self._last_command_code == "A" else "OFF")
+                
+                # Send the same command again
+                if self._last_command_code == "A":
+                    # Repeat "on" command based on operating mode
+                    if self._operating_mode == 1:
+                        button = self._button_config.get("toggle", 0)
+                    elif self._operating_mode == 2:
+                        button = self._button_config.get("on", 0)
+                    else:
+                        button = 0
+                else:  # Code B
+                    # Repeat "off" command based on operating mode  
+                    if self._operating_mode == 1:
+                        button = self._button_config.get("toggle", 0)
+                    elif self._operating_mode == 2:
+                        button = self._button_config.get("off", 1)
+                    else:
+                        button = 1
                         
                         command = bytes([button])
                         success = await self.coordinator.send_command(
@@ -1013,14 +1255,18 @@ class EldatConfiguredSwitch(EldatEntity, SwitchEntity):
                             _LOGGER.warning("❌ Failed to repeat command for EW-Receiver heating/cooling %s", 
                                           self._serial_number[-6:])
                             
-                except Exception as e:
-                    _LOGGER.error("Error repeating command for EW-Receiver heating/cooling %s: %s", 
-                                self._serial_number[-6:], e)
-            
-            # Create and store the timer task
-            self._repeat_timer = self.hass.async_create_task(_repeat_last_command())
-            _LOGGER.debug("⏰ Scheduled repeat timer for EW-Receiver heating/cooling %s (4 hours)", 
-                         self._serial_number[-6:])
+            except asyncio.CancelledError:
+                _LOGGER.debug("⏰ Repeat timer cancelled for EW-Receiver heating/cooling %s", 
+                            self._serial_number[-6:])
+                raise
+            except Exception as e:
+                _LOGGER.error("Error repeating command for EW-Receiver heating/cooling %s: %s", 
+                            self._serial_number[-6:], e)
+        
+        # Create and store the timer task
+        self._repeat_timer = self.hass.async_create_task(_repeat_last_command())
+        _LOGGER.debug("⏰ Scheduled repeat timer for EW-Receiver heating/cooling %s (4 hours)", 
+                     self._serial_number[-6:])
 
     def _cancel_repeat_timer(self) -> None:
         """Cancel the repeat timer."""

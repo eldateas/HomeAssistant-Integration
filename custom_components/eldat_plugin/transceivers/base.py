@@ -1,5 +1,13 @@
 """Base classes for ELDAT transceivers and devices.
 
+DEPRECATED: This file is kept for backward compatibility.
+All classes have been moved to the 'base' and 'behaviors' submodules.
+
+New imports:
+    from .base import BaseTransceiver, BaseDevice, BaseReceiver, BaseTransmitter, BaseSensor
+    from .base import DeviceType, DeviceSubtype, OperatingMode, TransceiverType
+    from .behaviors import CoverBehaviorMixin, SwitchBehaviorMixin, etc.
+
 Structured Naming Convention:
 - transceiver_<type>_<device_type>_<operation>: Structured operation naming
   Example: rx11_ew_receiver_button_start_continuous
@@ -15,14 +23,124 @@ across different ELDAT device types and transceivers.
 """
 from __future__ import annotations
 
-import asyncio
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+# Re-export all classes from new structure for backward compatibility
+from .base import (
+    BaseDevice,
+    BaseDeviceHandler,
+    BaseReceiver,
+    BaseSensor,
+    BaseTransceiver,
+    BaseTransmitter,
+    DeviceInfo,
+    DeviceSubtype,
+    DeviceType,
+    OperatingMode,
+    TransceiverCapabilities,
+    TransceiverType,
+)
+from .behaviors import (
+    ButtonBehaviorMixin,
+    CoverBehaviorMixin,
+    EntitySpecsMixin,
+    LightBehaviorMixin,
+    SensorBehaviorMixin,
+    SwitchBehaviorMixin,
+)
 
+__all__ = [
+    # Enums
+    "TransceiverType",
+    "DeviceType",
+    "DeviceSubtype",
+    "OperatingMode",
+    # Data classes
+    "DeviceInfo",
+    "TransceiverCapabilities",
+    # Base classes
+    "BaseTransceiver",
+    "BaseDeviceHandler",
+    "BaseDevice",
+    "BaseReceiver",
+    "BaseTransmitter",
+    "BaseSensor",
+    # Behavior Mixins
+    "CoverBehaviorMixin",
+    "SwitchBehaviorMixin",
+    "LightBehaviorMixin",
+"""Base classes for ELDAT transceivers and devices.
 
-class TransceiverType(Enum):
+DEPRECATED: This file is kept for backward compatibility.
+All classes have been moved to the 'base' and 'behaviors' submodules.
+
+New imports:
+    from .base import BaseTransceiver, BaseDevice, BaseReceiver, BaseTransmitter, BaseSensor
+    from .base import DeviceType, DeviceSubtype, OperatingMode, TransceiverType
+    from .behaviors import CoverBehaviorMixin, SwitchBehaviorMixin, etc.
+
+Structured Naming Convention:
+- transceiver_<type>_<device_type>_<operation>: Structured operation naming
+  Example: rx11_ew_receiver_button_start_continuous
+  
+Hierarchy: transceiver -> type -> device_type -> button_type
+- transceiver: RX11, RX21, Gateway
+- type: EW (EasyWave), EWneo, EWB (EasyWave Bidirectional) 
+- device_type: receiver, transmitter, sensor
+- button_type: A(0), B(1), C(2), D(3)
+
+This provides a clear, hierarchical naming structure for all operations
+across different ELDAT device types and transceivers.
+"""
+from __future__ import annotations
+
+# Re-export all classes from new structure for backward compatibility
+from .base import (
+    BaseDevice,
+    BaseDeviceHandler,
+    BaseReceiver,
+    BaseSensor,
+    BaseTransceiver,
+    BaseTransmitter,
+    DeviceInfo,
+    DeviceSubtype,
+    DeviceType,
+    OperatingMode,
+    TransceiverCapabilities,
+    TransceiverType,
+)
+from .behaviors import (
+    ButtonBehaviorMixin,
+    CoverBehaviorMixin,
+    EntitySpecsMixin,
+    LightBehaviorMixin,
+    SensorBehaviorMixin,
+    SwitchBehaviorMixin,
+)
+
+__all__ = [
+    # Enums
+    "TransceiverType",
+    "DeviceType",
+    "DeviceSubtype",
+    "OperatingMode",
+    # Data classes
+    "DeviceInfo",
+    "TransceiverCapabilities",
+    # Base classes
+    "BaseTransceiver",
+    "BaseDeviceHandler",
+    "BaseDevice",
+    "BaseReceiver",
+    "BaseTransmitter",
+    "BaseSensor",
+    # Behavior Mixins
+    "CoverBehaviorMixin",
+    "SwitchBehaviorMixin",
+    "LightBehaviorMixin",
+    "SensorBehaviorMixin",
+    "ButtonBehaviorMixin",
+    "EntitySpecsMixin",
+]
+
     """Supported transceiver types following structured naming.
     
     Each transceiver type supports different device types:

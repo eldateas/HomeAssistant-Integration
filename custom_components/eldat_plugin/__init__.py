@@ -28,6 +28,57 @@ from .coordinator import EldatCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _find_usb_device_path(hass: HomeAssistant, configured_path: str) -> str:
+    """Find the actual USB device path, handling port changes.
+    
+    If the configured path doesn't exist, searches for ELDAT device by VID/PID.
+    This allows the integration to continue working when USB port changes.
+    
+    Args:
+        hass: Home Assistant instance
+        configured_path: The originally configured device path
+        
+    Returns:
+        The actual device path (may be different from configured_path)
+    """
+    import os
+    
+    # If configured path exists, use it
+    if os.path.exists(configured_path):
+        return configured_path
+    
+    _LOGGER.warning("⚠️ Configured USB path %s not found, searching for ELDAT device...", configured_path)
+    
+    # Search for ELDAT device by VID/PID
+    try:
+        import serial.tools.list_ports
+        
+        # Run blocking I/O operation in executor to avoid blocking event loop
+        def _list_ports():
+            return list(serial.tools.list_ports.comports())
+        
+        ports = await hass.async_add_executor_job(_list_ports)
+        
+        # Look for ELDAT USB devices
+        for port in ports:
+            # Check if this is an ELDAT device (VID: 0x155A, PID: 0x1006 or 0x1014)
+            if port.vid == 0x155A and port.pid in [0x1006, 0x1014]:
+                _LOGGER.info("✅ Found ELDAT device at %s (VID:0x%04X PID:0x%04X)", 
+                           port.device, port.vid, port.pid)
+                return port.device
+        
+        # No ELDAT device found
+        _LOGGER.error("❌ No ELDAT USB device found (VID:0x155A PID:0x1006/0x1014)")
+        
+    except ImportError:
+        _LOGGER.warning("⚠️ pyserial not available for USB device detection")
+    except Exception as e:
+        _LOGGER.error("❌ Error searching for USB device: %s", e)
+    
+    # Fallback: return configured path (will fail later if still doesn't exist)
+    return configured_path
+
+
 async def _compile_rx11_library(hass: HomeAssistant) -> bool:
     """Compile the RX11 C library if it doesn't exist."""
     integration_dir = Path(__file__).parent
@@ -110,6 +161,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not device_path:
         _LOGGER.error("No device path specified in config entry")
         raise ConfigEntryNotReady("Device path missing")
+    
+    # Auto-detect USB port if configured path doesn't exist
+    # This allows the device to work even if USB port changes (e.g., USB0 -> USB1)
+    actual_device_path = await _find_usb_device_path(hass, device_path)
+    if actual_device_path != device_path:
+        _LOGGER.info("🔄 USB port changed: %s → %s", device_path, actual_device_path)
+        # Update config entry with new path (persistent across restarts)
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_DEVICE_PATH: actual_device_path}
+        )
+        device_path = actual_device_path
     
     try:
         transceiver_type = TransceiverType(transceiver_type_str)

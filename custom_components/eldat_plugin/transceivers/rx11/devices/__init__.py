@@ -17,11 +17,8 @@ from .registry import RX11DeviceFactory, rx11_device_factory, rx11_device_regist
 
 # Import individual device classes
 try:
-    from .ewneo_sensors import (
-        RX11TemperatureSensor,
-        RX11HumiditySensor,
-        RX11CombinedSensor,
-    )
+    # EWneo sensors now use the universal EWneoSensor class
+    # Individual sensor classes (RX11TemperatureSensor, etc.) have been removed
 
     from .ew_receivers import (
         RX11EWSwitchReceiver,
@@ -41,9 +38,6 @@ except ImportError as e:
     _LOGGER = logging.getLogger(__name__)
     _LOGGER.warning(f"Could not import device classes: {e}")
     # Provide fallback classes to prevent import errors
-    class RX11TemperatureSensor: pass
-    class RX11HumiditySensor: pass
-    class RX11CombinedSensor: pass
     class RX11EWSwitchReceiver: pass
     class RX11EWMotorReceiver: pass
     class RX11EWClimateReceiver: pass
@@ -59,11 +53,6 @@ __all__ = [
     "rx11_device_factory",
     "rx11_device_registry",
     "RX11DeviceHandlerRegistry",  # Legacy compatibility
-    
-    # Individual sensor classes
-    "RX11TemperatureSensor",
-    "RX11HumiditySensor",
-    "RX11CombinedSensor",
     
     # Individual receiver classes
     "RX11EWSwitchReceiver",

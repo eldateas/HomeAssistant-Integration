@@ -122,7 +122,7 @@ SERVICE_REMOVE_DEVICE_BY_ID: Final = "remove_device_by_id"
 SERVICE_REMOVE_ALL_DEVICES: Final = "remove_all_devices"
 SERVICE_LIST_DEVICES: Final = "list_devices"
 SERVICE_LIST_REMOVABLE_DEVICES: Final = "list_removable_devices"
-SERVICE_CLEAR_BLACKLIST: Final = "clear_blacklist"
+# Removed: SERVICE_CLEAR_BLACKLIST - use whitelist-based approach instead
 SERVICE_SCAN_DEVICES: Final = "scan_devices"
 SERVICE_LEARN_DEVICE: Final = "learn_device"
 SERVICE_SEND_COMMAND: Final = "send_command"
@@ -149,7 +149,7 @@ ATTR_BUTTON: Final = "button"
 ATTR_COMMAND: Final = "command"
 ATTR_TIMEOUT: Final = "timeout"
 ATTR_FORCE: Final = "force"
-ATTR_BLACKLIST: Final = "blacklist"
+# Removed: ATTR_BLACKLIST - use whitelist-based approach instead
 ATTR_INFO_TYPE: Final = "info_type"
 ATTR_CHANNELS: Final = "channels"
 ATTR_BATTERY_LEVEL: Final = "battery_level"
@@ -166,24 +166,24 @@ LEARNING_TIMEOUT: Final = 180  # Timeout für EWneo Receiver Learning (3 Minuten
 
 # Device Names und Labels
 DEVICE_NAME_PREFIXES: Final = {
-    "ew_transmitter": "EW Sender",
-    "ew_receiver": "EW Empfänger",
-    "ew_temperature_sensor": "EW Temperatur Sensor", 
-    "ew_humidity_sensor": "EW Luftfeuchte Sensor",
-    "ew_sensor": "EW Sensor",
+    "ew_transmitter": "EW-Transmitter",
+    "ew_receiver": "EW-Receiver",
+    "ew_temperature_sensor": "EWneo-Sensoren", 
+    "ew_humidity_sensor": "EWneo-Sensoren",
+    "ew_sensor": "EWneo-Sensoren",
     "ewneo_transceiver": "EW NEO Transceiver",
-    "ewneo_switch": "EW NEO Schalter",
-    "ewneo_dimmer": "EW NEO Dimmer", 
-    "ewneo_motor": "EW NEO Motor",
-    "ewneo_sensor": "EW NEO Sensor",
-    "ewneo_bidi_transmitter": "EWB Bidi Sender",
-    "ewneo_switch": "EWB Schalter",
-    "ewneo_dimmer": "EWB Dimmer",
-    "ewneo_motor": "EWB Motor",
-    "ewneo_dual_switch": "EWB Dual Schalter",
-    "ewneo_quad_switch": "EWB Quad Schalter",
-    "ewneo_dual_motor": "EWB Dual Motor",
-    "ewneo_quad_motor": "EWB Quad Motor"
+    "ewneo_switch": "EWneo-Switch",
+    "ewneo_dimmer": "EWneo-Dimmer", 
+    "ewneo_motor": "EWneo-Motor",
+    "ewneo_sensor": "EWneo-Sensoren",
+    "ewneo_bidi_transmitter": "EW-Transmitter",
+    "ewneo_switch": "EWneo-Switch",
+    "ewneo_dimmer": "EWneo-Dimmer",
+    "ewneo_motor": "EWneo-Motor",
+    "ewneo_dual_switch": "EWneo-DualSwitch",
+    "ewneo_quad_switch": "EWneo-QuadSwitch",
+    "ewneo_dual_motor": "EWneo-DualMotor",
+    "ewneo_quad_motor": "EWneo-QuadMotor"
 }
 
 # Button Labels

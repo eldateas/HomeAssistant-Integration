@@ -31,6 +31,8 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
         super().__init__(*args, device_type=DeviceType.EW_RECEIVER, 
                         subtype=DeviceSubtype.SWITCH, **kwargs)
         self._channel_states = {}
+        # Store operating mode for button entity generation
+        self._operating_mode = kwargs.get('operating_mode', 2)  # Default to 2-Tast
         self._setup_operating_mode(**kwargs)
     
     def _setup_operating_mode(self, **kwargs) -> None:
@@ -45,11 +47,16 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
     
     @property
     def supported_entity_types(self) -> List[str]:
-        """Return supported entity types."""
-        return ["button", "switch"]
+        """Return supported entity types. Switches use button entities for stateless operation."""
+        return ["button"]
     
     def get_entity_specs(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Generate entity specifications for this switch device."""
+        """Generate entity specifications for this switch device.
+        
+        Creates button entities for stateless operation:
+        - Mode 1 (Eintastbedienung): 1 Toggle button
+        - Mode 2 (Zweitastbedienung): 2 buttons (Ein/On, Aus/Off)
+        """
         specs = {
             "switch": [],
             "light": [],
@@ -59,15 +66,50 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             "button": []
         }
         
-        # Create switch entities for each channel
+        # Determine operating mode
+        operating_mode = getattr(self, '_operating_mode', 2)  # Default to 2-Tast
+        
+        # Create button entities for each channel based on operating mode
         for channel in range(self.channel_count):
-            specs["switch"].append(self._create_base_entity_spec(
-                "switch",
-                channel=channel,
-                name=f"{self.name} CH{channel+1}" if self.channel_count > 1 else self.name,
-                device_class="switch",
-                icon="mdi:light-switch"
-            ))
+            channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
+            
+            if operating_mode == 1:
+                # Eintastbedienung: 1 Toggle button (A)
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} A - Toggle",
+                    "unique_id": f"{self.serial_number}_toggle_ch{channel}",
+                    "channel": channel,
+                    "button_code": 0,  # TM_BUTTON_A
+                    "action": "toggle",
+                    "icon": "mdi:gesture-tap-button",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "switch"
+                })
+            elif operating_mode == 2:
+                # Zweitastbedienung: A - Ein, B - Aus
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} A - Ein",
+                    "unique_id": f"{self.serial_number}_on_ch{channel}",
+                    "channel": channel,
+                    "button_code": 0,  # TM_BUTTON_A
+                    "action": "on",
+                    "icon": "mdi:lightbulb-on",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "switch"
+                })
+                specs["button"].append({
+                    "type": "button",
+                    "name": f"{self.name}{channel_suffix} B - Aus",
+                    "unique_id": f"{self.serial_number}_off_ch{channel}",
+                    "channel": channel,
+                    "button_code": 1,  # TM_BUTTON_B
+                    "action": "off",
+                    "icon": "mdi:lightbulb-off",
+                    "operating_mode": operating_mode,
+                    "receiver_kind": "switch"
+                })
         
         return specs
     

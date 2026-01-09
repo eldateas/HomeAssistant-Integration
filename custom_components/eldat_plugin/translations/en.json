@@ -58,38 +58,38 @@
         "data": {}
       },
       "device_sensor": {
-        "title": "Learn EWneo Sensor",
-        "description": "Trigger the EWneo sensor or wait for automatic measurement. Waiting for telegram...",
+        "title": "Learn EWneo Sensors",
+        "description": "Trigger the EWneo sensors or wait for automatic measurement. Waiting for telegram...",
         "data": {
           "action": "Action"
         }
       },
       "device_sensor_description": {
-        "title": "EW-Sensor Learning - Instructions",
+        "title": "EWneo-Sensors Learning - Instructions",
         "description": "{instructions}",
         "data": {
           "action": "Action"
         }
       },
       "device_sensor_learn_actual": {
-        "title": "Learning EW-Sensor",
-        "description": "🌡️ **Waiting for EW-Sensor signal...**\n\n📡 **Please trigger your EW-Sensor NOW!**\n\nThe system is listening for the radio signal. This may take up to 3 minutes.\n\n⚡ **Status:** Waiting for telegram reception...",
+        "title": "Learning EWneo-Sensors",
+        "description": "🌡️ **Waiting for EWneo-Sensors signal...**\n\n📡 **Please trigger your EWneo-Sensors NOW!**\n\nThe system is listening for the radio signal. This may take up to 3 minutes.\n\n⚡ **Status:** Waiting for telegram reception...",
         "data": {}
       },
       "device_sensor_verify": {
-        "title": "Verify EWneo Sensor",
+        "title": "Verify EWneo Sensors",
         "description": "{instructions}",
         "data": {
           "action": "Action"
         }
       },
       "device_ewneo_receiver": {
-        "title": "Add EWneo Receiver",
+        "title": "Add EWneo Switch/Motor",
         "description": "{instructions}"
       },
       "device_ewneo_receiver_learn": {
-        "title": "Prepare EWneo Receiver",
-        "description": "🔧 **Preparing EWneo receiver...**\n\n📋 **Preparation steps:**\n• Determining EWneo index\n• Loading gateway serial\n• Setting receive filter\n\n⚡ **Please wait a moment...**"
+        "title": "Prepare EWneo Switch/Motor",
+        "description": "🔧 **Preparing EWneo switch/motor...**\n\n📋 **Preparation steps:**\n• Determining EWneo index\n• Loading gateway serial\n• Setting receive filter\n\n⚡ **Please wait a moment...**"
       },
       "device_ewneo_receiver_learning_mode": {
         "title": "Put EWneo Transceiver in Learning Mode",
@@ -99,11 +99,11 @@
         }
       },
       "device_ewneo_receiver_join": {
-        "title": "Connect EWneo Receiver",
-        "description": "🔗 **Establishing connection to EWneo receiver...**\n\n📡 **Executing EWB_JOIN_DEVICE...**\n\n⚡ **Please wait for device confirmation...**"
+        "title": "Connect EWneo Switch/Motor",
+        "description": "🔗 **Establishing connection to EWneo switch/motor...**\n\n📡 **Executing EWB_JOIN_DEVICE...**\n\n⚡ **Please wait for device confirmation...**"
       },
       "device_ewneo_receiver_confirm": {
-        "title": "Configure EWneo Receiver",
+        "title": "Configure EWneo Switch/Motor",
         "description": "{instructions}",
         "data": {
           "device_name": "Device Name",
@@ -148,7 +148,7 @@
         }
       },
       "device_ewneo_receiver": {
-        "title": "Configure EWneo Receiver",
+        "title": "Configure EWneo Switch/Motor",
         "description": "{instructions}",
         "data": {
           "entity_type": "Device Type",
@@ -157,8 +157,8 @@
         }
       },
       "device_ewneo_receiver_learn": {
-        "title": "Learning EWneo Receiver",
-        "description": "⚡ **EWneo Receiver Learning Process**\n\n🔧 Automatic setup in progress...\n\n📡 This process will:\n• Find next available EWneo index\n• Load gateway serial number\n• Set receive filter\n• Learn the receiver device\n\nPlease wait...",
+        "title": "Learning EWneo Switch/Motor",
+        "description": "⚡ **EWneo Switch/Motor Learning Process**\n\n🔧 Automatic setup in progress...\n\n📡 This process will:\n• Find next available EWneo index\n• Load gateway serial number\n• Set receive filter\n• Learn the receiver device\n\nPlease wait...",
         "data": {}
       },
       "device_confirm": {

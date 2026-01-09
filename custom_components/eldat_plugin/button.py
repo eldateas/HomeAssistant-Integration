@@ -88,23 +88,21 @@ async def async_setup_entry(
         device_type = device_info.get("type", "unknown")
         device_name = device_info.get("name", serial_number)
         
-        # ALWAYS create a remove button for every device (for easy cleanup of corrupted entries)
+        # ALWAYS create a remove button for EVERY device without exception
+        # This ensures even problematic/corrupted devices can be removed
         remove_unique_id = f"{serial_number}_remove"
         
-        # Only skip if we already created it THIS SESSION (avoid duplicates in same run)
-        if not entity_registry.is_entity_created_this_session(remove_unique_id):
-            remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
-            buttons.append(remove_button)
-            entity_registry.mark_entity_created(remove_unique_id, serial_number)
-            
-            # Check if this is a new entity or restore
-            existing_entity = ha_entity_registry.async_get_entity_id("button", "eldat_plugin", remove_unique_id)
-            if existing_entity:
-                _LOGGER.debug("🔄 Restoring remove button for device: %s", device_name)
-            else:
-                _LOGGER.debug("✅ Creating new remove button for device: %s", device_name)
+        # Always create/add remove button (Home Assistant handles duplicates automatically)
+        remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
+        buttons.append(remove_button)
+        entity_registry.mark_entity_created(remove_unique_id, serial_number)
+        
+        # Log creation/restoration
+        existing_entity = ha_entity_registry.async_get_entity_id("button", DOMAIN, remove_unique_id)
+        if existing_entity:
+            _LOGGER.debug("♻️ Re-adding existing remove button for device: %s", serial_number[-8:])
         else:
-            _LOGGER.debug("Remove button for device %s already processed this session", device_name)
+            _LOGGER.debug("✅ Creating new remove button for device: %s", serial_number[-8:])
         
         # Check if this device has configured button entities
         button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
@@ -112,6 +110,7 @@ async def async_setup_entry(
         has_action_buttons = False  # Track if device has actual action buttons (not just remove)
         
         # Skip button creation for heating/cooling EW-Receivers and EWneo devices
+        # Motor receivers use configured button entities from entity specs
         device_type = device_info.get("type", "unknown")
         receiver_kind = device_info.get("receiver_kind", "switch")
         is_neo_device = device_info.get("neo_device", False)
@@ -139,7 +138,7 @@ async def async_setup_entry(
                         entity_spec["action"] = action
                     
                     # Create standard button
-                    button = EldatConfiguredButton(coordinator, serial_number, device_info, entity_spec)
+                    button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                     buttons.append(button)
                     _LOGGER.info("✅ Created EW-Receiver button: %s (%s)", entity_spec.get('name'), action)
                 except Exception as e:
@@ -218,39 +217,52 @@ async def async_setup_entry(
         new_buttons = []
         remove_unique_id = f"{serial_number}_remove"
         
-        # Check if remove button already created this session (primary check)
-        if entity_registry.is_entity_created_this_session(remove_unique_id):
-            _LOGGER.debug("Remove button %s already created this session, skipping", remove_unique_id[-16:])
-        else:
-            # Check if button already exists in HA registry (secondary check for orphaned repairs)
-            existing_entity = ha_entity_registry.async_get_entity_id("button", "eldat_plugin", remove_unique_id)
-            
-            if existing_entity and not (orphaned_repair or force_create):
-                # Entity exists and this is not a forced recreation - skip
-                _LOGGER.debug("Remove button %s already exists in HA, skipping", remove_unique_id[-16:])
+        # ALWAYS create remove button for new devices, or when forced
+        # For existing devices, check if already created this session
+        should_create_remove_button = True
+        
+        if not (orphaned_repair or force_create):
+            # Only check session tracking for non-forced additions
+            if entity_registry.is_entity_created_this_session(remove_unique_id):
+                should_create_remove_button = False
+                _LOGGER.debug("Remove button %s already created this session, skipping", remove_unique_id[-16:])
             else:
-                # Create or recreate remove button
-                remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
-                new_buttons.append(remove_button)
-                entity_registry.mark_entity_created(remove_unique_id, serial_number)
-                
+                # Check if button already exists in HA registry
+                existing_entity = ha_entity_registry.async_get_entity_id("button", "eldat_plugin", remove_unique_id)
                 if existing_entity:
-                    _LOGGER.info("🔄 Recreating remove button for device %s (forced)", serial_number[-8:])
-                else:
-                    _LOGGER.info("✅ Created remove button for device %s", serial_number[-8:])
+                    should_create_remove_button = False
+                    _LOGGER.debug("Remove button %s already exists in HA, skipping", remove_unique_id[-16:])
+        
+        if should_create_remove_button:
+            # Create or recreate remove button
+            remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
+            new_buttons.append(remove_button)
+            entity_registry.mark_entity_created(remove_unique_id, serial_number)
+            
+            if orphaned_repair or force_create:
+                _LOGGER.info("🔄 Force-creating remove button for device %s", serial_number[-8:])
+            else:
+                _LOGGER.info("✅ Created remove button for device %s", serial_number[-8:])
         
         # For EW-Receivers, create additional configured button entities with press detection
-        # Skip heating/cooling receivers as they now use toggle switches instead
+        # Skip heating/cooling receivers as they use toggle switches instead
         if device_type == "ew_receiver":
             receiver_kind = device_info.get("receiver_kind", "switch")
             
-            # Skip button creation for heating/cooling receivers - they use toggle switches now
+            # Skip button creation for heating/cooling receivers - they use toggle switches
             if receiver_kind in ["heating", "cooling", "heating_cooling"]:
-                _LOGGER.debug("Skipping button creation for EW-Receiver %s (heating/cooling) - using toggle switches instead", 
-                            serial_number[-6:])
+                _LOGGER.debug("Skipping button creation for EW-Receiver %s (%s) - using toggle switches instead", 
+                            serial_number[-6:], receiver_kind)
             else:
+                # Get button entities from event_info or device_info
                 entity_info = event_data.get("entity_info", {})
                 button_entities = entity_info.get("entities", [])
+                
+                # Fallback to device_info if entity_info is empty
+                if not button_entities:
+                    button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
+                    _LOGGER.debug("Using button entities from device_info for %s: %d buttons", 
+                                serial_number[-6:], len(button_entities))
             
                 # Add configured action buttons (skip remove buttons as we already created one)
                 for entity_spec in button_entities:
@@ -260,7 +272,7 @@ async def async_setup_entry(
                             continue
                         
                         # Create standard button
-                        button = EldatConfiguredButton(coordinator, serial_number, device_info, entity_spec)
+                        button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                         new_buttons.append(button)
                         _LOGGER.info("✅ Created EW-Receiver button: %s (%s)", entity_spec.get('name'), entity_spec.get('action'))
                     except Exception as e:
@@ -325,7 +337,7 @@ async def async_setup_entry(
                 if entity_spec.get("action") == "remove_device":
                     button = EldatRemoveButton(coordinator, serial_number, device_info)
                 else:
-                    button = EldatConfiguredButton(coordinator, serial_number, device_info, entity_spec)
+                    button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                 new_buttons.append(button)
                 _LOGGER.info("✅ Created button entity: %s (%s)", entity_spec.get('name'), entity_spec.get('action'))
             except Exception as e:
@@ -414,6 +426,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         
         # Button configuration
         self._channel = entity_spec.get("channel", 0)
+        self._button_code = entity_spec.get("button_code", 0)  # TM_BUTTON_A/B/C/D (0-3)
         self._action = entity_spec.get("action", "toggle")
         self._action_type = entity_spec.get("action_type", "press")  # "press" or "press_and_hold"
         self._receiver_kind = entity_spec.get("receiver_kind", "switch")
@@ -440,6 +453,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         """Return additional state attributes."""
         attrs = {
             "channel": self._channel,
+            "button_code": self._button_code,
             "action": self._action,
             "action_type": self._action_type,
             "receiver_kind": self._receiver_kind,
@@ -837,15 +851,19 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
     async def _execute_short_press(self) -> bool:
         """Execute a short press command."""
         try:
-            # Send single push command
-            cmd_bytes = bytes([0x01, self._channel, 0x00, 0x00, 0x00])
+            # Send single push command using button_code (TM_BUTTON_A/B/C/D)
+            # button_code: 0=A, 1=B, 2=C, 3=D
+            button_letter = ['A', 'B', 'C', 'D'][self._button_code] if self._button_code < 4 else '?'
+            cmd_bytes = bytes([0x01, self._button_code, 0x00, 0x00, 0x00])
+            _LOGGER.warning("🔘 EWReceiverUIButton: name='%s', Button=%s (code=%d), action=%s, cmd=%s", 
+                          self._attr_name, button_letter, self._button_code, self._action, cmd_bytes.hex())
             success = await self.coordinator.transceiver.send_command_to_device(
                 self._serial_number, cmd_bytes
             )
             
             if success:
-                _LOGGER.debug("✅ Short press command sent for %s (channel %d)", 
-                             self._attr_name, self._channel)
+                _LOGGER.info("✅ Button %s pressed for %s (button_code=%d, action=%s)", 
+                           button_letter, self._attr_name, self._button_code, self._action)
             
             return success
             
@@ -856,16 +874,17 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
     async def _start_long_press(self) -> bool:
         """Start long press (toggle on - Schiebeschalter aktivieren)."""
         try:
-            # Send command to start continuous sending
-            cmd_bytes = bytes([0x01, self._channel, 0x00, 0x00, 0x00])
+            # Send command to start continuous sending using button_code
+            button_letter = ['A', 'B', 'C', 'D'][self._button_code] if self._button_code < 4 else '?'
+            cmd_bytes = bytes([0x01, self._button_code, 0x00, 0x00, 0x00])
             success = await self.coordinator.transceiver.send_command_to_device(
                 self._serial_number, cmd_bytes
             )
             
             if success:
                 self._is_long_press_active = True
-                _LOGGER.info("🚀 Long press STARTED for %s (channel %d) - Schiebeschalter EIN", 
-                           self._attr_name, self._channel)
+                _LOGGER.info("🚀 Long press STARTED for %s - Button %s (code=%d, action=%s) - Schiebeschalter EIN", 
+                           self._attr_name, button_letter, self._button_code, self._action)
                 
                 # Update icon immediately to show stop icon
                 self._attr_icon = "mdi:stop-circle"
@@ -893,14 +912,15 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                 self._continuous_task = None
             
             # Send stop command (same as start, but we stop the loop)
-            cmd_bytes = bytes([0x01, self._channel, 0x00, 0x00, 0x00])
+            cmd_bytes = bytes([0x01, self._button_code, 0x00, 0x00, 0x00])
             success = await self.coordinator.transceiver.send_command_to_device(
                 self._serial_number, cmd_bytes
             )
             
+            button_letter = ['A', 'B', 'C', 'D'][self._button_code] if self._button_code < 4 else '?'
             self._is_long_press_active = False
-            _LOGGER.info("🛑 Long press STOPPED for %s (channel %d) - Schiebeschalter AUS", 
-                       self._attr_name, self._channel)
+            _LOGGER.info("🛑 Long press STOPPED for %s - Button %s (code=%d, action=%s) - Schiebeschalter AUS", 
+                       self._attr_name, button_letter, self._button_code, self._action)
                        
             # Reset icon back to default
             if self._action_type == "press_and_hold":
@@ -919,7 +939,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         try:
             while self._is_long_press_active:
                 # Send command every 300ms for continuous effect
-                cmd_bytes = bytes([0x01, self._channel, 0x00, 0x00, 0x00])
+                cmd_bytes = bytes([0x01, self._button_code, 0x00, 0x00, 0x00])
                 try:
                     await self.coordinator.transceiver.send_command_to_device(
                         self._serial_number, cmd_bytes
@@ -938,10 +958,10 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
 
 
 # EWReceiverLongPressButton class removed - no longer needed
-# EW-Receiver buttons now use EldatConfiguredButton without longpress support
+# EW-Receiver buttons now use EldatEWReceiverButton without longpress support
 
 
-class EldatConfiguredButton(EldatEntity, ButtonEntity):
+class EldatEWReceiverButton(EldatEntity, ButtonEntity):
     """ELDAT button entity with LongPress support for EW-Receiver stateless buttons."""
     
     def __init__(
@@ -958,11 +978,11 @@ class EldatConfiguredButton(EldatEntity, ButtonEntity):
         self._entity_spec = entity_spec
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{entity_spec.get('action', 'button')}")
         self._attr_name = entity_spec.get("name", "ELDAT Button")
-        self._attr_icon = entity_spec.get("icon", "mdi:button-pointer")
         self._operating_mode = entity_spec.get("operating_mode", 1)
         self._button_config = entity_spec.get("button_config", {})
         self._receiver_kind = entity_spec.get("receiver_kind", "switch")
         self._channel = entity_spec.get("channel", 1)
+        self._button_code = entity_spec.get("button_code", 0)  # TM_BUTTON_A/B/C/D (0-3)
         
         # New button configuration format
         self._button_type = self._button_config.get("type", "toggle")
@@ -970,11 +990,14 @@ class EldatConfiguredButton(EldatEntity, ButtonEntity):
         self._is_stateless = self._button_config.get("stateless", True)
         self._device_class = entity_spec.get("device_class", "switch")
         
-        # Set appropriate icon based on button type and device class
-        self._attr_icon = self._get_icon_for_button_type()
+        # Use icon from entity_spec if provided, otherwise use default based on button type
+        if "icon" in entity_spec and entity_spec["icon"]:
+            self._attr_icon = entity_spec["icon"]
+        else:
+            self._attr_icon = self._get_icon_for_button_type()
         
-        _LOGGER.debug("✅ Konfigurierter Button erstellt: %s (Kanal: %d)", 
-                     self._attr_name, self._channel)
+        _LOGGER.debug("✅ Konfigurierter Button erstellt: %s (button_code: %d, icon: %s)", 
+                     self._attr_name, self._button_code, self._attr_icon)
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
@@ -982,6 +1005,7 @@ class EldatConfiguredButton(EldatEntity, ButtonEntity):
         attrs = {
             "button_type": self._button_type,
             "channel": self._channel,
+            "button_code": self._button_code,
             "receiver_kind": self._receiver_kind,
         }
         
@@ -1165,42 +1189,29 @@ class EldatConfiguredButton(EldatEntity, ButtonEntity):
             _LOGGER.error("❌ Fehler beim Senden des Normal-Befehls: %s", e)
             return False
 
-    def _create_long_press_command(self) -> str:
+    def _create_long_press_command(self) -> bytes:
         """Create LongPress command based on button configuration."""
-        # LongPress commands for different button types
-        # Channel determines the physical button (1-4 = A-D)
-        button_map = {
-            1: "10",  # Button A
-            2: "11",  # Button B  
-            3: "12",  # Button C
-            4: "13"   # Button D
-        }
+        # Create 5-byte command for long press: [telegram_type, button_code, 0x00, 0x00, 0x00]
+        # For now, use same format as normal press (0x01 = PUSH)
+        # The continuous sending loop in wrapper will handle the long press behavior
+        cmd_bytes = bytes([0x01, self._button_code, 0x00, 0x00, 0x00])
         
-        button_code = button_map.get(self._channel, "10")
-        # LongPress is indicated by setting bit 7 (0x80) in the command
-        long_press_command = f"8{button_code[1]}"  # Add 0x80 to make it LongPress
+        _LOGGER.debug("🔒 LongPress-Befehl erstellt: %s für button_code %d", 
+                     cmd_bytes.hex(), self._button_code)
         
-        _LOGGER.debug("🔒 LongPress-Befehl erstellt: %s für Kanal %d (Typ: %s)", 
-                     long_press_command, self._channel, self._button_type)
-        
-        return long_press_command
+        return cmd_bytes
 
-    def _create_normal_command(self) -> str:
+    def _create_normal_command(self) -> bytes:
         """Create normal command based on button configuration.""" 
-        # Normal commands for different channels
-        button_map = {
-            1: "10",  # Button A
-            2: "11",  # Button B
-            3: "12",  # Button C  
-            4: "13"   # Button D
-        }
+        # Create 5-byte command: [telegram_type, button_code, 0x00, 0x00, 0x00]
+        # telegram_type: 0x01 = PUSH
+        # button_code: 0=A, 1=B, 2=C, 3=D (TM_BUTTON_A/B/C/D)
+        cmd_bytes = bytes([0x01, self._button_code, 0x00, 0x00, 0x00])
         
-        command = button_map.get(self._channel, "10")
+        _LOGGER.debug("🔘 Normal-Befehl erstellt: %s für button_code %d (Typ: %s)", 
+                     cmd_bytes.hex(), self._button_code, self._button_type)
         
-        _LOGGER.debug("🔘 Normal-Befehl erstellt: %s für Kanal %d (Typ: %s)", 
-                     command, self._channel, self._button_type)
-        
-        return command
+        return cmd_bytes
 
 
 class EldatRemoveButton(EldatEntity, ButtonEntity):
@@ -1256,8 +1267,7 @@ class EldatRemoveButton(EldatEntity, ButtonEntity):
             # Use the coordinator's comprehensive removal method
             success = await self.coordinator.async_remove_device(
                 serial_number, 
-                force=True,  # Remove button should always work
-                blacklist=True  # Add to blacklist to prevent rediscovery
+                force=True  # Remove button should always work
             )
             
             if success:
@@ -1351,7 +1361,17 @@ class DeviceRemoveButton(ButtonEntity, EldatEntity):
         device_info: Dict[str, Any],
     ) -> None:
         """Initialize the remove button."""
-        super().__init__(coordinator, serial_number, device_info)
+        # Ensure device_info is never None
+        if not device_info:
+            device_info = {"name": f"Device {serial_number[-6:]}", "type": "unknown"}
+        
+        # CRITICAL: Remove config_entry_id to prevent linking to old/invalid entries
+        cleaned_device_info = device_info.copy()
+        for problematic_field in ['config_entry_id', 'via_device', 'config_subentry_id', 
+                                  'via_device_id', 'entry_id']:
+            cleaned_device_info.pop(problematic_field, None)
+        
+        super().__init__(coordinator, serial_number, cleaned_device_info)
         
         self._attr_unique_id = f"{serial_number}_remove"
         self._attr_name = f"{device_info.get('name', serial_number)} Entfernen"
@@ -1374,46 +1394,53 @@ class DeviceRemoveButton(ButtonEntity, EldatEntity):
             device_info = self.coordinator.get_device(self._serial_number)
             device_name = device_info.get("name", self._serial_number[-8:]) if device_info else self._serial_number[-8:]
             
-            _LOGGER.info("📋 Device info found: %s (Type: %s)", device_name, device_info.get("type") if device_info else "Unknown")
+            _LOGGER.info("📋 Device info: %s (Type: %s)", device_name, device_info.get("type") if device_info else "Unknown")
             
-            # Check if device still exists in coordinator
-            device_exists = self._serial_number in self.coordinator.devices
-            _LOGGER.info("🔍 Device exists in coordinator: %s", device_exists)
-            
-            # Always use force=True for button removal to ensure it works for all device types
-            # EWneo devices especially need force=True to be removed properly
-            _LOGGER.info("🚀 Starting removal process with force=True...")
+            # Step 1: Remove from coordinator and HA registries (this also calls EWB_REMOVE_DEVICE)
+            _LOGGER.info("🔄 Step 1/4: Removing from coordinator and HA registries...")
             success = await self.coordinator.async_remove_device(
                 self._serial_number, 
-                force=True,  # Changed to True for reliable removal
-                blacklist=True
+                force=True  # Always force for reliable removal
             )
-            _LOGGER.info("📊 Removal result: %s", "SUCCESS" if success else "FAILED")
             
             if success:
-                if device_exists:
-                    _LOGGER.info("✅ Device removed via coordinator: %s", device_name)
-                else:
-                    _LOGGER.info("✅ Orphaned entities cleaned up for device: %s", device_name)
-                
-                # Fire success event
-                self.hass.bus.async_fire("eldat_device_removed_via_button", {
-                    "serial_number": self._serial_number,
-                    "device_name": device_name,
-                    "method": "coordinator",
-                    "was_orphaned": not device_exists
-                })
+                _LOGGER.info("✅ Removed from coordinator and HA registries (including DeviceManager whitelist)")
             else:
-                _LOGGER.warning("❌ Failed to remove device via coordinator: %s", self._serial_number[-8:])
-                
-                # Fire error event
-                self.hass.bus.async_fire("eldat_device_remove_failed", {
-                    "serial_number": self._serial_number,
-                    "error": "Coordinator removal failed"
-                })
+                _LOGGER.warning("⚠️ Coordinator removal had issues, continuing cleanup...")
+            
+            # Step 2: Remove from device_config_manager
+            _LOGGER.info("🔄 Step 2/4: Removing from device configuration...")
+            try:
+                await self.coordinator.device_config_manager.remove_device(self._serial_number)
+                _LOGGER.info("✅ Removed from device configuration")
+            except Exception as e:
+                _LOGGER.warning("⚠️ Device config removal error: %s", e)
+            
+            # Step 3: Clean up entities
+            _LOGGER.info("🔄 Step 3/4: Final entity cleanup...")
+            from homeassistant.helpers import entity_registry as er
+            entity_registry = er.async_get(self.hass)
+            
+            # Find and remove all entities with this serial number
+            entities_removed = 0
+            for entity_entry in list(entity_registry.entities.values()):
+                if entity_entry.platform == "eldat_plugin" and entity_entry.unique_id:
+                    if self._serial_number.upper() in entity_entry.unique_id.upper():
+                        entity_registry.async_remove(entity_entry.entity_id)
+                        entities_removed += 1
+            
+            _LOGGER.info("✅ Device %s completely removed (cleaned up %d entities)", device_name, entities_removed)
+            
+            # Fire success event
+            self.hass.bus.async_fire("eldat_device_removed_via_button", {
+                "serial_number": self._serial_number,
+                "device_name": device_name,
+                "entities_removed": entities_removed,
+                "method": "device_manager"
+            })
                 
         except Exception as e:
-            _LOGGER.error("Error in remove button press: %s", e)
+            _LOGGER.error("❌ Error in remove button press: %s", e, exc_info=True)
             
             # Fire error event
             self.hass.bus.async_fire("eldat_device_remove_failed", {
@@ -1423,6 +1450,11 @@ class DeviceRemoveButton(ButtonEntity, EldatEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        # Button should always be available for removal
+        """Return if entity is available - button should ALWAYS be available for removal."""
+        # Override parent class - remove button must always work to allow cleanup
+        return True
+    
+    @property
+    def entity_registry_enabled_default(self) -> bool:
+        """Return if entity should be enabled by default."""
         return True

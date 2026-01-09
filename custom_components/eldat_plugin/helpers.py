@@ -96,237 +96,68 @@ def battery_percentage_from_level(battery_level: int | None) -> int:
 
 
 def determine_device_entities(learned_device: dict) -> dict:
-    """Determine which entities should be created for a learned device.
-
-    This extracts the large switch/case logic from the config flow into a
-    reusable helper. Returns a dict with keys: entities (list), platforms (set),
+    """DEPRECATED: Use entity_specs.create_entity_specs_for_device() instead.
+    
+    This function is kept for backward compatibility but delegates to
+    the centralized entity specification system.
+    
+    Returns a dict with keys: entities (list), platforms (set),
     device_class, category.
     """
+    import logging
+    _LOGGER = logging.getLogger(__name__)
+    _LOGGER.warning("determine_device_entities() is deprecated, use create_entity_specs_for_device()")
+    
+    from .entity_specs import create_entity_specs_for_device
+    
+    # Convert learned_device format to device_info format
+    serial_number = learned_device.get("serial_number", "unknown")
+    device_info = {
+        "type": learned_device.get("type", "unknown"),
+        "name": learned_device.get("name", ""),
+        "serial_number": serial_number,
+        **learned_device  # Include all other fields
+    }
+    
+    # Get entity specs from centralized function
+    entity_specs = create_entity_specs_for_device(serial_number, device_info)
+    
+    # Convert entity_specs format (dict of lists) to old format (single list + platforms)
+    all_entities = []
+    all_platforms = set()
+    
+    for platform, entities in entity_specs.items():
+        if entities:
+            all_platforms.add(platform)
+            all_entities.extend(entities)
+    
+    # Determine device_class and category from device type
     device_type = learned_device.get("type", "unknown")
-    entity_info: dict = {"entities": [], "platforms": set()}
-
+    device_class = "unknown"
+    category = "config"
+    
     if device_type == "ew_transmitter":
-        # EW-Transmitter creates binary sensor entities for button press detection
-        # Battery sensors are handled separately via sensor platform
-        entity_info.update({
-            "entities": [],
-            "platforms": {"binary_sensor", "sensor"},  # Both binary_sensor (buttons) and sensor (battery)
-            "device_class": "remote_control",
-            "category": "remote",
-        })
-
+        device_class = "remote_control"
+        category = "remote"
     elif device_type == "ew_sensor":
-        entities = []
-        if learned_device.get("is_learn_telegram"):
-            available_sensors = learned_device.get("available_sensors", [])
-            if "temperature" in available_sensors:
-                entities.append({
-                    "type": "sensor",
-                    "sensor_type": "temperature",
-                    "name": "Temperature",
-                    "unique_id": f"{learned_device.get('serial_number')}_temperature",
-                    "device_class": "temperature",
-                    "unit": "°C",
-                    "icon": "mdi:thermometer",
-                })
-            if "humidity" in available_sensors:
-                entities.append({
-                    "type": "sensor",
-                    "sensor_type": "humidity",
-                    "name": "Humidity",
-                    "unique_id": f"{learned_device.get('serial_number')}_humidity",
-                    "device_class": "humidity",
-                    "unit": "%",
-                    "icon": "mdi:water-percent",
-                })
-            if "rain" in available_sensors:
-                entities.append({
-                    "type": "sensor",
-                    "sensor_type": "rain",
-                    "name": "Rain",
-                    "unique_id": f"{learned_device.get('serial_number')}_rain",
-                    "device_class": "precipitation",
-                    "unit": "mm",
-                    "icon": "mdi:weather-rainy",
-                })
-            if "wind" in available_sensors:
-                entities.append({
-                    "type": "sensor",
-                    "sensor_type": "wind",
-                    "name": "Wind Speed",
-                    "unique_id": f"{learned_device.get('serial_number')}_wind",
-                    "device_class": "wind_speed",
-                    "unit": "m/s",
-                    "icon": "mdi:weather-windy",
-                })
-        if learned_device.get("has_battery"):
-            entities.append({
-                "type": "sensor",
-                "sensor_type": "battery",
-                "name": "Battery",
-                "unique_id": f"{learned_device.get('serial_number')}_battery",
-                "device_class": "battery",
-                "unit": "%",
-                "icon": "mdi:battery",
-                "current_value": battery_percentage_from_level(learned_device.get("battery_level")),
-            })
-        entity_info.update({
-            "entities": entities,
-            "platforms": {"sensor"},
-            "device_class": "sensor",
-            "category": "sensor",
-        })
-
+        device_class = "sensor"
+        category = "sensor"
     elif device_type == "ew_receiver":
-        entities = []
-        channel_count = learned_device.get("channels", 1)
-        for i in range(channel_count):
-            entities.append({
-                "type": "switch",
-                "channel": i,
-                "name": f"Channel {i+1}",
-                "unique_id": f"{learned_device.get('serial_number')}_ch{i}",
-                "device_class": "switch",
-                "icon": "mdi:light-switch",
-            })
-        entity_info.update({
-            "entities": entities,
-            "platforms": {"switch"},
-            "device_class": "switch",
-            "category": "switch",
-            # CRITICAL: EW-Receiver müssen Button-Support haben für Control-Entities
-            "supports_buttons": True,
-            "supports_feedback": False,  # Explizit false für EW-Receiver
-            "supports_sensors": False,   # Explizit false für EW-Receiver
-        })
-
-    elif device_type in ["ewneo_transceiver", "ewneo_bidi_transmitter"]:
-        entities = []
-        button_count = int(learned_device.get("button_count", learned_device.get("channels", 2)))
-        for i in range(button_count):
-            button_letter = chr(ord("A") + i)
-            entities.append({
-                "type": "button",
-                "channel": i,
-                "name": f"Button {button_letter}",
-                "unique_id": f"{learned_device.get('serial_number')}_btn{i}",
-                "device_class": "button",
-                "icon": "mdi:gesture-tap-button",
-            })
-        entity_info.update({
-            "entities": entities,
-            "platforms": {"button"},
-            "device_class": "remote_control",
-            "category": "remote",
-        })
-
-    elif device_type == "ewneo_receiver":
-        entities = []
-        gateway_device_type = learned_device.get("device_type", "EWB_DT_SWITCH")
-        platforms = set()
-        if gateway_device_type == "EWB_DT_SWITCH":
-            entities.append({
-                "type": "switch",
-                "channel": 0,
-                "name": "Switch",
-                "unique_id": f"{learned_device.get('serial_number')}_switch",
-                "device_class": "switch",
-                "icon": "mdi:toggle-switch",
-            })
-            platforms = {"switch"}
-        elif gateway_device_type == "EWB_DT_DUAL_SWITCH":
-            for i in range(2):
-                entities.append({
-                    "type": "switch",
-                    "channel": i,
-                    "name": f"Switch {i+1}",
-                    "unique_id": f"{learned_device.get('serial_number')}_switch_{i}",
-                    "device_class": "switch",
-                    "icon": "mdi:toggle-switch",
-                })
-            platforms = {"switch"}
-        elif gateway_device_type == "EWB_DT_QUAD_SWITCH":
-            for i in range(4):
-                entities.append({
-                    "type": "switch",
-                    "channel": i,
-                    "name": f"Switch {i+1}",
-                    "unique_id": f"{learned_device.get('serial_number')}_switch_{i}",
-                    "device_class": "switch",
-                    "icon": "mdi:toggle-switch",
-                })
-            platforms = {"switch"}
-        elif gateway_device_type == "EWB_DT_DIMMER":
-            entities.append({
-                "type": "light",
-                "channel": 0,
-                "name": "Dimmer",
-                "unique_id": f"{learned_device.get('serial_number')}_dimmer",
-                "device_class": "light",
-                "icon": "mdi:brightness-6",
-                "supports_brightness": True,
-            })
-            platforms = {"light"}
-        elif gateway_device_type == "EWB_DT_MOTOR":
-            entities.append({
-                "type": "cover",
-                "channel": 0,
-                "name": "Cover",
-                "unique_id": f"{learned_device.get('serial_number')}_cover",
-                "device_class": "blind",
-                "icon": "mdi:window-shutter",
-            })
-            platforms = {"cover"}
-        elif gateway_device_type == "EWB_DT_DUAL_MOTOR":
-            for i in range(2):
-                entities.append({
-                    "type": "cover",
-                    "channel": i,
-                    "name": f"Cover {i+1}",
-                    "unique_id": f"{learned_device.get('serial_number')}_cover_{i}",
-                    "device_class": "blind",
-                    "icon": "mdi:window-shutter",
-                })
-            platforms = {"cover"}
-        elif gateway_device_type == "EWB_DT_QUAD_MOTOR":
-            for i in range(4):
-                entities.append({
-                    "type": "cover",
-                    "channel": i,
-                    "name": f"Cover {i+1}",
-                    "unique_id": f"{learned_device.get('serial_number')}_cover_{i}",
-                    "device_class": "blind",
-                    "icon": "mdi:window-shutter",
-                })
-            platforms = {"cover"}
-        elif gateway_device_type == "EWB_DT_BIDI_TR":
-            entities.append({
-                "type": "switch",
-                "channel": 0,
-                "name": "Transceiver",
-                "unique_id": f"{learned_device.get('serial_number')}_transceiver",
-                "device_class": "switch",
-                "icon": "mdi:transit-connection-variant",
-            })
-            platforms = {"switch"}
+        receiver_kind = learned_device.get("receiver_kind", "switch")
+        if receiver_kind == "motor":
+            device_class = "blind"
+            category = "cover"
+        elif receiver_kind == "dimmer":
+            device_class = "light"
+            category = "light"
         else:
-            entities.append({
-                "type": "switch",
-                "channel": 0,
-                "name": "Unknown Device",
-                "unique_id": f"{learned_device.get('serial_number')}_unknown",
-                "device_class": "switch",
-                "icon": "mdi:help-circle",
-            })
-            platforms = {"switch"}
+            device_class = "switch"
+            category = "switch"
+    
+    return {
+        "entities": all_entities,
+        "platforms": all_platforms,
+        "device_class": device_class,
+        "category": category,
+    }
 
-        entity_info.update({
-            "entities": entities,
-            "platforms": platforms,
-            "device_class": ("outlet" if str(gateway_device_type).endswith("_SWITCH") else
-                              "light" if str(gateway_device_type).endswith("_DIMMER") else
-                              "blind" if str(gateway_device_type).endswith("_MOTOR") else "switch"),
-            "category": "config",
-        })
-
-    return entity_info

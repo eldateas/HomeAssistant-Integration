@@ -49,7 +49,7 @@ async def async_setup_entry(
             if entity_spec.get("type") != "light":
                 continue
             try:
-                lt = EldatConfiguredLight(coordinator, serial, device_info, entity_spec)
+                lt = EldatEWReceiverDimmer(coordinator, serial, device_info, entity_spec)
                 if lt.unique_id not in coordinator.created_entity_unique_ids:
                     lights.append(lt)
                     coordinator.created_entity_unique_ids.add(lt.unique_id)
@@ -91,7 +91,7 @@ async def async_setup_entry(
                         _LOGGER.info("🔧 Created EWneo light entity for device %s", serial[-8:])
                     else:
                         # Regular light entity
-                        lt = EldatConfiguredLight(coordinator, serial, device_info, spec)
+                        lt = EldatEWReceiverDimmer(coordinator, serial, device_info, spec)
                     
                     _LOGGER.debug("Light: Created light entity with unique_id: %s", lt.unique_id)
                     
@@ -144,7 +144,7 @@ async def async_setup_entry(
                 if device_info.get("neo_device"):
                     new_lights.append(EldatEWneoLight(coordinator, serial_number, device_info, entity_spec))
                 else:
-                    new_lights.append(EldatConfiguredLight(coordinator, serial_number, device_info, entity_spec))
+                    new_lights.append(EldatEWReceiverDimmer(coordinator, serial_number, device_info, entity_spec))
                     
             if new_lights:
                 async_add_entities(new_lights)
@@ -156,7 +156,7 @@ async def async_setup_entry(
     config_entry.async_on_unload(hass.bus.async_listen(EVENT_FORCE_CREATE, _handle_force_create))
 
 
-class EldatConfiguredLight(EldatEntity, LightEntity):
+class EldatEWReceiverDimmer(EldatEntity, LightEntity):
     """Light/dimmer entity created from entity specification with operating mode support."""
 
     def __init__(
@@ -502,6 +502,22 @@ class EldatEWneoLight(EldatEntity, LightEntity):
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass, set up event listeners."""
         await super().async_added_to_hass()
+        
+        # Add NFILTER for gateway serial to enable bidirectional communication
+        if self._gateway_serial:
+            try:
+                filter_success = await self.coordinator.transceiver.rx11_ewb_add_filter(self._gateway_serial)
+                if filter_success:
+                    _LOGGER.info("✅ EWneo light %s: Added NFILTER for gateway %s", 
+                                self._serial_number[-8:], self._gateway_serial[-8:])
+                else:
+                    _LOGGER.warning("⚠️ EWneo light %s: Failed to add NFILTER for gateway %s", 
+                                   self._serial_number[-8:], self._gateway_serial[-8:])
+            except Exception as e:
+                _LOGGER.error("❌ EWneo light %s: Error adding NFILTER: %s", self._serial_number[-8:], e)
+        else:
+            _LOGGER.warning("⚠️ EWneo light %s: No gateway serial configured, bidirectional communication may not work", 
+                           self._serial_number[-8:])
         
         # Listen for EWneo state update events
         def handle_ewneo_state_update(event):
