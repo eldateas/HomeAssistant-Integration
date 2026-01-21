@@ -374,8 +374,7 @@ class EldatButton(EldatEntity, ButtonEntity):
         self._button_id = button_id
         self._attr_unique_id = f"{serial_number}_button_{button_id}"
         
-        device_name = device_info.get("name", serial_number)
-        self._attr_name = f"{device_name} Button {button_id + 1}"
+        self._attr_name = f"Button {button_id + 1}"
         
         # Set icon based on device type
         device_type = device_info.get("type", "unknown")
@@ -1224,7 +1223,7 @@ class EldatRemoveButton(EldatEntity, ButtonEntity):
         device_name = device_info.get('name', f"Device {serial_number[-8:]}")
         device_type = device_info.get('type', 'unknown')
         
-        self._attr_name = f"{device_name} Entfernen"
+        self._attr_name = "Entfernen"
         self._attr_unique_id = f"{serial_number}_remove"
         self._attr_entity_id = f"button.{serial_number.lower()}_remove"
         self._attr_device_class = "restart"
@@ -1325,7 +1324,7 @@ class EldatTestButton(EldatEntity, ButtonEntity):
         super().__init__(coordinator, serial_number, device_info)
         
         self._attr_unique_id = f"{serial_number}_test"
-        self._attr_name = f"{device_info.get('name', serial_number)} Test"
+        self._attr_name = "Test"
         self._attr_icon = "mdi:test-tube"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -1374,7 +1373,7 @@ class DeviceRemoveButton(ButtonEntity, EldatEntity):
         super().__init__(coordinator, serial_number, cleaned_device_info)
         
         self._attr_unique_id = f"{serial_number}_remove"
-        self._attr_name = f"{device_info.get('name', serial_number)} Entfernen"
+        self._attr_name = "Entfernen"
         self._attr_icon = "mdi:delete"
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_device_class = None  # Explicitly no device class for buttons

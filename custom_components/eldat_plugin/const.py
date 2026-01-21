@@ -22,12 +22,12 @@ CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_TRANSCEIVER_TYPE: Final = "transceiver_type"
 
 # Default Values
-DEFAULT_SCAN_INTERVAL: Final = 30
+DEFAULT_SCAN_INTERVAL: Final = 5
 DEFAULT_DEVICE_NAME: Final = "ELDAT Integration"
 
 # USB und Device Settings
 USB_DEVICE_PATH: Final = "device_path"
-DEVICE_SCAN_INTERVAL: Final = datetime.timedelta(seconds=30)
+DEVICE_SCAN_INTERVAL: Final = datetime.timedelta(seconds=5)
 SERIAL_NUMBER_LENGTH: Final = 16
 
 # Device Types (basierend auf RxModule.h)
@@ -241,3 +241,5 @@ EVENT_TELEGRAM_RECEIVED: Final = f"{DOMAIN}_telegram_received"
 EVENT_SENSOR_UPDATE: Final = f"{DOMAIN}_sensor_update"
 EVENT_SENSOR_ADDED: Final = f"{DOMAIN}_sensor_added"
 EVENT_FORCE_CREATE: Final = f"{DOMAIN}_force_create"
+EVENT_BUTTON_PRESSED: Final = f"{DOMAIN}_button_pressed"
+EVENT_BUTTON_RELEASED: Final = f"{DOMAIN}_button_released"

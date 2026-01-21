@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     DOMAIN,
@@ -79,57 +79,6 @@ async def _find_usb_device_path(hass: HomeAssistant, configured_path: str) -> st
     return configured_path
 
 
-async def _compile_rx11_library(hass: HomeAssistant) -> bool:
-    """Compile the RX11 C library if it doesn't exist."""
-    integration_dir = Path(__file__).parent
-    rx11_dir = integration_dir / "transceivers" / "rx11"
-    library_path = rx11_dir / "RxModule.so"
-    source_path = rx11_dir / "RxModule.c"
-    
-    # Check if library already exists
-    if library_path.exists():
-        _LOGGER.debug("RX11 C library already exists at %s", library_path)
-        return True
-    
-    # Check if source files exist
-    if not source_path.exists():
-        _LOGGER.warning("RX11 source files not found, library compilation skipped")
-        return False
-    
-    _LOGGER.info("Compiling RX11 C library...")
-    
-    try:
-        # Run compilation in executor to avoid blocking
-        def _compile():
-            compile_script = integration_dir / "compile_library.sh"
-            if not compile_script.exists():
-                _LOGGER.error("Compilation script not found at %s", compile_script)
-                return False
-            
-            result = subprocess.run(
-                ["bash", str(compile_script)],
-                cwd=str(integration_dir),
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            
-            if result.returncode == 0:
-                _LOGGER.info("✅ RX11 C library compiled successfully")
-                return True
-            else:
-                _LOGGER.error("❌ RX11 library compilation failed: %s", result.stderr)
-                return False
-        
-        return await hass.async_add_executor_job(_compile)
-        
-    except subprocess.TimeoutExpired:
-        _LOGGER.error("RX11 library compilation timed out")
-        return False
-    except Exception as e:
-        _LOGGER.error("Failed to compile RX11 library: %s", e)
-        return False
-
 # Platforms to set up
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -138,6 +87,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.LIGHT,
     Platform.COVER,
+    Platform.SELECT,
 ]
 
 
@@ -145,14 +95,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up ELDAT from a config entry with transceiver modularity."""
     _LOGGER.info("Setting up ELDAT integration for entry %s", entry.entry_id)
     
+    # Guard against double setup
+    hass.data.setdefault(DOMAIN, {})
+    if entry.entry_id in hass.data[DOMAIN]:
+        _LOGGER.warning("⚠️ Entry %s already set up, skipping", entry.entry_id)
+        return True
+    
     # Get configuration data
     transceiver_type_str = entry.data.get(CONF_TRANSCEIVER_TYPE)
     device_path = entry.data.get(CONF_DEVICE_PATH)
     device_name = entry.data.get(CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME)
-    
-    # Compile RX11 library if needed and RX11 is being used
-    if transceiver_type_str == TransceiverType.RX11.value:
-        await _compile_rx11_library(hass)
     
     if not transceiver_type_str:
         _LOGGER.error("No transceiver type specified in config entry")
@@ -209,8 +161,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("Failed to setup coordinator: %s", e)
         raise ConfigEntryNotReady(f"Coordinator setup failed: {e}")
     
-    # Store coordinator in hass data
-    hass.data.setdefault(DOMAIN, {})
+    # Store coordinator in hass data (DOMAIN dict already initialized at top of function)
     hass.data[DOMAIN][entry.entry_id] = coordinator
     
     # Step 3: Restore ONLY registered devices BEFORE setting up platforms
@@ -335,12 +286,48 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove a config entry with proper cleanup."""
-    _LOGGER.info("🗑️ Removing ELDAT config entry...")
+    """Remove a config entry with proper cleanup - removes ALL devices."""
+    _LOGGER.info("🗑️ Removing ELDAT config entry and all associated devices...")
     
-    # Additional cleanup if needed
+    # Get coordinator for shutdown
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
         await coordinator.async_shutdown()
     
-    _LOGGER.info("✅ ELDAT config entry removed successfully")
+    # Remove all devices associated with this config entry from device registry
+    device_registry = dr.async_get(hass)
+    devices_to_remove = []
+    
+    for device in device_registry.devices.values():
+        # Check if device belongs to this config entry
+        for config_entry_id in device.config_entries:
+            if config_entry_id == entry.entry_id:
+                devices_to_remove.append(device.id)
+                break
+    
+    # Remove each device
+    for device_id in devices_to_remove:
+        device_registry.async_remove_device(device_id)
+        _LOGGER.info("🗑️ Removed device: %s", device_id)
+    
+    _LOGGER.info("✅ ELDAT config entry removed - %d devices deleted", len(devices_to_remove))
+    
+    # Optional: Clean up stored data files
+    import os
+    import shutil
+    data_dir = f"{hass.config.config_dir}/eldat_plugin"
+    if os.path.exists(data_dir):
+        try:
+            # Remove only device-related files, keep the directory
+            files_to_remove = [
+                "registered_devices.json",
+                "managed_devices.json", 
+                "managed_devices_backup.json",
+            ]
+            for filename in files_to_remove:
+                filepath = os.path.join(data_dir, filename)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    _LOGGER.info("🗑️ Removed data file: %s", filename)
+        except Exception as e:
+            _LOGGER.warning("⚠️ Could not clean up data files: %s", e)

@@ -9,8 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, EVENT_DEVICE_ADDED, EVENT_FORCE_CREATE
 from .coordinator import EldatCoordinator
@@ -289,9 +290,23 @@ def _create_switches_for_device(coordinator: EldatCoordinator, serial_number: st
         _LOGGER.debug("Skipping switch creation for sensor device %s (type: %s)", serial_number[-8:], device_type)
         return switches
     
-    # Skip EW transmitters entirely - they should only have binary sensor entities
+    # For EW transmitters, use entity_specs to determine what to create
+    # Transmitters in "Dauer" (permanent) mode with single button mode get switch entities
     if device_type == "ew_transmitter":
-        _LOGGER.debug("Skipping switch creation for transmitter device %s", serial_number[-8:])
+        from .entity_specs import create_entity_specs_for_device
+        entity_specs = create_entity_specs_for_device(serial_number, device_info)
+        switch_specs = entity_specs.get("switch", [])
+        
+        if switch_specs:
+            for spec in switch_specs:
+                if spec.get("switch_type") == "transmitter_state":
+                    switches.append(EldatTransmitterStateSwitch(coordinator, serial_number, device_info, spec))
+                else:
+                    switches.append(EldatTransmitterSwitch(coordinator, serial_number, device_info, spec))
+            _LOGGER.info("✅ Created %d switch entities for transmitter %s (Dauer mode)", 
+                        len(switches), serial_number[-8:])
+        else:
+            _LOGGER.debug("No switch entities for transmitter %s (not in Dauer mode)", serial_number[-8:])
         return switches
     
     # For EW-Receivers, only create switches if explicitly configured as switches
@@ -1313,6 +1328,225 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
         # Merge with base attributes
         base_attrs.update(device_attrs)
         return base_attrs
+
+
+class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
+    """Switch entity for ELDAT transmitters in 'Dauer' (permanent) mode.
+    
+    This creates a persistent toggle switch for each button on a transmitter.
+    When the button is pressed, the switch state toggles (On -> Off or Off -> On).
+    The state persists between button presses.
+    """
+
+    def __init__(
+        self,
+        coordinator: EldatCoordinator,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        entity_spec: Dict[str, Any],
+    ) -> None:
+        super().__init__(coordinator, serial_number, device_info)
+        self._entity_spec = entity_spec
+        self._button = entity_spec.get("button", "A")
+        self._channel = entity_spec.get("channel", 0)
+        self._is_on = False  # Persistent state
+        self._available = True
+        self._icon_on = entity_spec.get("icon_on", "mdi:toggle-switch")
+        self._icon_off = entity_spec.get("icon_off", "mdi:toggle-switch-off")
+        
+        # Set up entity attributes
+        self._attr_name = entity_spec.get("name", f"Transmitter {serial_number[-6:]} Button {self._button}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_transmitter_switch_{self._button}")
+        self._attr_icon = entity_spec.get("icon", self._icon_off)
+        self._attr_device_class = SwitchDeviceClass.SWITCH
+        self._attr_entity_registry_enabled_default = True
+        
+        _LOGGER.info("✅ Transmitter switch initialized: %s (button: %s)", 
+                    self._attr_name, self._button)
+
+    async def async_added_to_hass(self) -> None:
+        """Register for button press events when entity is added to hass."""
+        await super().async_added_to_hass()
+        
+        # Listen for button press events from this device
+        # Multiple event types are fired for button presses, use the short_press event
+        EVENT_BUTTON_SHORT_PRESS = "eldat_button_short_press"
+        
+        @callback
+        def _handle_button_press(event):
+            """Handle button press event - toggle state."""
+            event_serial = event.data.get("device_id", "") or event.data.get("serial_number", "")
+            
+            # Check if this event is for our device
+            if not event_serial.endswith(self._serial_number[-6:]):
+                return
+            
+            # Check if this is the button for this switch
+            # button_name is the string like "A", "B", "C", "D"
+            button_name = event.data.get("button_name", event.data.get("subtype", ""))
+            if button_name == self._button:
+                # Toggle state on button press
+                self._is_on = not self._is_on
+                _LOGGER.info("🔄 Transmitter switch %s toggled to %s (button %s pressed)",
+                            self._attr_name, "ON" if self._is_on else "OFF", self._button)
+                self.async_write_ha_state()
+        
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_BUTTON_SHORT_PRESS, _handle_button_press)
+        )
+    
+    @property
+    def is_on(self) -> bool:
+        """Return true if switch is on."""
+        return self._is_on
+    
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self._available
+
+    @property
+    def icon(self) -> str:
+        if self._is_on:
+            return self._icon_on
+        return self._icon_off
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Turn the switch on (manual override - not typical for transmitter switches)."""
+        self._is_on = True
+        self.async_write_ha_state()
+        _LOGGER.debug("Transmitter switch %s manually turned ON", self._attr_name)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Turn the switch off (manual override - not typical for transmitter switches)."""
+        self._is_on = False
+        self.async_write_ha_state()
+        _LOGGER.debug("Transmitter switch %s manually turned OFF", self._attr_name)
+
+
+class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
+    """Switch entity for EW-Transmitters in 2-button modes (Auf/Zu).
+
+    Maintains persistent state mapped from button events.
+    """
+
+    def __init__(
+        self,
+        coordinator: EldatCoordinator,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        entity_spec: Dict[str, Any],
+    ) -> None:
+        super().__init__(coordinator, serial_number, device_info)
+        self._entity_spec = entity_spec
+        self._button_map = entity_spec.get("button_map", {})
+        self._options = entity_spec.get("options", ["Auf", "Zu"])
+        self._state_key = entity_spec.get("state_key", "transmitter_state")
+        self._on_label = entity_spec.get("on_label", self._options[0])
+        self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "Aus")
+
+        self._attr_name = entity_spec.get("name", f"Transmitter {serial_number[-6:]} State")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state")
+        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
+        self._attr_device_class = SwitchDeviceClass.SWITCH
+        self._attr_entity_registry_enabled_default = True
+
+        self._current_state: str | None = None
+
+        _LOGGER.info("✅ Transmitter state switch initialized: %s", self._attr_name)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+
+        persistent = self.coordinator.get_device_state(self._serial_number) or {}
+        if self._state_key in persistent and persistent[self._state_key] in self._options:
+            self._current_state = persistent[self._state_key]
+        elif (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state == "on":
+                self._current_state = self._on_label
+            elif last_state.state == "off":
+                self._current_state = self._off_label
+
+        @callback
+        def _handle_button_event(event):
+            event_serial = event.data.get("serial_number", "") or event.data.get("device_id", "")
+            event_button = event.data.get("button")
+            if event_button is None:
+                event_button = event.data.get("button_id")
+
+            # Normalize button id from name if missing
+            if event_button is None:
+                button_name = event.data.get("button_name") or event.data.get("subtype") or ""
+                normalized_name = button_name.strip()
+                if normalized_name.lower().startswith("taste "):
+                    normalized_name = normalized_name.split()[-1]
+                name_map = {"A": 0, "B": 1, "C": 2, "D": 3}
+                if normalized_name in name_map:
+                    event_button = name_map[normalized_name]
+
+            # Normalize numeric string button ids
+            if isinstance(event_button, str) and event_button.isdigit():
+                event_button = int(event_button)
+
+            # Mask button id if function bits are included
+            if isinstance(event_button, int) and event_button > 3:
+                event_button = event_button & 0x03
+
+            # Compare full serial numbers or match by last 8 characters as fallback
+            matches_device = False
+            if event_serial:
+                if event_serial == self._serial_number:
+                    matches_device = True
+                elif len(event_serial) >= 8 and len(self._serial_number) >= 8:
+                    matches_device = event_serial[-8:] == self._serial_number[-8:]
+
+            if not matches_device:
+                event_device_id = event.data.get("device_id")
+                if event_device_id == f"eldat_transmitter_{self._serial_number.lower()}":
+                    matches_device = True
+                elif event_device_id and len(event_device_id) >= 8 and len(self._serial_number) >= 8:
+                    matches_device = event_device_id[-8:] == self._serial_number[-8:]
+
+            if not matches_device:
+                return
+
+            if event_button in self._button_map:
+                new_state = self._button_map[event_button]
+                if new_state in self._options and new_state != self._current_state:
+                    self._current_state = new_state
+                    self.coordinator.set_device_state(
+                        self._serial_number, {self._state_key: new_state}
+                    )
+                    self.async_write_ha_state()
+
+        self.async_on_remove(
+            self.hass.bus.async_listen("eldat_button_short_press", _handle_button_event)
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen("eldat_button_press_start", _handle_button_event)
+        )
+
+    @property
+    def is_on(self) -> bool:
+        return self._current_state == self._on_label
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self._current_state = self._on_label
+        self.coordinator.set_device_state(self._serial_number, {self._state_key: self._on_label})
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self._current_state = self._off_label
+        self.coordinator.set_device_state(self._serial_number, {self._state_key: self._off_label})
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "state_label": self._current_state,
+            "on_label": self._on_label,
+            "off_label": self._off_label,
+        }
 
 
 class EldatSwitch(EldatEntity, SwitchEntity):

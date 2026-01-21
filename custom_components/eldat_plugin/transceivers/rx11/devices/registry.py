@@ -65,36 +65,26 @@ except ImportError as e:
     _LOGGER.warning(f"Could not import climate receiver: {e}")
     receiver_imports['climate'] = lambda *args, **kwargs: None
 
-# Transmitter classes
+# Transmitter classes - now using unified button_transmitter module
 try:
-    from .ew_transmitters.single_button import create_rx11_single_button_transmitter
+    from .ew_transmitters.button_transmitter import (
+        create_rx11_single_button_transmitter,
+        create_rx11_dual_button_transmitter,
+        create_rx11_triple_button_transmitter,
+        create_rx11_quad_button_transmitter,
+    )
     transmitter_imports['single'] = create_rx11_single_button_transmitter
-except ImportError as e:
-    _LOGGER.warning(f"Could not import single button transmitter: {e}")
-    transmitter_imports['single'] = lambda *args, **kwargs: None
-
-try:
-    from .ew_transmitters.dual_button import create_rx11_dual_button_transmitter
     transmitter_imports['dual'] = create_rx11_dual_button_transmitter
-except ImportError as e:
-    _LOGGER.warning(f"Could not import dual button transmitter: {e}")
-    transmitter_imports['dual'] = lambda *args, **kwargs: None
-
-try:
-    from .ew_transmitters.triple_button import create_rx11_triple_button_transmitter
     transmitter_imports['triple'] = create_rx11_triple_button_transmitter
-except ImportError as e:
-    _LOGGER.warning(f"Could not import triple button transmitter: {e}")
-    transmitter_imports['triple'] = lambda *args, **kwargs: None
-
-try:
-    from .ew_transmitters.quad_button import create_rx11_quad_button_transmitter
     transmitter_imports['quad'] = create_rx11_quad_button_transmitter
 except ImportError as e:
-    _LOGGER.warning(f"Could not import quad button transmitter: {e}")
+    _LOGGER.warning(f"Could not import button transmitters: {e}")
+    transmitter_imports['single'] = lambda *args, **kwargs: None
+    transmitter_imports['dual'] = lambda *args, **kwargs: None
+    transmitter_imports['triple'] = lambda *args, **kwargs: None
     transmitter_imports['quad'] = lambda *args, **kwargs: None
 
-# EWneo transceiver classes
+# EWneo transceiver classes - now using unified modules
 try:
     from .ewneo_transceivers.transceiver import create_rx11_ewneo_transceiver
     ewneo_imports['transceiver'] = create_rx11_ewneo_transceiver
@@ -103,24 +93,18 @@ except ImportError as e:
     ewneo_imports['transceiver'] = lambda *args, **kwargs: None
 
 try:
-    from .ewneo_transceivers.switch import create_rx11_ewneo_switch
+    from .ewneo_transceivers.unified_switch import (
+        create_rx11_ewneo_switch,
+        create_rx11_ewneo_dual_switch,
+        create_rx11_ewneo_quad_switch,
+    )
     ewneo_imports['switch'] = create_rx11_ewneo_switch
+    ewneo_imports['dual_switch'] = create_rx11_ewneo_dual_switch
+    ewneo_imports['quad_switch'] = create_rx11_ewneo_quad_switch
 except ImportError as e:
     _LOGGER.warning(f"Could not import ewneo switch: {e}")
     ewneo_imports['switch'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_transceivers.dual_switch import create_rx11_ewneo_dual_switch
-    ewneo_imports['dual_switch'] = create_rx11_ewneo_dual_switch
-except ImportError as e:
-    _LOGGER.warning(f"Could not import ewneo dual switch: {e}")
     ewneo_imports['dual_switch'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_transceivers.quad_switch import create_rx11_ewneo_quad_switch
-    ewneo_imports['quad_switch'] = create_rx11_ewneo_quad_switch
-except ImportError as e:
-    _LOGGER.warning(f"Could not import ewneo quad switch: {e}")
     ewneo_imports['quad_switch'] = lambda *args, **kwargs: None
 
 try:
@@ -131,24 +115,18 @@ except ImportError as e:
     ewneo_imports['dimmer'] = lambda *args, **kwargs: None
 
 try:
-    from .ewneo_transceivers.motor import create_rx11_ewneo_motor
+    from .ewneo_transceivers.unified_motor import (
+        create_rx11_ewneo_motor,
+        create_rx11_ewneo_dual_motor,
+        create_rx11_ewneo_quad_motor,
+    )
     ewneo_imports['motor'] = create_rx11_ewneo_motor
+    ewneo_imports['dual_motor'] = create_rx11_ewneo_dual_motor
+    ewneo_imports['quad_motor'] = create_rx11_ewneo_quad_motor
 except ImportError as e:
     _LOGGER.warning(f"Could not import ewneo motor: {e}")
     ewneo_imports['motor'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_transceivers.dual_motor import create_rx11_ewneo_dual_motor
-    ewneo_imports['dual_motor'] = create_rx11_ewneo_dual_motor
-except ImportError as e:
-    _LOGGER.warning(f"Could not import ewneo dual motor: {e}")
     ewneo_imports['dual_motor'] = lambda *args, **kwargs: None
-
-try:
-    from .ewneo_transceivers.quad_motor import create_rx11_ewneo_quad_motor
-    ewneo_imports['quad_motor'] = create_rx11_ewneo_quad_motor
-except ImportError as e:
-    _LOGGER.warning(f"Could not import ewneo quad motor: {e}")
     ewneo_imports['quad_motor'] = lambda *args, **kwargs: None
 
 

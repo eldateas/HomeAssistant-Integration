@@ -6,11 +6,13 @@ import logging
 from typing import Any, Dict
 from datetime import datetime, timedelta
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, EVENT_DEVICE_ADDED, BUTTON_LABELS
 from .entity_registry import get_entity_registry
@@ -34,6 +36,7 @@ async def async_setup_entry(
     _LOGGER.info("🔧 Starting Binary Sensor Platform Setup")
     
     coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    ha_entity_registry = er.async_get(hass)
     
     # Setup binary sensors for all devices
     _LOGGER.info("📊 Setting up binary sensors")
@@ -48,30 +51,78 @@ async def async_setup_entry(
     _LOGGER.info("🔍 Setting up binary sensors for %d existing devices", len(coordinator.get_all_devices()))
     
     def _create_binary_sensors_for_device(serial_number: str, device_info: Dict[str, Any]) -> list:
-        """Create binary sensor entities for a device."""
+        """Create binary sensor entities for a device based on entity_specs."""
+        from .entity_specs import create_entity_specs_for_device
+        
         binary_sensors = []
         device_type = device_info.get("type", "unknown")
         
         _LOGGER.info("🔍 Processing device %s: type=%s, button_count=%s", 
                     serial_number[-6:], device_type, device_info.get("button_count", "unknown"))
         
-        # EW-Transmitters: Create binary sensors for button states
+        # EW-Transmitters: Use entity_specs to determine if binary sensors are needed
         if device_type == "ew_transmitter":
-            button_count = device_info.get("button_count", device_info.get("channels", 4))
+            # Get entity specs for this device - this respects operating_type, switch_mode, etc.
+            entity_specs = create_entity_specs_for_device(serial_number, device_info)
+            
+            # Only create binary sensors if entity_specs says so
+            binary_sensor_specs = entity_specs.get("binary_sensor", [])
+            
+            if not binary_sensor_specs:
+                # No binary sensors needed for this device (e.g., switch_mode == "permanent")
+                _LOGGER.info("📝 No binary sensors needed for EW-Transmitter %s (switch_mode=%s, grouping_mode=%s)", 
+                           serial_number[-6:], 
+                           device_info.get("switch_mode", "unknown"),
+                           device_info.get("grouping_mode", "unknown"))
+                return []
+            
             device_name = device_info.get("name", f"EW-Transmitter {serial_number[-6:]}")
+            _LOGGER.info("🎛️ Creating %d binary sensors for EW-Transmitter %s", len(binary_sensor_specs), device_name)
             
-            _LOGGER.info("🎛️ Creating %d binary sensors for EW-Transmitter %s", button_count, device_name)
-            
-            # Create binary sensor for each button (HA will handle duplicates)
-            for button_id in range(button_count):
+            # Create binary sensor for each spec
+            for spec in binary_sensor_specs:
+                sensor_type = spec.get("sensor_type")
+                if sensor_type == "transmitter_state":
+                    entity = EldatTransmitterStateBinarySensor(
+                        coordinator=coordinator,
+                        serial_number=serial_number,
+                        device_info=device_info,
+                        entity_spec=spec,
+                    )
+                    binary_sensors.append(entity)
+                    _LOGGER.info("✅ Created transmitter state binary sensor: %s", entity.name)
+                    continue
+
+                button_id = spec.get("button_index", 0)
                 entity = EldatTransmitterButtonSensor(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
                     button_id=button_id,
+                    entity_spec=spec,  # Pass the full entity spec for switch_mode etc.
                 )
+                # Preserve existing entity_id/unique_id if registered with legacy format
+                old_unique_id = f"{serial_number}_btn{button_id}"
+                existing_entity_id = None
+                old_entity_id = ha_entity_registry.async_get_entity_id(
+                    "binary_sensor", DOMAIN, old_unique_id
+                )
+                if old_entity_id:
+                    entity._attr_unique_id = old_unique_id
+                    entity._entity_spec["unique_id"] = old_unique_id
+                    existing_entity_id = old_entity_id
+
+                # Re-enable if previously disabled by integration
+                if not existing_entity_id:
+                    existing_entity_id = ha_entity_registry.async_get_entity_id(
+                        "binary_sensor", DOMAIN, entity.unique_id
+                    )
+                if existing_entity_id:
+                    entry = ha_entity_registry.async_get(existing_entity_id)
+                    if entry and entry.disabled_by == "integration":
+                        ha_entity_registry.async_update_entity(existing_entity_id, disabled_by=None)
                 binary_sensors.append(entity)
-                _LOGGER.info("✅ Created binary sensor: %s", entity.name)
+                _LOGGER.info("✅ Created binary sensor: %s (switch_mode=%s)", entity.name, spec.get("switch_mode", "impulse"))
             
             _LOGGER.info("✅ Successfully created %d binary sensors for device %s", len(binary_sensors), serial_number[-6:])
             return binary_sensors
@@ -113,14 +164,8 @@ async def async_setup_entry(
             # Add entities without update_before_add to avoid state issues during setup
             async_add_entities(binary_sensors, update_before_add=False)
             
-            # Wichtig: Event Listener für alle Binary Sensors registrieren
-            for sensor in binary_sensors:
-                if hasattr(sensor, '_register_event_listeners'):
-                    try:
-                        sensor._register_event_listeners()
-                        _LOGGER.debug("🎯 Event listeners registered for binary sensor %s", sensor.name)
-                    except Exception as e:
-                        _LOGGER.error("Failed to register event listeners for %s: %s", sensor.name, e)
+            # Note: Event listeners are registered in async_added_to_hass, not here
+            # because at this point entities don't have a hass instance yet
             
             _LOGGER.info("✅ Successfully added %d binary sensor entities for %d EW-Transmitter devices", 
                         len(binary_sensors), len([d for d in coordinator.get_all_devices().values() if d.get("type") == "ew_transmitter"]))
@@ -128,11 +173,19 @@ async def async_setup_entry(
             _LOGGER.error("❌ Failed to add binary sensor entities: %s", e)
     else:
         # Check if there are EW-Transmitter devices that should have binary sensors
+        # Note: Transmitters in "group" mode don't get binary sensors, they get a sensor entity instead
         ew_transmitters = [d for d in coordinator.get_all_devices().values() if d.get("type") == "ew_transmitter"]
-        if ew_transmitters:
-            _LOGGER.error("❌ Found %d EW-Transmitters but no binary sensors created - this is a bug!", len(ew_transmitters))
-            for serial, device in [(s, d) for s, d in coordinator.get_all_devices().items() if d.get("type") == "ew_transmitter"]:
-                _LOGGER.error("   EW-Transmitter: %s (%s) - %s", device.get("name", "Unknown"), serial[-6:], device)
+        single_mode_transmitters = [d for d in ew_transmitters if d.get("grouping_mode", "single") == "single"]
+        if single_mode_transmitters:
+            _LOGGER.warning("⚠️ Found %d EW-Transmitters in single mode but no binary sensors created", len(single_mode_transmitters))
+            for serial, device in [(s, d) for s, d in coordinator.get_all_devices().items() 
+                                   if d.get("type") == "ew_transmitter" and d.get("grouping_mode", "single") == "single"]:
+                _LOGGER.warning("   EW-Transmitter: %s (%s) - grouping=%s, switch_mode=%s", 
+                              device.get("name", "Unknown"), serial[-6:], 
+                              device.get("grouping_mode", "single"), device.get("switch_mode", "impulse"))
+        elif ew_transmitters:
+            # Transmitters in group mode - this is expected, they get sensor entities instead
+            _LOGGER.info("📊 Found %d EW-Transmitters in group mode - no binary sensors needed (using sensor entities)", len(ew_transmitters))
         else:
             _LOGGER.debug("No binary sensor entities created (no EW-Transmitter devices found)")
     
@@ -262,8 +315,13 @@ async def async_setup_entry(
     _LOGGER.info("✅ Binary sensor platform setup complete with event listeners")
 
 
-class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
-    """Binary sensor for EW-Transmitter button state with press/hold detection."""
+class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntity):
+    """Binary sensor for EW-Transmitter button state with press/hold detection.
+    
+    Supports two switch modes:
+    - "impulse": Status is ON while button is pressed, OFF when released
+    - "permanent": Status toggles on each button press (persistent state)
+    """
     
     # Class variable to track which buttons are currently pressed per device
     _active_buttons = {}
@@ -274,12 +332,16 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
         serial_number: str,
         device_info: Dict[str, Any],
         button_id: int,
+        entity_spec: Dict[str, Any] = None,
     ) -> None:
         """Initialize transmitter button binary sensor."""
         _LOGGER.warning("🔍 Initializing binary sensor for device %s, button %d", serial_number, button_id)
         
         self._button_id = button_id
-        self._button_name = BUTTON_LABELS.get(button_id, f"Taste {button_id + 1}")
+        self._entity_spec = entity_spec or {}
+        spec_label = self._entity_spec.get("button_label") or self._entity_spec.get("button")
+        self._button_name = spec_label or BUTTON_LABELS.get(button_id, f"Taste {button_id + 1}")
+        self._switch_mode = self._entity_spec.get("switch_mode", "impulse")  # "impulse" or "permanent"
         self._last_press_time = None
         self._is_on = False
         self._is_holding = False
@@ -296,8 +358,8 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
         # Initialize parent classes
         super().__init__(coordinator, serial_number, device_info)
         
-        self._attr_unique_id = f"{serial_number}_btn{button_id}"
-        self._attr_name = f"{device_info['name']} {self._button_name}"
+        self._attr_unique_id = self._entity_spec.get("unique_id", f"{serial_number}_btn{button_id}")
+        self._attr_name = self._entity_spec.get("name", self._button_name)
         
         # Ensure entity is enabled by default
         self._attr_entity_registry_enabled_default = True
@@ -309,16 +371,37 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
             entity_type="binary_sensor"
         )
         
-        self._attr_icon = device_config.get("icon", "mdi:gesture-tap-button")
-        self._attr_device_class = None  # No specific device class for remote buttons
+        # Use icon and device_class from entity_spec if available
+        self._attr_icon = self._entity_spec.get("icon") or device_config.get("icon", "mdi:gesture-tap-button")
+        device_class_str = self._entity_spec.get("device_class")
+        if device_class_str:
+            try:
+                self._attr_device_class = BinarySensorDeviceClass(device_class_str)
+            except ValueError:
+                self._attr_device_class = None
+        else:
+            self._attr_device_class = None  # No specific device class for remote buttons
         
-        _LOGGER.warning("🔍 Binary sensor initialized: %s (unique_id: %s, enabled_default: %s)", 
-                       self._attr_name, self._attr_unique_id, self._attr_entity_registry_enabled_default)
+        _LOGGER.warning("🔍 Binary sensor initialized: %s (unique_id: %s, switch_mode: %s)", 
+                       self._attr_name, self._attr_unique_id, self._switch_mode)
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to Home Assistant."""
         await super().async_added_to_hass()
         _LOGGER.info("🔍 Binary sensor added to hass: %s", self._attr_name)
+
+        # Restore persistent state after restart (permanent mode only)
+        if self._switch_mode == "permanent":
+            persistent = self.coordinator.get_device_state(self._serial_number) or {}
+            persistent_key = f"button_{self._button_id}"
+            if persistent_key in persistent:
+                self._is_on = bool(persistent[persistent_key])
+                self.async_write_ha_state()
+            elif (last_state := await self.async_get_last_state()) is not None:
+                self._is_on = last_state.state == "on"
+                self.async_write_ha_state()
+
+        # No automatic disable here; keep original behavior
         
         # Listen for devices loaded event to update availability
         @callback
@@ -424,6 +507,24 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
                 is_test = event.data.get("test", False)
                 is_low_battery = event.data.get("is_low_battery", False)
                 battery_level = event.data.get("battery_level", 100)
+
+                # Normalize button id from name if missing or ambiguous
+                if event_button is None:
+                    button_name = event.data.get("button_name") or event.data.get("subtype") or ""
+                    normalized_name = button_name.strip()
+                    if normalized_name.lower().startswith("taste "):
+                        normalized_name = normalized_name.split()[-1]
+                    name_map = {"A": 0, "B": 1, "C": 2, "D": 3}
+                    if normalized_name in name_map:
+                        event_button = name_map[normalized_name]
+
+                # Normalize numeric string button ids
+                if isinstance(event_button, str) and event_button.isdigit():
+                    event_button = int(event_button)
+
+                # Mask button id if function bits are included
+                if isinstance(event_button, int) and event_button > 3:
+                    event_button = event_button & 0x03
                 
                 # Update battery low status if this event is for our device and button
                 if (event_serial == self._serial_number or 
@@ -439,11 +540,18 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
                         else:
                             self._battery_low = False
                 
-                # Match by serial_number OR device_id
-                matches_device = (
-                    event_serial == self._serial_number or 
-                    event_device_id == f"eldat_transmitter_{self._serial_number.lower()}"
-                )
+                # Match by serial_number or device_id with last-8 fallback
+                matches_device = False
+                if event_serial:
+                    if event_serial == self._serial_number:
+                        matches_device = True
+                    elif len(event_serial) >= 8 and len(self._serial_number) >= 8:
+                        matches_device = event_serial[-8:] == self._serial_number[-8:]
+                if not matches_device and event_device_id:
+                    if event_device_id == f"eldat_transmitter_{self._serial_number.lower()}":
+                        matches_device = True
+                    elif len(event_device_id) >= 8 and len(self._serial_number) >= 8:
+                        matches_device = event_device_id[-8:] == self._serial_number[-8:]
                 
                 if is_test:
                     _LOGGER.info("🧪 Test event received by %s", self.name)
@@ -453,12 +561,13 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
                              event_device_id,
                              event_button, is_push, is_release, matches_device)
                 
-                # Handle general release for all buttons (Button A/0 release releases all)
+                # Handle general release for all buttons (Button A/0 release releases all) - only in impulse mode
                 if (matches_device and 
                     is_release and event_button == 0 and 
-                    self._button_id != 0):
-                    # Button A release -> release all other buttons of this transmitter
-                    _LOGGER.info("🔄 Button A released on %s - releasing button %s as well", 
+                    self._button_id != 0 and
+                    self._switch_mode == "impulse"):
+                    # Button A release -> release all other buttons of this transmitter (impulse mode only)
+                    _LOGGER.info("🔄 Button A released on %s - releasing button %s as well (impulse mode)", 
                                event_serial[-6:] if event_serial else "Unknown", self._button_name)
                     self._handle_button_release()
                     return
@@ -475,7 +584,22 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
                         
                         current_time = datetime.now()
                         self._last_press_time = current_time
-                        self._is_on = True
+                        
+                        # Handle based on switch_mode
+                        if self._switch_mode == "permanent":
+                            # Toggle mode: flip state on each press
+                            self._is_on = not self._is_on
+                            _LOGGER.info("✅ Button %s pressed on %s - toggled to %s (permanent mode)", 
+                                       self._button_name, self._serial_number[-6:], "ON" if self._is_on else "OFF")
+                            self.coordinator.set_device_state(
+                                self._serial_number, {f"button_{self._button_id}": self._is_on}
+                            )
+                        else:
+                            # Impulse mode: ON while pressed
+                            self._is_on = True
+                            _LOGGER.info("✅ Button %s pressed on %s - state ON (impulse mode)", 
+                                       self._button_name, self._serial_number[-6:])
+                        
                         self._is_holding = False
                         
                         # Cancel existing timers
@@ -488,7 +612,6 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
                         
                         # Update state immediately
                         self.async_write_ha_state()
-                        _LOGGER.info("✅ Button %s pressed on %s - state updated", self._button_name, self._serial_number[-6:])
                         
                         # Fire button press start event for device automation
                         self.hass.bus.async_fire(
@@ -533,21 +656,29 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
                                     }
                                 )
                         
-                        # Set auto-release timer (fallback)
+                        # Set auto-release timer (fallback) - only for impulse mode
                         async def _auto_release():
                             await asyncio.sleep(self._max_press_duration / 1000.0)
-                            if self._is_on:
+                            if self._is_on and self._switch_mode == "impulse":
                                 self._handle_button_release()
                                 _LOGGER.warning("Auto-released button %s after %dms", self._button_name, self._max_press_duration)
                         
                         # Start timers
                         self._hold_timer = asyncio.create_task(_check_for_hold())
-                        self._auto_release_timer = asyncio.create_task(_auto_release())
+                        if self._switch_mode == "impulse":
+                            self._auto_release_timer = asyncio.create_task(_auto_release())
                         
                     elif is_release:
-                        # Button released (specific button or Button A release for this specific button)
-                        self._handle_button_release()
-                        _LOGGER.info("✅ Button %s released on %s - state updated", self._button_name, self._serial_number[-6:])
+                        # Button released
+                        if self._switch_mode == "impulse":
+                            # Impulse mode: reset to OFF on release
+                            self._handle_button_release()
+                            _LOGGER.info("✅ Button %s released on %s - state OFF (impulse mode)", 
+                                       self._button_name, self._serial_number[-6:])
+                        else:
+                            # Permanent mode: state stays as-is, just log release
+                            _LOGGER.info("✅ Button %s released on %s - state remains %s (permanent mode)", 
+                                       self._button_name, self._serial_number[-6:], "ON" if self._is_on else "OFF")
                         
             except Exception as e:
                 _LOGGER.error("Error handling button event: %s", e)
@@ -642,6 +773,8 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
         
         # Reset state
         self._is_on = False
+        if self._switch_mode == "impulse" and self._device_info.get("operating_type") == "1":
+            self._last_press_time = None
         self._is_holding = False
         
         # Cancel timers
@@ -747,19 +880,23 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
         _LOGGER.debug("🧹 Event listeners unregistered for %s", self._attr_name)
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         """Return true if button is pressed."""
+        if self._switch_mode == "impulse" and self._device_info.get("operating_type") == "1":
+            if self._last_press_time is None and not self._is_on:
+                return False
         return self._is_on
 
     @property
     def icon(self) -> str:
         """Return the icon based on button state."""
+        if self._device_info.get("operating_type") == "1":
+            return "mdi:radiobox-marked" if self._is_on else "mdi:radiobox-blank"
         if self._is_holding:
             return "mdi:gesture-tap-hold"
-        elif self._is_on:
+        if self._is_on:
             return "mdi:gesture-tap-button"
-        else:
-            return "mdi:radiobox-blank"
+        return "mdi:radiobox-blank"
 
     @property
     def available(self) -> bool:
@@ -812,12 +949,140 @@ class EldatTransmitterButtonSensor(EldatEntity, BinarySensorEntity):
         
         return attrs
 
+
+class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensorEntity):
+    """Binary sensor for EW-Transmitter Auf/Zu state with persistence."""
+
+    def __init__(
+        self,
+        coordinator: EldatCoordinator,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        entity_spec: Dict[str, Any],
+    ) -> None:
+        super().__init__(coordinator, serial_number, device_info)
+        self._entity_spec = entity_spec
+        self._button_map = entity_spec.get("button_map", {})
+        self._options = entity_spec.get("options", ["Auf", "Zu"])
+        self._state_key = entity_spec.get("state_key", "transmitter_state")
+        self._on_label = entity_spec.get("on_label", self._options[0])
+        self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "Aus")
+
+        self._attr_name = entity_spec.get("name", f"Transmitter {serial_number[-6:]} State")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state_binary")
+        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
+
+        device_class_str = entity_spec.get("device_class")
+        if device_class_str:
+            try:
+                self._attr_device_class = BinarySensorDeviceClass(device_class_str)
+            except ValueError:
+                self._attr_device_class = None
+        else:
+            self._attr_device_class = None
+
+        self._current_state: str | None = None
+        self._listeners_registered = False
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+
+        persistent = self.coordinator.get_device_state(self._serial_number) or {}
+        if self._state_key in persistent and persistent[self._state_key] in self._options:
+            self._current_state = persistent[self._state_key]
+        elif (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state == "on":
+                self._current_state = self._on_label
+            elif last_state.state == "off":
+                self._current_state = self._off_label
+
+        self._register_event_listeners()
+
+    @property
+    def is_on(self) -> bool:
+        return self._current_state == self._on_label
+
+    def _register_event_listeners(self) -> None:
+        if self._listeners_registered or not self.hass:
+            return
+
+        @callback
+        def _handle_button_event(event):
+            event_serial = event.data.get("serial_number", "") or event.data.get("device_id", "")
+            event_button = event.data.get("button")
+            if event_button is None:
+                event_button = event.data.get("button_id")
+
+            # Normalize button id from name if missing
+            if event_button is None:
+                button_name = event.data.get("button_name") or event.data.get("subtype") or ""
+                normalized_name = button_name.strip()
+                if normalized_name.lower().startswith("taste "):
+                    normalized_name = normalized_name.split()[-1]
+                name_map = {"A": 0, "B": 1, "C": 2, "D": 3}
+                if normalized_name in name_map:
+                    event_button = name_map[normalized_name]
+
+            # Normalize numeric string button ids
+            if isinstance(event_button, str) and event_button.isdigit():
+                event_button = int(event_button)
+
+            # Mask button id if function bits are included
+            if isinstance(event_button, int) and event_button > 3:
+                event_button = event_button & 0x03
+
+            # Compare full serial numbers or match by last 8 characters as fallback
+            matches_device = False
+            if event_serial:
+                if event_serial == self._serial_number:
+                    matches_device = True
+                elif len(event_serial) >= 8 and len(self._serial_number) >= 8:
+                    matches_device = event_serial[-8:] == self._serial_number[-8:]
+
+            if not matches_device:
+                event_device_id = event.data.get("device_id")
+                if event_device_id == f"eldat_transmitter_{self._serial_number.lower()}":
+                    matches_device = True
+                elif event_device_id and len(event_device_id) >= 8 and len(self._serial_number) >= 8:
+                    matches_device = event_device_id[-8:] == self._serial_number[-8:]
+
+            if not matches_device:
+                return
+
+            if event_button in self._button_map:
+                new_state = self._button_map[event_button]
+                if new_state in self._options and new_state != self._current_state:
+                    self._current_state = new_state
+                    self.coordinator.set_device_state(
+                        self._serial_number, {self._state_key: new_state}
+                    )
+                    self.async_write_ha_state()
+
+        self.async_on_remove(
+            self.hass.bus.async_listen("eldat_button_short_press", _handle_button_event)
+        )
+        self.async_on_remove(
+            self.hass.bus.async_listen("eldat_button_press_start", _handle_button_event)
+        )
+
+        self._listeners_registered = True
+
+    async def _register_event_listeners_async(self) -> None:
+        if not self.hass:
+            return
+        await asyncio.sleep(0)
+        self._register_event_listeners()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "state_label": self._current_state,
+            "on_label": self._on_label,
+            "off_label": self._off_label,
+        }
+
     @property
     def icon(self) -> str:
-        """Return icon with battery low indication."""
-        if self._battery_low:
-            return "mdi:radiobox-marked-outline"  # Different icon for low battery
-        elif self._is_on:
-            return "mdi:radiobox-marked"  # Pressed state
-        else:
-            return "mdi:radiobox-blank"   # Released state
+        if self.is_on:
+            return "mdi:window-shutter-open"
+        return self._attr_icon or "mdi:window-shutter"

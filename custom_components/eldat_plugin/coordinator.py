@@ -25,6 +25,7 @@ from .const import (
     EVENT_SENSOR_ADDED,
     EVENT_FORCE_CREATE,
     CONF_TRANSCEIVER_TYPE,
+    BUTTON_LABELS,
 )
 from .transceivers import TransceiverFactory, TransceiverType, BaseTransceiver
 from .device_config import DeviceConfigManager
@@ -70,6 +71,11 @@ class EldatCoordinator(DataUpdateCoordinator):
         self._used_ew_receiver_indices: Dict[int, Dict[str, Any]] = {}  # {index: {receiver_serial, device_serial, device_name, created_at}}
         self._ew_receiver_indices_file = f"{hass.config.config_dir}/eldat_plugin/used_ew_receiver_indices.json"
         self._next_free_ew_receiver_index: Optional[int] = 0  # Cache for next known free index
+
+        # EW-Transmitter naming index (EW-Sender #N)
+        self._next_ew_sender_index: int = 1
+        # EWneo sensor naming index (EWneo-Sensor #N)
+        self._next_ewneo_sensor_index: int = 1
         
         # Device registration will happen during async_setup
         
@@ -122,6 +128,43 @@ class EldatCoordinator(DataUpdateCoordinator):
         if self._setup_timeout:
             self._setup_timeout.cancel()
             self._setup_timeout = None
+
+    def _get_transmitter_action_label(self, serial_number: str, button: int | None) -> str | None:
+        """Return semantic action label for a transmitter button."""
+        if button is None:
+            return None
+
+        device_info = self.devices.get(serial_number, {})
+        operating_type = device_info.get("operating_type", "1")
+        usage_type = device_info.get("usage_type", "switch")
+        button_count = device_info.get("button_count", 4)
+
+        if operating_type == "2":
+            is_switch_mode = usage_type == "switch"
+            if is_switch_mode:
+                if button_count <= 2:
+                    return "An" if button == 0 else "Aus" if button == 1 else None
+                if button in (0, 1):
+                    return "An 1" if button == 0 else "Aus 1"
+                if button in (2, 3):
+                    return "An 2" if button == 2 else "Aus 2"
+            else:
+                if button_count <= 2:
+                    return "Auf" if button == 0 else "Zu" if button == 1 else None
+                if button in (0, 1):
+                    return "Auf 1" if button == 0 else "Zu 1"
+                if button in (2, 3):
+                    return "Auf 2" if button == 2 else "Zu 2"
+
+        if operating_type == "3":
+            if button == 0:
+                return "Auf"
+            if button == 1:
+                return "Zu"
+            if button in (2, 3):
+                return "Stopp"
+
+        return BUTTON_LABELS.get(button, f"Taste {button + 1}")
         _LOGGER.info("Device setup mode deactivated")
     
     async def _load_used_ewb_indices(self) -> None:
@@ -139,7 +182,36 @@ class EldatCoordinator(DataUpdateCoordinator):
                     # Load from integrated structure
                     if 'used_ewb_indices' in data:
                         # Convert string keys back to integers
-                        self._used_ewb_indices = {int(k): v for k, v in data.get('used_ewb_indices', {}).items()}
+                        raw_indices = {int(k): v for k, v in data.get('used_ewb_indices', {}).items()}
+                        
+                        # Cleanup: Remove all stale RESERVED entries (older than 5 minutes)
+                        from datetime import datetime, timedelta
+                        cutoff_time = datetime.now() - timedelta(minutes=5)
+                        cleaned_indices = {}
+                        removed_count = 0
+                        
+                        for idx, info in raw_indices.items():
+                            if info.get('reserved'):
+                                # Check if reservation is stale
+                                try:
+                                    created_at = datetime.fromisoformat(info.get('created_at', ''))
+                                    if created_at < cutoff_time:
+                                        _LOGGER.info("🧹 Removing stale reservation for index %d (created: %s)", idx, created_at)
+                                        removed_count += 1
+                                        continue
+                                except (ValueError, TypeError):
+                                    # Invalid date, remove it
+                                    removed_count += 1
+                                    continue
+                            cleaned_indices[idx] = info
+                        
+                        self._used_ewb_indices = cleaned_indices
+                        
+                        if removed_count > 0:
+                            _LOGGER.info("🧹 Cleaned up %d stale EWB index reservations", removed_count)
+                            # Save cleaned data immediately
+                            await self._save_used_ewb_indices()
+                        
                         self._next_free_ewb_index = self._find_next_free_ewb_index() if self._used_ewb_indices else 0
                         _LOGGER.info("📋 Loaded %d used EWB indices from registered_devices.json (next free: %d)", 
                                    len(self._used_ewb_indices), self._next_free_ewb_index)
@@ -225,16 +297,52 @@ class EldatCoordinator(DataUpdateCoordinator):
         import json
         import aiofiles
         import os
+        import re
         try:
             if os.path.exists(self._registered_devices_file):
                 async with aiofiles.open(self._registered_devices_file, 'r', encoding='utf-8') as f:
                     content = await f.read()
                     data = json.loads(content)
                     loaded_devices = data.get('devices', {})
+                    devices_updated = False
                     
                     # WICHTIG: Bereinige ALLE geladenen Geräte von alten Metadaten
-                    for device_info in loaded_devices.values():
+                    for serial_number, device_info in loaded_devices.items():
                         self._clean_device_info(device_info)
+                        # Migration: normalize operating_type for 2/3-button configs if mis-set
+                        if device_info.get("type") == "ew_transmitter":
+                            operating_type = device_info.get("operating_type", "1")
+                            grouping_mode = device_info.get("grouping_mode", "single")
+                            switch_mode = device_info.get("switch_mode")
+
+                            corrected_operating_type = operating_type
+                            if operating_type == "1":
+                                if switch_mode == "cover" and grouping_mode == "cover":
+                                    corrected_operating_type = "3"
+                                elif switch_mode in ("switch", "cover") or grouping_mode == "dual":
+                                    corrected_operating_type = "2"
+
+                            if corrected_operating_type != operating_type:
+                                device_info["operating_type"] = corrected_operating_type
+                                device_info = await self._regenerate_entity_specs(
+                                    serial_number, device_info
+                                )
+                                loaded_devices[serial_number] = device_info
+                                devices_updated = True
+                        # Migration: refresh 1-button transmitter entities to apply icon updates
+                        if (
+                            device_info.get("type") == "ew_transmitter"
+                            and device_info.get("operating_type") == "1"
+                            and device_info.get("grouping_mode", "single") == "single"
+                        ):
+                            original_entities = device_info.get("entities", [])
+                            device_info = await self._regenerate_entity_specs(
+                                serial_number, device_info
+                            )
+                            loaded_devices[serial_number] = device_info
+                            if original_entities != device_info.get("entities", []):
+                                devices_updated = True
+                        
                     
                     self._registered_devices = loaded_devices
                     
@@ -292,11 +400,118 @@ class EldatCoordinator(DataUpdateCoordinator):
                         self._next_free_ewb_index = self._find_next_free_ewb_index()
                     
                     _LOGGER.info("📋 Loaded %d registered devices from storage", len(self._registered_devices))
+                    if devices_updated:
+                        await self._save_registered_devices()
+                        _LOGGER.info("💾 Updated registered devices with regenerated entity specs")
+
+                    # Restore and/or recompute next naming indices
+                    stored_next_sender = data.get("next_ew_sender_index")
+                    stored_next_ewneo_sensor = data.get("next_ewneo_sensor_index")
+
+                    max_sender_index = 0
+                    max_ewneo_sensor_index = 0
+                    for device_info in loaded_devices.values():
+                        name = device_info.get("name") or ""
+                        match = re.match(r"^EW-Sender #(?P<idx>\d+)$", name)
+                        if match:
+                            max_sender_index = max(max_sender_index, int(match.group("idx")))
+
+                        match = re.match(r"^EWneo-Sensor #(?P<idx>\d+)$", name)
+                        if match:
+                            max_ewneo_sensor_index = max(max_ewneo_sensor_index, int(match.group("idx")))
+
+                    if max_sender_index > 0:
+                        self._next_ew_sender_index = max_sender_index + 1
+                    elif isinstance(stored_next_sender, int) and stored_next_sender > 0:
+                        self._next_ew_sender_index = stored_next_sender
+                    else:
+                        self._next_ew_sender_index = 1
+
+                    if max_ewneo_sensor_index > 0:
+                        self._next_ewneo_sensor_index = max_ewneo_sensor_index + 1
+                    else:
+                        self._next_ewneo_sensor_index = 1
             else:
                 _LOGGER.info("📋 No registered devices file found, starting with empty list")
         except Exception as e:
             _LOGGER.error("❌ Failed to load registered devices: %s", e)
             self._registered_devices = {}
+
+    def _ensure_default_sender_name(self, device_info: Dict[str, Any]) -> None:
+        """Assign default EW-Sender #N name when no custom name is set."""
+        import re
+
+        if device_info.get("type") != "ew_transmitter":
+            return
+
+        name = (device_info.get("name") or "").strip()
+        if not name:
+            should_assign = True
+        else:
+            should_assign = name.startswith("EW-Transmitter") or name.startswith("Ew Transmitter")
+
+        if should_assign:
+            device_info["name"] = f"EW-Sender #{self._next_ew_sender_index}"
+            self._next_ew_sender_index += 1
+        else:
+            match = re.match(r"^EW-Sender #(?P<idx>\d+)$", name)
+            if match:
+                existing_idx = int(match.group("idx"))
+                self._next_ew_sender_index = max(self._next_ew_sender_index, existing_idx + 1)
+
+    def _ensure_default_ewneo_sensor_name(self, device_info: Dict[str, Any]) -> None:
+        """Assign default EWneo-Sensor #N name when no custom name is set."""
+        import re
+
+        if device_info.get("type") not in ("ew_sensor", "ewneo_sensor"):
+            return
+
+        name = (device_info.get("name") or "").strip()
+        if not name:
+            should_assign = True
+        else:
+            should_assign = name.startswith("EWneo-Sensor") or name.startswith("EW-Sensor") or name.startswith("Ew Sensor")
+
+        if should_assign:
+            device_info["name"] = f"EWneo-Sensor #{self._next_ewneo_sensor_index}"
+            self._next_ewneo_sensor_index += 1
+        else:
+            match = re.match(r"^EWneo-Sensor #(?P<idx>\d+)$", name)
+            if match:
+                existing_idx = int(match.group("idx"))
+                self._next_ewneo_sensor_index = max(self._next_ewneo_sensor_index, existing_idx + 1)
+
+    def _recompute_next_sender_index(self) -> None:
+        """Recompute next EW-Sender index from registered devices."""
+        import re
+
+        max_sender_index = 0
+        for device_info in self._registered_devices.values():
+            name = device_info.get("name") or ""
+            match = re.match(r"^EW-Sender #(?P<idx>\d+)$", name)
+            if match:
+                max_sender_index = max(max_sender_index, int(match.group("idx")))
+
+        self._next_ew_sender_index = max_sender_index + 1 if max_sender_index > 0 else 1
+
+    def _recompute_next_ewneo_sensor_index(self) -> None:
+        """Recompute next EWneo-Sensor index from registered devices."""
+        import re
+
+        max_ewneo_sensor_index = 0
+        for device_info in self._registered_devices.values():
+            if device_info.get("type") not in ("ew_sensor", "ewneo_sensor"):
+                continue
+            name = device_info.get("name") or ""
+            match = re.match(r"^EWneo-Sensor #(?P<idx>\d+)$", name)
+            if match:
+                max_ewneo_sensor_index = max(max_ewneo_sensor_index, int(match.group("idx")))
+
+        self._next_ewneo_sensor_index = max_ewneo_sensor_index + 1 if max_ewneo_sensor_index > 0 else 1
+
+    def get_next_ew_sender_index(self) -> int:
+        """Get the next available EW-Sender index."""
+        return self._next_ew_sender_index
     
     def _clean_device_info(self, device_info: Dict[str, Any]) -> None:
         """Remove problematic metadata from device_info that should not be persisted.
@@ -380,7 +595,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                 'used_ewb_indices': {str(k): v for k, v in self._used_ewb_indices.items()},
                 'next_free_ewb_index': self._next_free_ewb_index,
                 'used_ew_receiver_indices': {str(k): v for k, v in self._used_ew_receiver_indices.items()},
-                'next_free_ew_receiver_index': self._next_free_ew_receiver_index
+                'next_free_ew_receiver_index': self._next_free_ew_receiver_index,
+                'next_ew_sender_index': self._next_ew_sender_index,
+                'next_ewneo_sensor_index': self._next_ewneo_sensor_index
             }
             
             content = json.dumps(data, indent=2, ensure_ascii=False)
@@ -470,8 +687,17 @@ class EldatCoordinator(DataUpdateCoordinator):
         try:
             # Add metadata
             device_info['registered_at'] = datetime.now().isoformat()
+            device_info.setdefault('serial_number', serial_number)
             # NICHT speichern: config_entry_id wird beim Entity-Setup automatisch gesetzt
             # device_info['config_entry_id'] = self.config_entry.entry_id
+
+            # Assign default names if needed
+            self._ensure_default_sender_name(device_info)
+            self._ensure_default_ewneo_sensor_name(device_info)
+
+            # Regenerate entity specs for EW-Transmitters to ensure correct platforms
+            if device_info.get("type") == "ew_transmitter":
+                device_info = await self._regenerate_entity_specs(serial_number, device_info)
             
             # Store in registered devices list
             self._registered_devices[serial_number] = device_info
@@ -855,6 +1081,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.info("  Step 3/7: Removing from registered devices...")
             if serial_number in self._registered_devices:
                 del self._registered_devices[serial_number]
+                self._recompute_next_sender_index()
+                if device_info.get("type") in ("ew_sensor", "ewneo_sensor"):
+                    self._recompute_next_ewneo_sensor_index()
             
             # Step 4: Remove from legacy dicts
             _LOGGER.info("  Step 4/7: Removing from legacy dicts...")
@@ -1251,11 +1480,54 @@ class EldatCoordinator(DataUpdateCoordinator):
             
         # Check if transceiver connection changed
         is_connected = self.transceiver.is_connected
+        
+        # Try to reconnect if disconnected
+        if not is_connected:
+            if not hasattr(self, '_reconnect_attempts'):
+                self._reconnect_attempts = 0
+                self._last_reconnect_time = 0
+            
+            import time
+            current_time = time.time()
+            
+            # Wait only 2 seconds between reconnect attempts (faster recovery)
+            if current_time - self._last_reconnect_time >= 2:
+                self._reconnect_attempts += 1
+                self._last_reconnect_time = current_time
+                
+                _LOGGER.warning("🔴 RX11 nicht verfügbar - Reconnect-Versuch %d...", 
+                              self._reconnect_attempts)
+                
+                try:
+                    # Try to reconnect
+                    await self.transceiver.disconnect()
+                    await asyncio.sleep(0.5)  # Brief pause before reconnect
+                    connected = await self.transceiver.connect()
+                    
+                    if connected:
+                        _LOGGER.info("✅ RX11 erfolgreich verbunden nach %d Versuchen!", 
+                                   self._reconnect_attempts)
+                        self._reconnect_attempts = 0
+                        is_connected = True
+                        # Immediately update all listeners on successful reconnect
+                        self.async_update_listeners()
+                    else:
+                        _LOGGER.warning("⚠️ RX11 Reconnect fehlgeschlagen (Versuch %d) - USB-Gerät nicht gefunden", 
+                                       self._reconnect_attempts)
+                except Exception as e:
+                    _LOGGER.warning("⚠️ RX11 Reconnect-Fehler (Versuch %d): %s", 
+                                   self._reconnect_attempts, e)
+        else:
+            # Reset reconnect counter on successful connection
+            if hasattr(self, '_reconnect_attempts') and self._reconnect_attempts > 0:
+                _LOGGER.info("✅ RX11 Verbindung wiederhergestellt")
+                self._reconnect_attempts = 0
+        
         if hasattr(self, '_last_connection_state') and self._last_connection_state != is_connected:
             if is_connected:
-                _LOGGER.info("🔌 USB transmitter connected - entities are now available")
+                _LOGGER.info("🔌 RX11 USB Transceiver verbunden - Entitäten sind verfügbar")
             else:
-                _LOGGER.warning("⚠️  USB transmitter disconnected - entities are unavailable")
+                _LOGGER.warning("🔴 RX11 USB Transceiver getrennt - Entitäten sind nicht verfügbar")
             
             # Trigger entity state update for all entities
             self.async_update_listeners()
@@ -1505,7 +1777,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 {
                     "type": "sensor",
                     "sensor_type": "temperature", 
-                    "name": "Temperature",
+                    "name": "Temperatur",
                     "unique_id": f"{serial_number}_temperature",
                     "device_class": "temperature",
                     "unit_of_measurement": "°C",
@@ -1516,7 +1788,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 {
                     "type": "sensor",
                     "sensor_type": "humidity",
-                    "name": "Humidity", 
+                    "name": "Luftfeuchtigkeit", 
                     "unique_id": f"{serial_number}_humidity",
                     "device_class": "humidity",
                     "unit_of_measurement": "%",
@@ -1527,7 +1799,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 {
                     "type": "sensor",
                     "sensor_type": "battery",
-                    "name": "Battery",
+                    "name": "Batterie",
                     "unique_id": f"{serial_number}_battery",
                     "device_class": "battery",
                     "unit_of_measurement": "%", 
@@ -1630,6 +1902,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Fire device automation compatible events
             button_name = telegram_data.get("button_name", f"button_{button}")
+            action_label = self._get_transmitter_action_label(serial_number, button)
+            if not action_label:
+                action_label = button_name
             
             # Fire device trigger compatible events
             if action in ["press", "push", "on", "1", 1]:
@@ -1638,9 +1913,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                     # Battery low event
                     self.hass.bus.async_fire("eldat_button_battery_low", {
                         "device_id": serial_number,
-                        "subtype": button_name,
+                        "serial_number": serial_number,
+                        "subtype": action_label,
                         "button": button,
                         "button_name": button_name,
+                        "action_label": action_label,
+                        "raw_button_name": button_name,
                         "battery_level": telegram_data.get("battery_level", 0),
                         "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
                     })
@@ -1650,9 +1928,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Button press start event
                 self.hass.bus.async_fire("eldat_button_press_start", {
                     "device_id": serial_number,
-                    "subtype": button_name,
+                    "serial_number": serial_number,
+                    "subtype": action_label,
                     "button": button,
                     "button_name": button_name,
+                    "action_label": action_label,
+                    "raw_button_name": button_name,
                     "is_low_battery": telegram_data.get("is_low_battery", False),
                     "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
                 })
@@ -1660,9 +1941,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Short press event (for immediate action)
                 self.hass.bus.async_fire("eldat_button_short_press", {
                     "device_id": serial_number,
-                    "subtype": button_name,
+                    "serial_number": serial_number,
+                    "subtype": action_label,
                     "button": button,
                     "button_name": button_name,
+                    "action_label": action_label,
+                    "raw_button_name": button_name,
                     "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
                 })
                 
@@ -1670,9 +1954,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Button press end event
                 self.hass.bus.async_fire("eldat_button_press_end", {
                     "device_id": serial_number,
-                    "subtype": button_name,
+                    "serial_number": serial_number,
+                    "subtype": action_label,
                     "button": button,
                     "button_name": button_name,
+                    "action_label": action_label,
+                    "raw_button_name": button_name,
                     "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
                 })
             
@@ -1697,6 +1984,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                 is_release = telegram_data.get("is_release", False)
                 is_low_battery = telegram_data.get("is_low_battery", False)
                 button_name = telegram_data.get("button_name", f"Button {button}")
+                action_label = self._get_transmitter_action_label(serial_number, button)
+                if not action_label:
+                    action_label = button_name
                 
                 if button is not None:
                     # Determine event type based on new parsing format
@@ -1724,6 +2014,8 @@ class EldatCoordinator(DataUpdateCoordinator):
                             "serial_number": serial_number,
                             "button": button,
                             "button_name": button_name,
+                            "action_label": action_label,
+                            "raw_button_name": button_name,
                             "function": function,
                             "is_push": is_push,
                             "is_release": is_release,
@@ -2322,10 +2614,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                 for platform, entities in entity_specs.items():
                     all_entities.extend(entities)
                 _LOGGER.debug("Merged entities: %d total", len(all_entities))
+                platforms = [platform for platform, entities in entity_specs.items() if entities]
                 
                 if all_entities:
                     # REPLACE old entity specs completely with newly generated ones
                     device_info["entities"] = all_entities
+                    device_info["platforms"] = platforms
                     _LOGGER.info("✅ Regenerated %d entity specs for device %s with updated naming", 
                                len(all_entities), serial_number[-6:])
                 else:

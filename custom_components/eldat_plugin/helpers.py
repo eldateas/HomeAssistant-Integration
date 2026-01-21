@@ -28,6 +28,10 @@ async def run_learning(coordinator, match_fn: Callable[[dict], Optional[dict]], 
 
     event = asyncio.Event()
     result: dict = {"device": None}
+    
+    # Store the original callback to restore it later
+    original_callback = getattr(coordinator.transceiver, '_telegram_callback', None)
+    _LOGGER.debug("run_learning: storing original callback: %s", original_callback)
 
     async def _callback(dev: dict, info_dict: dict = None, raw_data: str = None) -> None:
         try:
@@ -50,9 +54,17 @@ async def run_learning(coordinator, match_fn: Callable[[dict], Optional[dict]], 
     except asyncio.TimeoutError:
         _LOGGER.debug("Learning timed out after %s seconds", timeout)
     finally:
-        # Cleanup: remove callback and disable learning
+        # Cleanup: restore original callback and disable learning
         try:
-            coordinator.transceiver.set_telegram_callback(None)
+            # Restore the original callback instead of setting to None
+            if original_callback:
+                coordinator.transceiver.set_telegram_callback(original_callback)
+                _LOGGER.debug("run_learning: restored original callback")
+            else:
+                # If there was no original callback, restore the coordinator's _handle_telegram
+                if hasattr(coordinator, '_handle_telegram'):
+                    coordinator.transceiver.set_telegram_callback(coordinator._handle_telegram)
+                    _LOGGER.debug("run_learning: restored coordinator._handle_telegram callback")
             await coordinator.transceiver.set_learning_mode(False)
             coordinator._config_flow_learning = False
         except Exception:  # pragma: no cover - defensive cleanup

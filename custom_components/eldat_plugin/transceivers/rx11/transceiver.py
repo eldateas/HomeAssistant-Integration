@@ -1289,10 +1289,18 @@ class RX11Transceiver(BaseTransceiver):
         _LOGGER.warning("RX11 wrapper not available for EWB management")
         return False
 
-    async def rx11_ewb_join_device(self, gateway_serial: str) -> Optional[tuple[int, str]]:
-        """Join EWB device and return (device_type, receiver_serial)."""
+    async def rx11_ewb_join_device(self, gateway_serial: str, timeout: float = 2.0) -> Optional[tuple[int, str]]:
+        """Join EWB device - single attempt.
+        
+        Args:
+            gateway_serial: Gateway serial number (hex string)
+            timeout: Timeout in seconds for this single attempt (default: 2.0s)
+        
+        Returns:
+            Tuple of (device_type, receiver_serial) on success, None on timeout/failure
+        """
         if self._rx11_wrapper:
-            return await self._rx11_wrapper.rx11_ewb_join_device(gateway_serial)
+            return await self._rx11_wrapper.rx11_ewb_join_device(gateway_serial, timeout)
         _LOGGER.warning("RX11 wrapper not available for EWB management")
         return None
 

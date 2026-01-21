@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Callable, Dict, Optional
 
 from .rx_module import (
@@ -70,6 +71,18 @@ class RX11Wrapper:
         self._serial_error_count = 0
         self._consecutive_errors = 0
         
+        # Health check and connection monitoring
+        self._health_check_task: Optional[asyncio.Task] = None
+        self._stop_health_check = False
+        self._health_check_interval: float = 30.0  # Check connection 30 seconds after last communication
+        self._last_successful_communication: float = 0.0  # Timestamp of last successful communication
+        self._connection_lost_threshold: int = 3  # Mark disconnected after 3 consecutive failures
+        self._reconnect_in_progress: bool = False
+        self._reconnect_lock = asyncio.Lock()
+        
+        # Coordinator reference for status updates
+        self._coordinator = None
+        
         _LOGGER.info("✅ RX11 Pure Python wrapper initialized for %s", device_path)
     
     # ================================================================================================
@@ -93,6 +106,9 @@ class RX11Wrapper:
                     self._connected = True
                     _LOGGER.info("✅ Connected to RX11 at %s", self.device_path)
                     
+                    # Register disconnect callback for immediate notification on hardware errors
+                    self._module.set_disconnect_callback(self._on_hardware_disconnect)
+                    
                     # Test connection and fetch versions
                     await asyncio.sleep(0.3)  # Initial settle time
                     
@@ -107,6 +123,10 @@ class RX11Wrapper:
                     # Start continuous EWB receive loop for background telegram monitoring
                     _LOGGER.info("🚀 Starting continuous EWB receive loop...")
                     await self.rx11_ewb_sensor_start_receive_loop()
+                    
+                    # Start health check task for connection monitoring
+                    _LOGGER.info("🏥 Starting health check task...")
+                    await self._start_health_check()
                     
                     self._serial_error_count = 0
                     self._consecutive_errors = 0
@@ -126,6 +146,9 @@ class RX11Wrapper:
             if not self._connected:
                 return
             
+            # Stop health check task
+            await self._stop_health_check_task()
+            
             # Stop EWB receive loop
             await self.rx11_ewb_sensor_stop_receive_loop()
             
@@ -140,13 +163,47 @@ class RX11Wrapper:
                 _LOGGER.error("❌ Exception during RX11 disconnect: %s", e)
                 self._connected = False
     
+    def _on_hardware_disconnect(self) -> None:
+        """Called by RxModule when a hardware error (USB disconnect) occurs.
+        
+        This is called from the serial handler thread, so we need to be
+        thread-safe and schedule any async operations properly.
+        """
+        _LOGGER.warning("🔴 RX11 Hardware-Disconnect erkannt - aktualisiere Status sofort")
+        
+        # Mark as disconnected immediately
+        self._connected = False
+        self._consecutive_errors += 1
+        
+        # Notify coordinator to update listeners immediately
+        if self._coordinator and hasattr(self._coordinator, 'hass'):
+            try:
+                # Schedule async update on the event loop
+                self._coordinator.hass.loop.call_soon_threadsafe(
+                    self._coordinator.async_update_listeners
+                )
+                _LOGGER.info("✅ Coordinator wurde über Hardware-Disconnect benachrichtigt")
+            except Exception as e:
+                _LOGGER.warning("⚠️ Fehler beim Benachrichtigen des Coordinators: %s", e)
+    
     def get_connection_stats(self) -> dict:
         """Get connection and error statistics."""
         return {
             'connected': self._connected,
             'serial_error_count': self._serial_error_count,
             'consecutive_errors': self._consecutive_errors,
-            'device_path': self.device_path
+            'device_path': self.device_path,
+            'last_successful_communication': self._last_successful_communication,
+            'health_check_interval': self._health_check_interval,
+            'reconnect_in_progress': self._reconnect_in_progress,
+            'ewb_receive_loop_running': (
+                self._ewb_receive_task is not None and 
+                not self._ewb_receive_task.done()
+            ) if self._ewb_receive_task else False,
+            'health_check_running': (
+                self._health_check_task is not None and 
+                not self._health_check_task.done()
+            ) if self._health_check_task else False
         }
     
     # ================================================================================================
@@ -655,42 +712,418 @@ class RX11Wrapper:
         _LOGGER.info("⏹️ Stopped EWB receive loop")
     
     async def _ewb_receive_loop(self):
-        """Internal continuous EWB receive loop."""
-        _LOGGER.info("🔄 EWB receive loop started")
+        """Internal continuous EWB receive loop.
         
-        while not self._stop_ewb_receive and self._connected:
+        This loop:
+        1. Sends EWB_RCV requests to receive telegrams from EWB devices
+        2. EWB_RCV is a blocking "long-poll" command that waits until a telegram arrives
+        3. No timeout - the separate health check task monitors connection health
+        4. Only SUCCESS and ERR_CANCELED/ERR_SUPERSEDED are expected results
+        5. Real errors (FAILSTATE, I/O errors) are logged, health check handles reconnection
+        6. Waits for reconnection if connection is lost
+        """
+        _LOGGER.info("🔄 EWB receive loop started (no timeout, health check monitors connection)")
+        
+        self._consecutive_errors = 0
+        
+        while not self._stop_ewb_receive:
+            # Wait for connection if disconnected
+            if not self._connected:
+                _LOGGER.debug("EWB receive loop waiting for connection...")
+                await asyncio.sleep(1.0)
+                continue
+                
             try:
-                # Get raw telegram data from module
+                # Send EWB_RCV and wait for telegram (blocking until telegram arrives)
+                # Use very long timeout (1 hour) - health check handles connection monitoring
                 result, info_type, receiver_transmitter, info_data = await asyncio.get_event_loop().run_in_executor(
-                    None, self._module.ewb_rcv_request, 5.0
+                    None, self._module.ewb_rcv_request, 3600.0
                 )
                 
                 if result == ErrorCode.SUCCESS:
+                    # Successful telegram received - update timestamp for health check
+                    self._last_successful_communication = time.time()
+                    self._consecutive_errors = 0
+                    
                     # Log received telegram details
                     serial_hex = ''.join(f'{b:02X}' for b in receiver_transmitter)
                     data_hex = ' '.join(f'{b:02X}' for b in info_data)
-                    _LOGGER.warning("📥 RX11 Telegram received: Serial=%s (full 16 bytes), InfoType=%d, Data=[%s]", 
-                                  serial_hex, info_type, data_hex)
-                    
-                    _LOGGER.warning("🔍 Checking callback: self._telegram_callback = %s", bool(self._telegram_callback))
+                    _LOGGER.debug("📥 RX11 Telegram received: Serial=%s, InfoType=%d, Data=[%s]", 
+                                serial_hex[-8:], info_type, data_hex)
                     
                     if self._telegram_callback:
                         try:
-                            _LOGGER.warning("📞 CALLING telegram callback...")
                             # Call callback with raw data (matching C library signature)
                             self._telegram_callback(info_type, receiver_transmitter, info_data)
-                            _LOGGER.warning("✅ Telegram callback completed successfully")
                         except Exception as e:
                             _LOGGER.error("❌ Error in telegram callback: %s", e, exc_info=True)
                     else:
-                        _LOGGER.error("⚠️ Telegram received but NO callback set! Cannot process telegram.")
+                        _LOGGER.warning("⚠️ Telegram received but NO callback set!")
                         
+                elif result == ErrorCode.ERR_SUPERSEDED:
+                    # SUPERSEDED means a new request replaced this one - normal during reconnect
+                    self._consecutive_errors = 0
+                    _LOGGER.debug("🔄 EWB_RCV superseded - new request sent")
+                    
+                elif result == ErrorCode.ERR_CANCELED:
+                    # Request was canceled - normal during shutdown or reconnect
+                    _LOGGER.debug("🛑 EWB_RCV canceled")
+                    
+                elif result == ErrorCode.ERR_RF_TIMEOUT:
+                    # RF timeout - extremely rare with 1h timeout, just continue
+                    self._consecutive_errors = 0
+                    _LOGGER.debug("⏱️ EWB_RCV timeout - continuing")
+                    
+                elif result == ErrorCode.ERR_FAILSTATE:
+                    # RX11 is in a bad state - health check will handle reconnection
+                    self._consecutive_errors += 1
+                    _LOGGER.error("🔴 RX11 FAILSTATE detected in EWB receive loop")
+                    # Don't trigger reconnect here - let health check handle it
+                    await asyncio.sleep(1.0)
+                    
+                else:
+                    # Other error - log it
+                    self._consecutive_errors += 1
+                    error_name = self._get_error_name(result)
+                    _LOGGER.warning("⚠️ EWB_RCV error: %s (0x%02X)", error_name, result)
+                    await asyncio.sleep(0.5)
+                        
+            except asyncio.CancelledError:
+                _LOGGER.info("🛑 EWB receive loop cancelled")
+                break
+            except (OSError, IOError) as e:
+                # OS/IO error typically indicates USB disconnection
+                # Health check will detect this and trigger reconnect
+                _LOGGER.error("🔌 I/O Error in EWB receive loop: %s", e)
+                await asyncio.sleep(1.0)
             except Exception as e:
                 if not self._stop_ewb_receive:
-                    _LOGGER.error("Error in EWB receive loop: %s", e)
-                await asyncio.sleep(0.5)
+                    _LOGGER.error("❌ Unexpected error in EWB receive loop: %s", e, exc_info=True)
+                    await asyncio.sleep(0.5)
         
         _LOGGER.info("🔄 EWB receive loop stopped")
+    
+    # ================================================================================================
+    # HEALTH CHECK
+    # ================================================================================================
+    
+    async def _start_health_check(self):
+        """Start the health check task."""
+        if self._health_check_task and not self._health_check_task.done():
+            _LOGGER.debug("Health check already running")
+            return
+        
+        self._stop_health_check = False
+        self._last_successful_communication = time.time()
+        self._health_check_task = asyncio.create_task(self._health_check_loop())
+        _LOGGER.info("🏥 Started health check task (interval: %ds after last communication)", 
+                    int(self._health_check_interval))
+    
+    async def _stop_health_check_task(self):
+        """Stop the health check task."""
+        self._stop_health_check = True
+        
+        if self._health_check_task and not self._health_check_task.done():
+            try:
+                self._health_check_task.cancel()
+                await asyncio.wait_for(self._health_check_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                _LOGGER.debug("Health check stop timeout (expected)")
+            except asyncio.CancelledError:
+                _LOGGER.debug("Health check cancelled (expected)")
+            except Exception as e:
+                _LOGGER.error("Error stopping health check: %s", e)
+            finally:
+                self._health_check_task = None
+        
+        _LOGGER.info("⏹️ Stopped health check task")
+    
+    async def _health_check_loop(self):
+        """Health check loop - queries hardware version to verify connection.
+        
+        This loop:
+        1. Waits until 30 seconds have passed since last successful communication
+        2. Queries the hardware version as a quick health check
+        3. If the query fails, attempts reconnection
+        4. If communication happens (EWB telegram received), the timer resets
+        5. Waits during reconnection, then resumes monitoring
+        """
+        _LOGGER.info("🏥 Health check loop started")
+        health_check_errors = 0
+        
+        while not self._stop_health_check:
+            # Wait for connection if disconnected (reconnection in progress or hardware error)
+            if not self._connected:
+                _LOGGER.debug("Health check waiting for connection...")
+                await asyncio.sleep(2.0)
+                health_check_errors = 0  # Reset errors after reconnect
+                continue
+            
+            # Check if hardware error occurred - skip health checks during hardware error
+            if self._module.has_hardware_error:
+                _LOGGER.debug("🔴 Hardware-Fehler erkannt - Health check pausiert")
+                await asyncio.sleep(2.0)
+                continue
+                
+            try:
+                # Calculate time since last successful communication
+                time_since_last_comm = time.time() - self._last_successful_communication
+                
+                if time_since_last_comm >= self._health_check_interval:
+                    # 30 seconds since last communication - perform health check
+                    _LOGGER.warning("🏥 Performing health check (%.1fs since last communication)", 
+                                time_since_last_comm)
+                    
+                    # Query hardware version as health check
+                    # This is a quick command that should respond immediately
+                    hw_version = await self._perform_health_check()
+                    
+                    if hw_version:
+                        # Health check successful
+                        self._last_successful_communication = time.time()
+                        health_check_errors = 0
+                        _LOGGER.warning("🏥 Health check OK - Hardware: %s", hw_version)
+                    else:
+                        # Health check failed
+                        health_check_errors += 1
+                        _LOGGER.warning("🏥 Health check failed (error %d/%d)", 
+                                       health_check_errors, self._connection_lost_threshold)
+                        
+                        if health_check_errors >= self._connection_lost_threshold:
+                            _LOGGER.error("🔴 Health check failed %d times - initiating reconnection", 
+                                        health_check_errors)
+                            await self._handle_connection_lost()
+                            health_check_errors = 0
+                
+                # Sleep for 5 seconds, then check again
+                # This allows us to react quickly when communication happens
+                await asyncio.sleep(5.0)
+                
+            except asyncio.CancelledError:
+                _LOGGER.info("🛑 Health check loop cancelled")
+                break
+            except Exception as e:
+                if not self._stop_health_check:
+                    _LOGGER.error("❌ Error in health check loop: %s", e, exc_info=True)
+                    await asyncio.sleep(5.0)
+        
+        _LOGGER.info("🏥 Health check loop stopped")
+    
+    async def _perform_health_check(self) -> Optional[str]:
+        """Perform a health check by querying the hardware version.
+        
+        Returns:
+            Hardware version string if successful, None if failed
+        """
+        try:
+            # Don't use cache - we want to actually communicate with the device
+            result, hw_str = await asyncio.get_event_loop().run_in_executor(
+                None, self._module.ma_query_hw_ver_request
+            )
+            
+            if result == ErrorCode.SUCCESS:
+                # Convert bytes to string
+                null_index = hw_str.find(0)
+                if null_index >= 0:
+                    hw_str = hw_str[:null_index]
+                version = hw_str.decode('ascii', errors='ignore').strip()
+                return version if version else None
+            else:
+                error_name = self._get_error_name(result)
+                _LOGGER.warning("🏥 Health check query failed: %s (0x%02X)", error_name, result)
+                return None
+        except (OSError, IOError) as e:
+            _LOGGER.error("🏥 Health check I/O error (USB disconnected?): %s", e)
+            return None
+        except Exception as e:
+            _LOGGER.error("🏥 Health check exception: %s", e)
+            return None
+    
+    def _get_error_name(self, error_code: int) -> str:
+        """Get human-readable error name from error code."""
+        error_names = {
+            0x00: "SUCCESS",
+            0x01: "ERR_CANCELED",
+            0x02: "ERR_OUT_OF_QUEUE",
+            0x03: "ERR_INVALID_REQUEST",
+            0x04: "ERR_SIZE_MISMATCH",
+            0x05: "ERR_INVALID_PARAMETER",
+            0x06: "ERR_INCOMPLETE_FW",
+            0x07: "ERR_RF_TIMEOUT",
+            0x08: "ERR_INVALID_SERIAL",
+            0x09: "ERR_SUPERSEDED",
+            0x0A: "ERR_INCOMPAT_FW",
+            0x0B: "ERR_SERIAL_FILTER",
+            0x0C: "ERR_FILTER_OUT_OF_MEM",
+            0x0D: "ERR_INVALID_SEC_REPLY",
+            0x0E: "ERR_TOO_LATE",
+            0xFF: "ERR_FAILSTATE"
+        }
+        return error_names.get(error_code, f"UNKNOWN_ERROR_{error_code}")
+    
+    async def _handle_connection_lost(self):
+        """Handle connection lost - attempt to reconnect with device re-discovery.
+        
+        This method:
+        1. Properly disposes of the old connection
+        2. Resets all internal state (caches, error counters)
+        3. Scans for the RX11 device (may be at a different port after replug)
+        4. Attempts reconnection with exponential backoff
+        5. Keeps trying indefinitely until device is found again
+        """
+        async with self._reconnect_lock:
+            if self._reconnect_in_progress:
+                _LOGGER.debug("Reconnection already in progress, skipping")
+                return
+            
+            self._reconnect_in_progress = True
+        
+        try:
+            _LOGGER.warning("🔄 Connection lost - attempting to reconnect to RX11...")
+            
+            # Mark as disconnected
+            self._connected = False
+            
+            # Try to close existing connection gracefully and reset state
+            await self._dispose_and_reset()
+            
+            # Wait a moment before starting reconnection attempts
+            await asyncio.sleep(2.0)
+            
+            # Keep trying to reconnect indefinitely (until stop requested)
+            attempt = 0
+            while not self._stop_ewb_receive and not self._stop_health_check:
+                attempt += 1
+                
+                # Exponential backoff with max 60 seconds
+                if attempt > 1:
+                    delay = min(2 ** min(attempt - 1, 6), 60)
+                    _LOGGER.info("🔄 Waiting %ds before reconnection attempt %d...", delay, attempt)
+                    await asyncio.sleep(delay)
+                
+                _LOGGER.info("🔄 Reconnection attempt %d - scanning for RX11 device...", attempt)
+                
+                # Try to find the RX11 device (may be at different port)
+                new_device_path = await self._find_rx11_device()
+                
+                if not new_device_path:
+                    _LOGGER.warning("⚠️ No RX11 device found - will retry...")
+                    continue
+                
+                # Device found - update path if changed
+                if new_device_path != self.device_path:
+                    _LOGGER.info("📍 RX11 found at new port: %s (was: %s)", 
+                               new_device_path, self.device_path)
+                    self.device_path = new_device_path
+                else:
+                    _LOGGER.info("📍 RX11 found at same port: %s", new_device_path)
+                
+                # Try to connect
+                try:
+                    # Create fresh RxModule instance with clean state
+                    self._module = RxModule(port=self.device_path, baudrate=115200, debug=True)
+                    
+                    # Connect
+                    success = await asyncio.get_event_loop().run_in_executor(
+                        None, self._module.connect
+                    )
+                    
+                    if success:
+                        # Verify connection with hardware version query
+                        hw_version = await self.get_hardware_version()
+                        if hw_version:
+                            self._connected = True
+                            self._consecutive_errors = 0
+                            self._last_successful_communication = time.time()
+                            
+                            # Clear version cache to force re-fetch
+                            self._hw_version_cache = None
+                            self._fw_version_cache = None
+                            self._versions_fetched = False
+                            
+                            _LOGGER.info("✅ Reconnection successful! Hardware: %s", hw_version)
+                            return
+                        else:
+                            _LOGGER.warning("⚠️ Connected but hardware version query failed")
+                            # Dispose and try again
+                            try:
+                                await asyncio.get_event_loop().run_in_executor(
+                                    None, self._module.dispose
+                                )
+                            except Exception:
+                                pass
+                    else:
+                        _LOGGER.warning("❌ Connection to %s failed", self.device_path)
+                        
+                except Exception as e:
+                    _LOGGER.error("❌ Reconnection attempt %d error: %s", attempt, e)
+            
+            _LOGGER.warning("🛑 Reconnection loop stopped (shutdown requested)")
+            
+        finally:
+            async with self._reconnect_lock:
+                self._reconnect_in_progress = False
+    
+    async def _dispose_and_reset(self):
+        """Dispose of current connection and reset all internal state."""
+        _LOGGER.debug("Disposing connection and resetting state...")
+        
+        # Try to close existing module connection
+        if self._module:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._module.dispose
+                )
+            except Exception as e:
+                _LOGGER.debug("Error during dispose: %s", e)
+        
+        # Reset error counters
+        self._serial_error_count = 0
+        self._consecutive_errors = 0
+        
+        # Reset caches
+        self._serial_cache.clear()
+        self._cache_timestamp.clear()
+        self._hw_version_cache = None
+        self._fw_version_cache = None
+        self._versions_fetched = False
+        
+        # Reset used receiver tracking
+        self._used_receivers.clear()
+        self._used_ewb_indices.clear()
+        self._ewb_device_serials.clear()
+        
+        _LOGGER.debug("State reset complete")
+    
+    async def _find_rx11_device(self) -> Optional[str]:
+        """Find RX11 device, potentially at a new port after USB replug.
+        
+        Returns:
+            Device path if found, None otherwise
+        """
+        try:
+            import serial.tools.list_ports
+            
+            # Scan for RX11 devices
+            all_ports = await asyncio.get_event_loop().run_in_executor(
+                None, serial.tools.list_ports.comports
+            )
+            
+            # RX11 USB identifiers
+            RX11_VID = 0x155A
+            RX11_PIDS = [0x1006, 0x1014]
+            
+            for port in all_ports:
+                if port.vid == RX11_VID and port.pid in RX11_PIDS:
+                    _LOGGER.debug("Found RX11 at %s (VID: 0x%04X, PID: 0x%04X)", 
+                                port.device, port.vid, port.pid)
+                    return port.device
+            
+            return None
+            
+        except Exception as e:
+            _LOGGER.error("Error scanning for RX11 device: %s", e)
+            return None
     
     def set_telegram_callback(self, callback: Callable):
         """Set callback for received telegrams."""
@@ -712,21 +1145,37 @@ class RX11Wrapper:
     # ================================================================================================
     
     async def rx11_ewb_device_join(
-        self, gateway_serial: str, timeout: float = 30.0
+        self, gateway_serial: str, timeout: float = 2.0
     ) -> Optional[tuple[int, str]]:
-        """Join EWB device."""
+        """Join EWB device - single attempt.
+        
+        Args:
+            gateway_serial: Gateway serial number (hex string)
+            timeout: Timeout in seconds for this single attempt (default: 2.0s)
+        
+        Returns:
+            Tuple of (device_type, receiver_serial) on success, None on timeout/failure
+        """
         try:
             gateway_bytes = bytes.fromhex(gateway_serial)
             result, device_type, receiver = await asyncio.get_event_loop().run_in_executor(
                 None, self._module.ewb_join_device_request, gateway_bytes, timeout
             )
             
+            from .rx_module import ErrorCode
+            
             if result == ErrorCode.SUCCESS:
                 receiver_hex = ''.join(f'{b:02X}' for b in receiver)
+                _LOGGER.info("✅ EWB_JOIN_DEVICE SUCCESS: Type=0x%02X, Serial=%s",
+                           device_type, receiver_hex[-8:])
                 return (device_type, receiver_hex)
+            else:
+                # Timeout or other error - expected during learning, just return None
+                _LOGGER.debug("⏸️ EWB_JOIN_DEVICE: result=0x%02X (timeout expected during learning)", result)
+            
             return None
         except Exception as e:
-            _LOGGER.error("Exception joining EWB device: %s", e)
+            _LOGGER.error("Exception joining EWB device: %s", e, exc_info=True)
             return None
     
     async def rx11_ewb_join_device(

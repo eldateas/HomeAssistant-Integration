@@ -83,6 +83,17 @@ class FunctionCode(IntEnum):
     PING_RCV = 0xF0
 
 
+# Continuous receive function codes - these wait indefinitely for incoming telegrams
+# and should not be considered "stuck" in health checks
+CONTINUOUS_RCV_FUNCTIONS: frozenset[int] = frozenset({
+    FunctionCode.EW_RCV_BUTTON,  # EasyWave button receive
+    FunctionCode.EW_RCV_EX,      # EasyWave extended receive
+    FunctionCode.EWB_RCV,        # EasyWave Neo receive
+    FunctionCode.TR_RCV,         # Transceiver receive
+    FunctionCode.SEC_RCV,        # Security receive
+})
+
+
 # ====================================================================================================
 # ERROR CODES
 # ====================================================================================================
@@ -197,6 +208,7 @@ class Request:
     queued: bool = False
     cancel: bool = False
     handle: int = 0
+    is_continuous: bool = False  # True for RCV requests that wait for incoming telegrams
     
     # Result
     icp: ICP = field(default_factory=lambda: ICP())
@@ -479,6 +491,8 @@ class RxModule:
         # State tracking
         self._state_good = True
         self._connection_healthy = True
+        self._hardware_error = False
+        self._last_error: Optional[str] = None
         self._last_successful_communication = time.time()
         self._reconnect_attempts = 0
         self._max_reconnect_attempts = 10
@@ -500,10 +514,25 @@ class RxModule:
         self._send_cmd_loop_running = False
         self._send_cmd_loop_gateway: Optional[bytes] = None
         self._send_cmd_loop_button: Optional[int] = None
+        
+        # Disconnect callback for immediate notification
+        self._disconnect_callback: Optional[Callable[[], None]] = None
     
     # ================================================================================================
     # PROPERTIES
     # ================================================================================================
+    
+    def set_disconnect_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """Set a callback to be called when a disconnect/hardware error occurs."""
+        self._disconnect_callback = callback
+    
+    def _notify_disconnect(self) -> None:
+        """Notify the disconnect callback if registered."""
+        if self._disconnect_callback is not None:
+            try:
+                self._disconnect_callback()
+            except Exception as e:
+                _LOGGER.warning("Fehler beim Aufrufen des Disconnect-Callbacks: %s", e)
     
     @property
     def is_connected(self) -> bool:
@@ -517,12 +546,32 @@ class RxModule:
         with self._protocol_lock:
             if not self._connected:
                 return "disconnected"
+            elif self._hardware_error:
+                return "hardware_error"
             elif not self._connection_healthy:
                 return "reconnecting"
             elif not self._state_good:
                 return "error"
             else:
                 return "connected"
+    
+    @property
+    def has_hardware_error(self) -> bool:
+        """Check if a hardware error occurred (USB disconnected, I/O error, etc.)."""
+        with self._protocol_lock:
+            return self._hardware_error
+    
+    @property
+    def last_error(self) -> Optional[str]:
+        """Get the last error message."""
+        with self._protocol_lock:
+            return self._last_error
+    
+    def clear_hardware_error(self) -> None:
+        """Clear hardware error flag (called after successful reconnect)."""
+        with self._protocol_lock:
+            self._hardware_error = False
+            self._last_error = None
     
     # ================================================================================================
     # CONNECTION MANAGEMENT
@@ -556,6 +605,8 @@ class RxModule:
             with self._protocol_lock:
                 self._state_good = True
                 self._connection_healthy = True
+                self._hardware_error = False
+                self._last_error = None
                 self._last_successful_communication = time.time()
                 self._reconnect_attempts = 0
             
@@ -656,18 +707,61 @@ class RxModule:
         return False
     
     def _check_connection_health(self):
-        """Check if connection is healthy based on recent activity."""
+        """Check if connection is healthy based on recent activity.
+        
+        The RX11 protocol works as follows:
+        - IRP (I/O Request Packet) is sent to the module
+        - For async requests: IPP (I/O Pending Packet) with handle is returned, then ICP later
+        - For sync requests (handle=0): ICP is returned directly
+        
+        Connection is unhealthy if:
+        - IRPs were sent (in _tx_req_sent) but no IPP/ICP response came
+        - Non-continuous command requests are pending without ICP response
+        
+        Continuous RCV requests (EWB_RCV, TR_RCV, etc.) are excluded as they
+        wait indefinitely for incoming telegrams.
+        """
         with self._protocol_lock:
             if not self._connection_healthy:
                 return  # Already marked unhealthy
             
             time_since_comm = time.time() - self._last_successful_communication
             
-            # If no communication for too long and we have pending requests, mark unhealthy
+            # Count requests waiting for IPP (IRPs sent but no acknowledgment yet)
+            irps_waiting_for_ipp = self._tx_req_sent_size
+            
+            # Count only non-continuous pending requests (waiting for ICP)
+            # Continuous RCV requests wait for incoming telegrams and should not
+            # trigger unhealthy state just because no telegrams arrived
+            non_continuous_pending = sum(
+                1 for req in self._req_pending.values() 
+                if not req.is_continuous
+            )
+            
+            # Count continuous RCV requests (for logging only)
+            continuous_pending = len(self._req_pending) - non_continuous_pending
+            
+            # Log health status periodically (every 30s check)
+            if time_since_comm >= self._health_check_interval:
+                _LOGGER.info(
+                    "🔍 RX11 Health Check: %.1fs since last comm, "
+                    "IRPs waiting for IPP=%d, Commands waiting for ICP=%d, "
+                    "Continuous RCV requests=%d",
+                    time_since_comm, irps_waiting_for_ipp, non_continuous_pending, continuous_pending
+                )
+            
+            # Connection is unhealthy if:
+            # 1. No communication for too long AND
+            # 2. There are IRPs waiting for IPP (stuck in send queue) OR
+            #    There are non-continuous commands waiting for ICP
             if time_since_comm > self._health_check_interval and (
-                self._tx_req_sent_size > 0 or len(self._req_pending) > 0
+                irps_waiting_for_ipp > 0 or non_continuous_pending > 0
             ):
-                _LOGGER.warning("Connection appears unhealthy - no response for %.1fs", time_since_comm)
+                _LOGGER.error(
+                    "🔴 RX11 Connection UNHEALTHY - no response for %.1fs! "
+                    "(IRPs without IPP=%d, Commands without ICP=%d)", 
+                    time_since_comm, irps_waiting_for_ipp, non_continuous_pending
+                )
                 self._state_good = False
     
     def _mark_communication_success(self):
@@ -702,7 +796,8 @@ class RxModule:
             irp=irp,
             irp_byte_count=irp_byte_count,
             expected_icp_byte_count=expected_icp_byte_count,
-            req_str=req_str
+            req_str=req_str,
+            is_continuous=irp.function in CONTINUOUS_RCV_FUNCTIONS
         )
     
     def _place_request(self, req: Request):
@@ -783,6 +878,14 @@ class RxModule:
             return
         
         try:
+            # First check if serial port is still valid (USB might have been removed)
+            if not self._check_serial_port_valid():
+                _LOGGER.error("ERROR [writeToBuffer] - Serial port no longer valid (USB disconnected?)")
+                with self._protocol_lock:
+                    self._state_good = False
+                    self._connection_healthy = False
+                return
+            
             # Encode the packet
             packet = encode_irp(irp)
             
@@ -804,17 +907,40 @@ class RxModule:
         
         except (serial.SerialException, OSError) as e:
             if not self._shutdown_requested:
-                _LOGGER.error("ERROR [writeToBuffer] - Serial error: %s", e)
+                _LOGGER.error("ERROR [writeToBuffer] - Serial error (USB disconnected?): %s", e)
                 with self._protocol_lock:
                     self._state_good = False
                     self._connection_healthy = False
-                # Trigger reconnect in background
-                threading.Thread(target=self._reconnect, daemon=True, name="RxModule-Reconnect").start()
         except Exception as e:
             if not self._shutdown_requested:
                 _LOGGER.error("ERROR [writeToBuffer] - %s", e)
                 with self._protocol_lock:
                     self._state_good = False
+    
+    def _check_serial_port_valid(self) -> bool:
+        """Check if the serial port is still valid (USB device still connected)."""
+        try:
+            if not self._serial:
+                return False
+            
+            # Try to check if the port is still accessible
+            # This will fail if the USB device has been removed
+            import os
+            if hasattr(self._serial, 'port') and self._serial.port:
+                # On Linux, check if the device file still exists
+                if not os.path.exists(self._serial.port):
+                    _LOGGER.warning("Serial port %s no longer exists", self._serial.port)
+                    return False
+            
+            # Also check if the serial connection is still open
+            if not self._serial.is_open:
+                _LOGGER.warning("Serial port is not open")
+                return False
+                
+            return True
+        except Exception as e:
+            _LOGGER.warning("Error checking serial port validity: %s", e)
+            return False
     
     def _serial_handler(self):
         """Main serial handler thread - reads and processes incoming data."""
@@ -827,17 +953,44 @@ class RxModule:
                     self._check_connection_health()
                     last_health_check = time.time()
                 
+                # Check if serial port is still valid (USB might have been removed)
+                if not self._check_serial_port_valid():
+                    if not self._shutdown_requested:
+                        _LOGGER.error("Serial port no longer valid - USB device may have been removed")
+                        with self._protocol_lock:
+                            self._state_good = False
+                            self._connection_healthy = False
+                    break
+                
                 # Read available bytes (no lock needed for reading)
-                while self._serial and self._serial.in_waiting > 0:
-                    byte_data = self._serial.read(1)
-                    if not byte_data:
-                        break
-                    
-                    byte = byte_data[0]
-                    if self.debug:
-                        _LOGGER.info("RX byte: 0x%02x (buf_len=%d, sop=%s, stuffing=%s)", 
-                                    byte, len(self._rx_raw_buffer), self._rx_sop, self._rx_stuffing)
-                    self._process_received_byte(byte)
+                try:
+                    while self._serial and self._serial.in_waiting > 0:
+                        byte_data = self._serial.read(1)
+                        if not byte_data:
+                            break
+                        
+                        byte = byte_data[0]
+                        if self.debug:
+                            _LOGGER.info("RX byte: 0x%02x (buf_len=%d, sop=%s, stuffing=%s)", 
+                                        byte, len(self._rx_raw_buffer), self._rx_sop, self._rx_stuffing)
+                        self._process_received_byte(byte)
+                except (serial.SerialException, OSError) as e:
+                    if not self._shutdown_requested:
+                        error_str = str(e)
+                        if "Input/output error" in error_str or "Errno 5" in error_str:
+                            _LOGGER.error("🔴 RX11 USB Hardware-Fehler: %s - Gerät wurde möglicherweise getrennt", e)
+                        elif "device disconnected" in error_str.lower() or "no such device" in error_str.lower():
+                            _LOGGER.error("🔴 RX11 USB Gerät getrennt: %s", e)
+                        else:
+                            _LOGGER.error("🔴 RX11 Serial-Port Fehler: %s", e)
+                        with self._protocol_lock:
+                            self._state_good = False
+                            self._connection_healthy = False
+                            self._hardware_error = True
+                            self._last_error = error_str
+                        # Notify disconnect callback if registered
+                        self._notify_disconnect()
+                    break
                 
                 # Process queued requests (uses lock internally)
                 self._process_queued_requests()
@@ -847,19 +1000,27 @@ class RxModule:
                 
             except (serial.SerialException, OSError) as e:
                 if not self._shutdown_requested:
-                    _LOGGER.error("Serial handler error: %s", e)
+                    error_str = str(e)
+                    if "Input/output error" in error_str or "Errno 5" in error_str:
+                        _LOGGER.error("🔴 RX11 USB Hardware-Fehler im Handler: %s - Gerät nicht verfügbar", e)
+                    else:
+                        _LOGGER.error("🔴 RX11 Serial-Handler Fehler (USB getrennt?): %s", e)
                     with self._protocol_lock:
                         self._state_good = False
                         self._connection_healthy = False
-                    # Attempt reconnect
-                    self._reconnect()
-                    last_health_check = time.time()  # Reset after reconnect
+                        self._hardware_error = True
+                        self._last_error = error_str
+                    # Notify disconnect callback if registered
+                    self._notify_disconnect()
+                break
             except Exception as e:
                 if not self._shutdown_requested:
                     _LOGGER.error("Unexpected error in serial handler: %s", e)
                     with self._protocol_lock:
                         self._state_good = False
                 time.sleep(0.01)
+        
+        _LOGGER.info("Serial handler thread exiting")
     
     def _process_received_byte(self, byte: int):
         """Process a single received byte."""

@@ -94,9 +94,14 @@ class EldatEntity(CoordinatorEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        # Entity is available if coordinator is working 
-        # (USB connection not strictly required for button entities and automations)
-        return self.coordinator.last_update_success
+        # Entity is available if coordinator is working AND transceiver is connected
+        if not self.coordinator.last_update_success:
+            return False
+        # Check transceiver connection
+        transceiver = getattr(self.coordinator, 'transceiver', None)
+        if transceiver and hasattr(transceiver, 'is_connected'):
+            return transceiver.is_connected
+        return True
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""

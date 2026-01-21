@@ -300,12 +300,23 @@ class EldatCover(EldatEntity, CoverEntity):
         # Update cover state based on coordinator data
         device_data = self.coordinator.devices.get(self._serial_number, {})
         
+        # Safely get channel data
+        if not isinstance(device_data, dict):
+            self.async_write_ha_state()
+            return
+            
         # Check for motor state updates
         channels = device_data.get("channels", {})
-        channel_data = channels.get(str(self._channel), {})
         
-        # Update position if available
-        if "position" in channel_data:
+        # Handle both dict and non-dict channel data
+        if isinstance(channels, dict):
+            channel_data = channels.get(str(self._channel), {})
+        else:
+            # If not a dict, skip processing
+            channel_data = {}
+        
+        # Update position if available (only if channel_data is a dict)
+        if isinstance(channel_data, dict) and "position" in channel_data:
             position = channel_data["position"]
             self._attr_is_closed = position <= 5  # Consider closed if position <= 5%
         

@@ -1,17 +1,17 @@
 {
   "domain": "eldat_plugin",
   "name": "ELDAT Integration",
-  "version": "1.0.0",
-  "documentation": "https://github.com/eldat-eas/homeassistant-eldat",
+  "version": "0.3.0",
+  "documentation": "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/eldat_plugin/docs",
   "dependencies": [],
   "codeowners": [
-    "@eldat-dev"
+    "eldateas"
   ],
   "config_flow": true,
   "dhcp": [],
   "homekit": {},
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/eldat-eas/homeassistant-eldat/issues",
+  "issue_tracker": "https://github.com/eldateas/HomeAssistant-Integration/issues",
   "quality_scale": "silver",
   "requirements": [
     "pyserial>=3.5",
@@ -41,5 +41,5 @@
   ],
   "zeroconf": [],
   "panel_custom": [],
-  "logo": "icon.png"
+  "logo": "images/eldat_logo.png"
 }

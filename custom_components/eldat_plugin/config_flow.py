@@ -33,13 +33,8 @@ from .entity_specs import create_entity_specs_for_device
 
 _LOGGER = logging.getLogger(__name__)
 
-# Simple schema used when waiting for a sensor telegram during learning
-STEP_DEVICE_SENSOR_SCHEMA = vol.Schema({
-    vol.Required("action", default="wait"): vol.In({
-        "wait": "⏳ Weiter warten",
-        "cancel": "❌ Abbrechen",
-    })
-})
+# Learning timeout in seconds (30 seconds for all learning operations)
+LEARNING_TIMEOUT_SECONDS = 30
 
 
 class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -61,6 +56,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._learn_task = None
         self._learn_cancel_event = None
         self._telegram_listener_remove = None
+        self._ewneo_learn_task = None
+        self._ewneo_poll_task = None
+        self._transmitter_learn_task = None
     
     async def _cleanup_learning_mode(self, coordinator=None) -> None:
         """Clean up learning mode and tasks."""
@@ -68,7 +66,14 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._learn_cancel_event.set()
         
         # Cancel all learning tasks
-        for task_attr in ['_learn_task', '_learning_task', '_sensor_learning_task']:
+        for task_attr in [
+            '_learn_task',
+            '_learning_task',
+            '_sensor_learning_task',
+            '_ewneo_learn_task',
+            '_ewneo_poll_task',
+            '_transmitter_learn_task',
+        ]:
             task = getattr(self, task_attr, None)
             if task and not task.done():
                 task.cancel()
@@ -183,8 +188,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             name = f"{device['name']} ({device['device']})"
             device_options[device["device"]] = name
 
-        device_options["manual"] = "🔧 Manueller Pfad eingeben"
-        device_options["refresh"] = "🔄 Geräteliste aktualisieren"
+        device_options["manual"] = "🔧 Manual"
+        device_options["refresh"] = "🔄 Refresh"
 
         if not self._discovered_devices:
             errors["base"] = "no_devices_found"
@@ -270,104 +275,293 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_device_type_select(user_input)
 
     async def async_step_device_type_select(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Select device type to add."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            device_type = user_input.get("device_type")
-            self._device_type = device_type
-
-            if device_type == "ew_transmitter":
-                return await self.async_step_device_transmitter_config()
-            if device_type == "ew_sensor":
-                return await self.async_step_device_sensor()
-            if device_type == "ew_receiver":
-                return await self.async_step_device_receiver()
-            if device_type == "ewneo_receiver":
-                return await self.async_step_device_ewneo_receiver()
-
-        device_type_options = {
-            "ew_transmitter": "🎛️ EW-Transmitter (Handsender/Fernbedienung)",
-            "ew_sensor": "🌡️ EWneo-Sensor (Temperatur/Feuchtigkeit/Wetter)", 
-            "ew_receiver": "📥 EW-Empfänger (konfigurieren ohne Lernen)",
-            "ewneo_receiver": "📥 EWneo-Switch/Motor (Neo-Schaltaktor)",
-        }
-
-        data_schema = vol.Schema({
-            vol.Required("device_type"): vol.In(device_type_options),
-        })
-
-        return self.async_show_form(
+        """Select device type to add - shown as a menu."""
+        # Show a menu with device type options
+        return self.async_show_menu(
             step_id="device_type_select",
-            data_schema=data_schema,
-            errors=errors,
-            description_placeholders={
-                "instructions": "Wählen Sie den Gerätetyp aus, den Sie hinzufügen möchten."
+            menu_options={
+                "device_transmitter_config": "🎛️ EW-Sender (Fernbedienung)",
+                "device_sensor": "🌡️ EWneo-Sensor (Temperatur/Feuchte)",
+                "device_receiver": "📥 EW-Empfänger (Schalter/Motor/Heizung)",
+                "device_ewneo_receiver": "📥 EWneo-Schalter/Motor (Bidirektional)",
+                "device_cancel": "❌ Abbrechen",
+            },
+        )
+    
+    async def async_step_device_cancel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Cancel the device adding flow."""
+        return self.async_abort(reason="user_cancelled_silent")
+
+    async def async_step_device_transmitter_config(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure transmitter operating mode - Step 1: Select button operation type via menu."""
+        # Initialize device config for transmitter
+        self._device_config = {
+            "device_type": "ew_transmitter",
+        }
+        
+        # Show menu with operating type options
+        return self.async_show_menu(
+            step_id="device_transmitter_config",
+            menu_options={
+                "device_transmitter_1button": "🔘 1-Tast-Bedienung",
+                "device_transmitter_2button": "🔘🔘 2-Tast-Bedienung",
+                "device_transmitter_3button": "🔘🔘🔘 3-Tast-Bedienung (Auf/Zu/Stopp)",
+                "device_type_select": "⬅️ Zurück",
             },
         )
 
-    async def async_step_device_transmitter_config(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure transmitter button count before learning."""
-        errors: dict[str, str] = {}
+    async def async_step_device_transmitter_1button(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 1-button operating type selection."""
+        self._device_config["operating_type"] = "1"
+        return await self.async_step_device_transmitter_grouping()
+
+    async def async_step_device_transmitter_2button(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 2-button operating type selection."""
+        self._device_config["operating_type"] = "2"
+        return await self.async_step_device_transmitter_2button_usage()
+
+    async def async_step_device_transmitter_3button(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 3-button operating type selection (cover mode)."""
+        self._device_config["operating_type"] = "3"
+        self._device_config["grouping_mode"] = "cover"
+        self._device_config["switch_mode"] = "cover"
+        self._device_config["button_count"] = 4
+        self._device_config["channels"] = 4
+        self._device_config["cover_mode"] = True
+        return await self.async_step_device_transmitter_description()
+
+    async def async_step_device_transmitter_grouping(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure transmitter grouping mode for 1-button operation via menu."""
+        return self.async_show_menu(
+            step_id="device_transmitter_grouping",
+            menu_options={
+                "device_transmitter_grouping_single": "🔘 Einzeln schalten",
+                "device_transmitter_grouping_group": "🔗 Als Gruppe schalten",
+                "device_transmitter_config": "⬅️ Zurück",
+            },
+        )
+
+    async def async_step_device_transmitter_grouping_single(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle single grouping mode selection."""
+        self._device_config["grouping_mode"] = "single"
+        return await self.async_step_device_transmitter_switch_mode()
+
+    async def async_step_device_transmitter_grouping_group(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle group grouping mode selection."""
+        self._device_config["grouping_mode"] = "group"
+        return await self.async_step_device_transmitter_switch_mode()
+
+    async def async_step_device_transmitter_switch_mode(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure transmitter switch mode via menu - Impulse or Permanent."""
+        return self.async_show_menu(
+            step_id="device_transmitter_switch_mode",
+            menu_options={
+                "device_transmitter_switch_impulse": "⚡ Impuls (Zustand wird zurückgesetzt)",
+                "device_transmitter_switch_permanent": "🔒 Dauer (Zustand bleibt erhalten)",
+                "device_transmitter_grouping": "⬅️ Zurück",
+            },
+        )
+
+    async def async_step_device_transmitter_switch_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle impulse switch mode selection."""
+        self._device_config["switch_mode"] = "impulse"
+        return await self.async_step_device_transmitter_button_count()
+
+    async def async_step_device_transmitter_switch_permanent(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle permanent switch mode selection."""
+        self._device_config["switch_mode"] = "permanent"
+        return await self.async_step_device_transmitter_button_count()
+
+    async def async_step_device_transmitter_button_count(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure transmitter button count via menu."""
+        return self.async_show_menu(
+            step_id="device_transmitter_button_count",
+            menu_options={
+                "device_transmitter_buttons_1": "🔘 1 Taste",
+                "device_transmitter_buttons_2": "🔘🔘 2 Tasten",
+                "device_transmitter_buttons_3": "🔘🔘🔘 3 Tasten",
+                "device_transmitter_buttons_4": "🔘🔘🔘🔘 4 Tasten",
+                "device_transmitter_switch_mode": "⬅️ Zurück",
+            },
+        )
+
+    async def async_step_device_transmitter_buttons_1(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 1 button selection."""
+        self._device_config["button_count"] = 1
+        self._device_config["channels"] = 1
+        return await self.async_step_device_transmitter_description()
+
+    async def async_step_device_transmitter_buttons_2(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 2 buttons selection."""
+        self._device_config["button_count"] = 2
+        self._device_config["channels"] = 2
+        return await self.async_step_device_transmitter_description()
+
+    async def async_step_device_transmitter_buttons_3(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 3 buttons selection."""
+        self._device_config["button_count"] = 3
+        self._device_config["channels"] = 3
+        return await self.async_step_device_transmitter_description()
+
+    async def async_step_device_transmitter_buttons_4(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 4 buttons selection."""
+        self._device_config["button_count"] = 4
+        self._device_config["channels"] = 4
+        return await self.async_step_device_transmitter_description()
+
+    async def async_step_device_transmitter_2button_usage(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure 2-button transmitter usage via menu - EIN/AUS or AUF/ZU."""
+        return self.async_show_menu(
+            step_id="device_transmitter_2button_usage",
+            menu_options={
+                "device_transmitter_2button_switch": "🔌 EIN/AUS (Schalter)",
+                "device_transmitter_2button_cover": "🏠 AUF/ZU (Rollladen/Jalousie)",
+                "device_transmitter_config": "⬅️ Zurück",
+            },
+        )
+
+    async def async_step_device_transmitter_2button_switch(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 2-button switch usage selection."""
+        self._device_config["usage_type"] = "switch"
+        return await self.async_step_device_transmitter_2button_button_count()
+
+    async def async_step_device_transmitter_2button_cover(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 2-button cover usage selection."""
+        self._device_config["usage_type"] = "cover"
+        return await self.async_step_device_transmitter_2button_button_count()
+
+    async def async_step_device_transmitter_2button_button_count(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure 2-button transmitter button count via menu - 2 or 4 buttons."""
+        usage_type = self._device_config.get("usage_type", "switch")
         
-        if user_input is not None:
-            button_count = int(user_input["button_count"])
-            self._device_config = {
-                "device_type": "ew_transmitter",
-                "button_count": button_count,
-                "channels": button_count
-            }
-            return await self.async_step_device_transmitter_description()
+        if usage_type == "switch":
+            two_btn_desc = "🔘🔘 2 Tasten → 1 Schalter (A→AN, B→AUS)"
+            four_btn_desc = "🔘🔘🔘🔘 4 Tasten → 2 Schalter"
+        else:
+            two_btn_desc = "🔘🔘 2 Tasten → 1 Rollladen (A→AUF, B→ZU)"
+            four_btn_desc = "🔘🔘🔘🔘 4 Tasten → 2 Rollladen"
         
-        data_schema = vol.Schema({
-            vol.Required("button_count", default="4"): vol.In({
-                "1": "🔘 Eintaster (1 Taste)",
-                "2": "🔘🔘 Zweitaster (2 Tasten)", 
-                "3": "🔘🔘🔘 Dreitaster (3 Tasten A/B/C)",
-                "4": "🔘🔘🔘🔘 Viertaster (4 Tasten A/B/C/D)"
-            })
-        })
+        return self.async_show_menu(
+            step_id="device_transmitter_2button_button_count",
+            menu_options={
+                "device_transmitter_2button_2": two_btn_desc,
+                "device_transmitter_2button_4": four_btn_desc,
+                "device_transmitter_2button_usage": "⬅️ Zurück",
+            },
+        )
+
+    async def async_step_device_transmitter_2button_2(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 2 buttons selection for 2-button mode."""
+        usage_type = self._device_config.get("usage_type", "switch")
+        self._device_config["button_count"] = 2
+        self._device_config["channels"] = 2
+        self._device_config["grouping_mode"] = "single"
+        self._device_config["switch_mode"] = usage_type
+        return await self.async_step_device_transmitter_description()
+
+    async def async_step_device_transmitter_2button_4(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 4 buttons selection for 2-button mode."""
+        usage_type = self._device_config.get("usage_type", "switch")
+        self._device_config["button_count"] = 4
+        self._device_config["channels"] = 4
+        self._device_config["grouping_mode"] = "dual"
+        self._device_config["switch_mode"] = usage_type
+        return await self.async_step_device_transmitter_description()
+
+
+    async def async_step_device_transmitter_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show learning menu for EW-Sender with start/cancel options."""
+        button_count = self._device_config.get("button_count", 4)
+        operating_type = self._device_config.get("operating_type", "1")
         
-        return self.async_show_form(
-            step_id="device_transmitter_config",
-            data_schema=data_schema,
-            errors=errors,
+        # Get coordinator to retrieve next sender index
+        entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
+        coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+        
+        sender_index = "?"
+        if coordinator:
+            sender_index = str(coordinator.get_next_ew_sender_index())
+        
+        # Store description placeholders for use in strings.json
+        return self.async_show_menu(
+            step_id="device_transmitter_description",
+            menu_options={
+                "device_transmitter_learn_start": "▶️ Lernen starten",
+                "device_transmitter_config": "⬅️ Zurück",
+            },
             description_placeholders={
-                "instructions": (
-                    f"**⚙️ EW-Transmitter Konfiguration**\n\n"
-                    f"Wählen Sie die Anzahl der Tasten, die Ihr Handsender hat.\n"
-                    f"Im nächsten Schritt erhalten Sie Anweisungen zum Einlernen.\n\n"
-                    f"Für jeden Taster wird automatisch eine binary_sensor Entität erstellt."
-                )
+                "button_count": str(button_count),
+                "operating_type": operating_type,
+                "sender_index": sender_index,
             }
         )
 
+    async def async_step_device_transmitter_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Start transmitter learning - intermediate step to allow transition to progress."""
+        return await self.async_step_device_transmitter_learn_progress()
 
-
-    async def async_step_device_transmitter_learn(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle EW-Transmitter learning after button count configuration."""
-        # This method is for direct progression - go to the actual learning step
-        # Get coordinator
+    async def async_step_device_transmitter_learn_progress(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show progress indicator during transmitter learning."""
         entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
         coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
 
         if not coordinator:
             return self.async_abort(reason="transceiver_not_available")
 
-        # Start progress indicator
-        button_count = self._device_config.get("button_count", 4)
-        progress_task = self.async_show_progress(
-            step_id="device_transmitter_learn",
-            progress_action="waiting_for_transmitter_telegram"
-        )
-        
-        _LOGGER.info("=== TRANSMITTER LEARNING START ===")
+        # Initialize learning task if not started
+        if self._transmitter_learn_task is None:
+            self._transmitter_learn_task = self.hass.async_create_task(
+                self._do_transmitter_learning_with_timeout(coordinator)
+            )
 
-        # Wait for telegram using the central learning helper
-        _LOGGER.info("Waiting for transmitter telegram...")
+        # If task finished, route to next step
+        if self._transmitter_learn_task.done():
+            result = "error"
+            try:
+                result = self._transmitter_learn_task.result()
+            except asyncio.CancelledError:
+                result = "cancelled"
+            except Exception as e:
+                _LOGGER.error("Learning task error: %s", e)
+                result = "error"
+            finally:
+                self._transmitter_learn_task = None
+
+            if result == "success":
+                return self.async_show_progress_done(next_step_id="device_confirm")
+            if result == "timeout":
+                return self.async_show_progress_done(next_step_id="device_transmitter_learn_timeout")
+            if result == "already_exists":
+                return self.async_show_progress_done(next_step_id="device_transmitter_already_exists")
+            if result == "cancelled":
+                return self.async_show_progress_done(next_step_id="device_transmitter_description")
+            return self.async_abort(reason="unknown")
+
+        return self.async_show_progress(
+            step_id="device_transmitter_learn_progress",
+            progress_action="waiting_for_transmitter_telegram",
+            progress_task=self._transmitter_learn_task,
+        )
+
+    async def _do_transmitter_learning_with_timeout(self, coordinator) -> str:
+        """Run transmitter learning with an enforced timeout for progress UI."""
+        try:
+            # Add a small buffer to ensure the task completes and the UI advances
+            return await asyncio.wait_for(
+                self._do_transmitter_learning(coordinator),
+                timeout=LEARNING_TIMEOUT_SECONDS + 2,
+            )
+        except asyncio.TimeoutError:
+            return "timeout"
+
+
+
+    async def _do_transmitter_learning(self, coordinator) -> str:
+        """Perform transmitter learning in background task."""
+        _LOGGER.info("=== TRANSMITTER LEARNING START ===")
+        
         try:
             def _match_transmitter(dev: dict) -> Optional[dict]:
-                # Accept both 'type' and 'device_type' markers and InfoType==1
                 is_transmitter = (
                     dev.get("type") == "ew_transmitter"
                     or dev.get("device_type") == "transmitter"
@@ -377,23 +571,48 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return dev
                 return None
 
-            # Start setup mode for device registration
-            coordinator.start_setup_mode(timeout_seconds=180)
+            coordinator.start_setup_mode(timeout_seconds=LEARNING_TIMEOUT_SECONDS)
             
-            learned = await run_learning(coordinator, _match_transmitter, timeout=180)
+            learned = await run_learning(coordinator, _match_transmitter, timeout=LEARNING_TIMEOUT_SECONDS)
 
             if learned:
-                _LOGGER.info("Transmitter Telegramm-Event empfangen: %s", learned)
+                _LOGGER.info("Transmitter Telegramm empfangen: %s", learned)
                 received_serial = learned.get("serial_number", learned.get("serial", "?"))
-                _LOGGER.info("📡 EW-Transmitter empfangen - Seriennummer: %s", received_serial)
+                
+                # Get next sender index for name
+                sender_index = coordinator.get_next_ew_sender_index()
+
+                if received_serial in coordinator.devices:
+                    self._learned_device = {
+                        "name": f"EW-Sender #{sender_index}",
+                        "serial_number": received_serial,
+                        "type": "ew_transmitter",
+                        "device_type": "ew_transmitter",
+                    }
+                    coordinator.stop_setup_mode()
+                    return "already_exists"
+                
+                # Get configuration from previous steps
+                operating_type = self._device_config.get("operating_type", "1")
+                grouping_mode = self._device_config.get("grouping_mode", "single")
+                switch_mode = self._device_config.get("switch_mode", "impulse")
+                usage_type = self._device_config.get("usage_type", "switch")
+                cover_mode = self._device_config.get("cover_mode", False)
+                
+                
                 
                 self._learned_device = {
-                    "name": learned.get("name", f"EW-Transmitter {received_serial[-6:] if received_serial != '?' else '?'}"),
+                    "name": f"EW-Sender #{sender_index}",
                     "serial_number": received_serial,
                     "type": "ew_transmitter",
                     "device_type": "ew_transmitter",
                     "button_count": self._device_config.get("button_count", 4),
                     "channels": self._device_config.get("channels", 4),
+                    "operating_type": operating_type,
+                    "grouping_mode": grouping_mode,
+                    "switch_mode": switch_mode,
+                    "usage_type": usage_type,
+                    "cover_mode": cover_mode,
                     "last_telegram": {
                         "info_type": learned.get("info_type"),
                         "button": learned.get("button"),
@@ -402,58 +621,45 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "timestamp": learned.get("timestamp"),
                     },
                 }
-                _LOGGER.info("ConfigFlow: self._learned_device gesetzt: %s", self._learned_device)
-                # Direkt speichern ohne Bestätigung
-                return await self.async_step_device_save()
+                coordinator.stop_setup_mode()
+                return "success"
                 
-            _LOGGER.warning("Kein Telegramm-Event empfangen (learning_timeout)")
             coordinator.stop_setup_mode()
-            return self.async_abort(reason="learning_timeout")
+            return "timeout"
             
+        except asyncio.CancelledError:
+            coordinator.stop_setup_mode()
+            raise
         except Exception as e:
             _LOGGER.error("Error in transmitter learning: %s", e, exc_info=True)
-            coordinator._config_flow_learning = False
             coordinator.stop_setup_mode()
-            return self.async_abort(reason="unknown")
+            return "error"
 
-    async def async_step_device_transmitter_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Show detailed learning instructions for EW-Transmitter."""
-        if user_input is not None:
-            action = user_input.get("action")
-            if action == "start_learning":
-                return await self.async_step_device_transmitter_learn()
-            elif action == "cancel":
-                return self.async_abort(reason="user_cancelled")
-        
-        button_count = self._device_config.get("button_count", 4)
-        
-        return self.async_show_form(
-            step_id="device_transmitter_description",
-            data_schema=vol.Schema({
-                vol.Required("action", default="start_learning"): vol.In({
-                    "start_learning": "▶️ Einlernen starten",
-                    "cancel": "❌ Abbrechen"
-                })
-            }),
+    async def async_step_device_transmitter_learn_timeout(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show timeout menu with retry/cancel options."""
+        return self.async_show_menu(
+            step_id="device_transmitter_learn_timeout",
+            menu_options={
+                "device_transmitter_learn_start": "🔄 Erneut versuchen",
+                "device_transmitter_description": "⬅️ Zurück zur Konfiguration",
+            },
+        )
+
+    async def async_step_device_transmitter_already_exists(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show info that device already exists."""
+        serial_number = "?"
+        if self._learned_device:
+            serial_number = self._learned_device.get("serial_number", "?")
+
+        return self.async_show_menu(
+            step_id="device_transmitter_already_exists",
+            menu_options={
+                "device_transmitter_learn_start": "🔄 Anderen Sender einlernen",
+                "device_transmitter_description": "⬅️ Zurück",
+            },
             description_placeholders={
-                "instructions": (
-                    f"🎛️ **EW-Transmitter Einlernen**\n\n"
-                    f"**📋 Konfiguration:**\n"
-                    f"• Tastenanzahl: {button_count}\n"
-                    f"• Typ: EW-Transmitter (Handsender/Fernbedienung)\n\n"
-                    f"**📡 Lernvorgang:**\n\n"
-                    f"**1.** Klicken Sie auf 'Einlernen starten'\n"
-                    f"**2.** Drücken Sie anschließend eine beliebige Taste am EW-Transmitter\n"
-                    f"**3.** Das System wartet bis zu 3 Minuten auf das Funksignal\n"
-                    f"**4.** Nach Empfang werden die Geräteinformationen angezeigt\n"
-                    f"**5.** Bestätigen Sie die Erstellung des Geräts\n\n"
-                    f"⚡ **Was wird erstellt:**\n"
-                    f"• Ein EW-Transmitter Gerät\n"
-                    f"• {button_count} Tasten-Entitäten (eine pro Taste)\n"
-                    f"• Automatische Statusaktualisierung bei Tastendruck\n\n"
-                    f"🔴 **Wichtig:** Halten Sie den EW-Transmitter bereit!"
-                )
-            }
+                "serial": serial_number[-8:] if len(serial_number) > 8 else serial_number,
+            },
         )
 
     async def async_step_device_sensor(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -461,106 +667,103 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_device_sensor_description()
 
     async def async_step_device_sensor_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Show detailed learning instructions for EW-Sensor."""
-        if user_input is not None:
-            action = user_input.get("action")
-            if action == "start_learning":
-                return await self.async_step_device_sensor_start()
-            elif action == "cancel":
-                return self.async_abort(reason="user_cancelled")
-        
-        return self.async_show_form(
+        """Show learning menu for EWneo-Sensor with start/cancel options."""
+        return self.async_show_menu(
             step_id="device_sensor_description",
-            data_schema=vol.Schema({
-                vol.Required("action", default="start_learning"): vol.In({
-                    "start_learning": "▶️ Einlernen starten",
-                    "cancel": "❌ Abbrechen"
-                })
-            }),
-            description_placeholders={
-                "instructions": (
-                    "🌡️ **EWneo-Sensoren Einlernen**\n\n"
-                    "**📋 Gerätetyp:** EWneo-Sensoren (Temperatur/Feuchtigkeit/Wetter)\n\n"
-                    "**📡 Lernvorgang:**\n\n"
-                    "**1.** Klicken Sie auf 'Einlernen starten'\n"
-                    "**2.** Betätigen Sie anschließend die Lerntaste am EWneo-Sensoren\n"
-                    "**3.** Das System wartet bis zu 3 Minuten auf das Lerntelegramm\n"
-                    "**4.** Nach Empfang werden die Sensorinformationen angezeigt\n"
-                    "**5.** Bestätigen Sie die Erstellung des Sensors\n\n"
-                    "📊 **Automatische Erkennung:**\n"
-                    "• 🌡️ Temperatur-Sensor (falls verfügbar)\n"
-                    "• 💧 Feuchtigkeits-Sensor (falls verfügbar)\n"
-                    "• ☔ Regen-Sensor (falls verfügbar)\n"
-                    "• 💨 Wind-Sensor (falls verfügbar)\n"
-                    "• 🔋 Batterie-Status wird überwacht\n\n"
-                    "⚡ **Was wird erstellt:**\n"
-                    "• Ein EWneo-Sensoren Gerät\n"
-                    "• Automatische Sensor-Entitäten für alle erkannten Messgrößen\n"
-                    "• Regelmäßige Aktualisierung bei empfangenen Telegrammen\n\n"
-                    "🔴 **Wichtig:** Halten Sie den EWneo-Sensoren mit der Lerntaste bereit!"
-                )
-            }
+            menu_options={
+                "device_sensor_learn_start": "▶️ Lernen starten",
+                "device_type_select": "⬅️ Zurück",
+            },
         )
 
-    async def async_step_device_sensor_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Start EW-Sensor learning after description display."""
-        return await self.async_step_device_sensor_learn_actual()
+    async def async_step_device_sensor_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Start sensor learning - intermediate step to allow transition to progress."""
+        return await self.async_step_device_sensor_learn_progress()
 
-    async def async_step_device_sensor_learn_actual(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Wait for sensor telegram with progress indicator."""
-        # Get coordinator
+    async def async_step_device_sensor_learn_progress(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show progress indicator during sensor learning with cancel option."""
         entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
         coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
 
         if not coordinator:
             return self.async_abort(reason="transceiver_not_available")
 
-        # Start progress indicator
-        progress_task = self.async_show_progress(
-            step_id="device_sensor_learn_actual",
-            progress_action="waiting_for_sensor_telegram"
-        )
+        # Initialize learning task if not started
+        if not hasattr(self, '_sensor_learn_task') or self._sensor_learn_task is None:
+            self._sensor_learn_task = self.hass.async_create_task(
+                self._do_sensor_learning(coordinator)
+            )
+            # Show progress - this will wait for the task to complete
+            return self.async_show_progress(
+                step_id="device_sensor_learn_progress",
+                progress_action="waiting_for_sensor_telegram",
+                    progress_task=self._sensor_learn_task,
+            )
         
-        _LOGGER.info("=== SENSOR LEARNING START ===")
+        # Check if learning task is done (called when progress is done)
+        if self._sensor_learn_task.done():
+            result = "error"
+            try:
+                result = self._sensor_learn_task.result()
+            except asyncio.CancelledError:
+                result = "cancelled"
+            except Exception as e:
+                _LOGGER.error("Sensor learning task error: %s", e)
+                result = "error"
+            finally:
+                self._sensor_learn_task = None
+            
+            if result == "success":
+                return self.async_show_progress_done(next_step_id="device_confirm")
+            elif result == "timeout":
+                return self.async_show_progress_done(next_step_id="device_sensor_learn_timeout")
+            elif result == "cancelled":
+                return self.async_show_progress_done(next_step_id="device_sensor_description")
+            else:
+                return self.async_abort(reason="unknown")
+        
+        # Still waiting - show progress
+        return self.async_show_progress(
+            step_id="device_sensor_learn_progress",
+            progress_action="waiting_for_sensor_telegram",
+            progress_task=self._sensor_learn_task,
+        )
 
-        # Wait for sensor telegram using the central learning helper
-        _LOGGER.info("Waiting for EWneo-Sensoren LEARN telegram...")
+
+    async def _do_sensor_learning(self, coordinator) -> str:
+        """Perform sensor learning in background task."""
+        _LOGGER.info("=== SENSOR LEARNING START ===")
+        
         try:
             def _match_sensor(dev: dict) -> Optional[dict]:
-                # Only accept EWneo sensor LEARN telegrams (not measurement telegrams)
                 is_sensor = (
                     dev.get("type") == "ew_sensor"
+                    or dev.get("type") == "ewneo_sensor"
                     or dev.get("device_type") == "sensor"
-                    or dev.get("info_type") == 2  # Sensor info type
+                    or dev.get("device_type") == "ewneo_sensor"
+                    or dev.get("info_type") == 2
                 )
-                # CRITICAL: Only accept learn telegrams, reject normal measurement telegrams
                 is_learn = dev.get("is_learn_telegram", False)
                 
+                # Only accept LEARN telegrams, not regular sensor data telegrams
                 if is_sensor and is_learn and not dev.get("added_manually", False):
-                    _LOGGER.info("✅ EWneo-Sensoren Learn-Telegramm erkannt: %s", dev.get("serial_number", "?  ")[-6:])
+                    _LOGGER.info("✅ EWneo-Sensor Learn-Telegramm erkannt: %s", dev.get("serial_number", "?")[-6:])
                     return dev
                 elif is_sensor and not is_learn:
-                    _LOGGER.info("⏭️ EWneo-Sensoren Messwert-Telegramm ignoriert (nur Lerntelegramme werden akzeptiert): %s", dev.get("serial_number", "?")[-6:])
+                    _LOGGER.debug("⏭️ Messwert-Telegramm ignoriert (kein Lerntelegramm): %s", dev.get("serial_number", "?")[-6:])
                 return None
 
-            # Start setup mode for device registration
-            coordinator.start_setup_mode(timeout_seconds=180)
+            coordinator.start_setup_mode(timeout_seconds=LEARNING_TIMEOUT_SECONDS)
             
-            learned = await run_learning(coordinator, _match_sensor, timeout=180)
+            learned = await run_learning(coordinator, _match_sensor, timeout=LEARNING_TIMEOUT_SECONDS)
 
             if learned:
-                _LOGGER.info("Sensor Telegramm-Event empfangen: %s", learned)
+                _LOGGER.info("Sensor Telegramm empfangen: %s", learned)
                 
-                # Extract available sensors from learn telegram
                 available_sensors = learned.get("available_sensors", [])
                 measurement_types = learned.get("measurement_types", [])
                 sensor_capabilities = learned.get("sensor_capabilities", [])
                 
-                _LOGGER.info("📋 Parsed sensor data: available_sensors=%s, measurement_types=%s, sensor_capabilities=%s",
-                           available_sensors, measurement_types, sensor_capabilities)
-                
-                # Determine sensor types from telegram data
-                # Use sensor_capabilities as it includes battery
                 detected_sensors = set()
                 if sensor_capabilities:
                     detected_sensors.update(sensor_capabilities)
@@ -569,32 +772,23 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 elif measurement_types:
                     detected_sensors.update(measurement_types)
                 
-                # Log what was detected
-                if detected_sensors:
-                    _LOGGER.info("✅ Detected sensor capabilities from learn telegram: %s", detected_sensors)
-                else:
-                    _LOGGER.warning("⚠️ No sensor capabilities detected in learn telegram! Telegram may be incomplete.")
-                
                 received_serial = learned.get("serial_number", learned.get("serial", "?"))
-                _LOGGER.info("📡 EW-Sensor empfangen - Seriennummer: %s", received_serial)
                 
-                # Convert sensor capabilities to sensor_types for new EWneoSensor class
-                sensor_types = []
-                for sensor_cap in detected_sensors:
-                    # Skip battery - it's handled separately
-                    if sensor_cap != "battery":
-                        sensor_types.append(sensor_cap)
+                sensor_types = [s for s in detected_sensors if s != "battery"]
                 
+                next_index = getattr(coordinator, "_next_ewneo_sensor_index", 1)
+                display_name = f"EWneo-Sensor #{next_index}"
+
                 self._learned_device = {
-                    "name": learned.get("name", f"EWneo-Sensoren {received_serial[-6:] if received_serial != '?' else '?'}"),
+                    "name": display_name,
                     "serial_number": received_serial,
-                    "type": "ewneo_sensor",  # WICHTIG: ewneo_sensor statt ew_sensor
+                    "type": "ewneo_sensor",
                     "device_type": "ewneo_sensor",
                     "is_learn_telegram": True,
                     "available_sensors": list(detected_sensors),
                     "measurement_types": measurement_types,
                     "sensor_capabilities": sensor_capabilities,
-                    "sensor_types": sensor_types,  # NEU: Für neue EWneoSensor Klasse
+                    "sensor_types": sensor_types,
                     "has_battery": True,
                     "battery_level": learned.get("battery_level", 100),
                     "last_telegram": {
@@ -604,19 +798,29 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 }
                 
-                _LOGGER.info("EWneo-Sensoren configured with sensor_types: %s", sensor_types)
-                # Direkt speichern ohne Bestätigung
-                return await self.async_step_device_save()
+                coordinator.stop_setup_mode()
+                return "success"
             
-            _LOGGER.warning("Kein Sensor-Telegramm empfangen (learning_timeout)")
             coordinator.stop_setup_mode()
-            return self.async_abort(reason="learning_timeout")
+            return "timeout"
             
+        except asyncio.CancelledError:
+            coordinator.stop_setup_mode()
+            raise
         except Exception as e:
             _LOGGER.error("Error in sensor learning: %s", e, exc_info=True)
-            coordinator._config_flow_learning = False
             coordinator.stop_setup_mode()
-            return self.async_abort(reason="unknown")
+            return "error"
+
+    async def async_step_device_sensor_learn_timeout(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show timeout menu with retry/cancel options for sensor learning."""
+        return self.async_show_menu(
+            step_id="device_sensor_learn_timeout",
+            menu_options={
+                "device_sensor_learn_start": "🔄 Erneut versuchen",
+                "device_sensor_description": "⬅️ Zurück",
+            },
+        )
 
     async def async_step_device_receiver(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure EW receiver device - Load next available receiver from RX11."""
@@ -656,186 +860,149 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="receiver_load_failed")
 
     async def async_step_device_receiver_type(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EW receiver device - Step 1: Select device type."""
-        if user_input is not None:
-            device_type = user_input.get("receiver_type")
-            self._device_config["receiver_kind"] = device_type
-            
-            # Update device name with receiver type
-            rx11_index = self._device_config.get("rx11_index", 0)
-            type_names = {
-                "switch": "Switch",
-                "motor": "Motor",
-                "heating_cooling": "Heizung"
-            }
-            type_name = type_names.get(device_type, "Receiver")
-            self._device_config["name"] = f"EW-{type_name} (Index {rx11_index})"
-            
-            # For heating/cooling, skip operating mode selection - always use toggle (mode 1)
-            if device_type == "heating_cooling":
-                self._device_config["operating_mode"] = 1  # Force toggle mode for heating/cooling
-                return await self.async_step_device_receiver_confirm()
-            else:
-                return await self.async_step_device_receiver_operating_mode()
-            
-        serial = self._device_config.get("serial_number", "Unbekannt")
+        """Configure EW receiver device - Step 1: Select device type via menu."""
+        serial = self._device_config.get("serial_number", "Unknown")
         name = self._device_config.get("name", "EW-Receiver")
         
-        return self.async_show_form(
+        return self.async_show_menu(
             step_id="device_receiver_type",
-            data_schema=vol.Schema({
-                vol.Required("receiver_type"): vol.In({
-                    "switch": "🔌 Schalter",
-                    "motor": "🏠 Motor/Rollo",
-                    "heating_cooling": "🌡️ Heizen/Kühlen (nur Toggle-Bedienung)"
-                })
-            }),
+            menu_options={
+                "device_receiver_type_switch": "🔌 Switch",
+                "device_receiver_type_motor": "🏠 Motor/Cover",
+                "device_receiver_type_heating": "🌡️ Heating/Cooling",
+                "device_type_select": "⬅️ Zurück",
+            },
             description_placeholders={
                 "device_name": name,
-                "serial": serial[-12:] if serial else "Unbekannt",
-                "instructions": (
-                    f"📥 **EW-Receiver Konfiguration - Schritt 1/3**\n\n"
-                    f"**📋 Geräteinformationen:**\n"
-                    f"• Gerät: {name}\n"
-                    f"• Seriennummer: {serial[-12:] if serial else 'Unbekannt'}\n"
-                    f"• Typ: EW-Receiver (Schaltaktor)\n\n"
-                    f"**🎛️ Gerätetyp auswählen:**\n\n"
-                    f"**🔌 Schalter:** Standard Ein/Aus-Schaltung für Beleuchtung, Steckdosen, etc.\n"
-                    f"**🏠 Motor/Rollo:** Steuerung für Rollläden, Jalousien, Markisen mit Auf/Ab/Stopp\n"
-                    f"**🌡️ Heizen/Kühlen:** Temperaturregelung für Heizungen, Klimaanlagen mit Toggle-Bedienung (automatische 4h Wiederholung)\n\n"
-                    f"💡 **Hinweis:** Der gewählte Gerätetyp bestimmt die verfügbaren Steuerungsoptionen und Button-Konfigurationen."
-                )
+                "serial": serial[-12:] if serial else "Unknown",
             }
         )
+
+    async def async_step_device_receiver_type_switch(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle switch receiver type selection."""
+        rx11_index = self._device_config.get("rx11_index", 0)
+        self._device_config["receiver_kind"] = "switch"
+        self._device_config["name"] = f"EW-Schalter #{rx11_index + 1}"
+        return await self.async_step_device_receiver_operating_mode()
+
+    async def async_step_device_receiver_type_motor(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle motor receiver type selection."""
+        rx11_index = self._device_config.get("rx11_index", 0)
+        self._device_config["receiver_kind"] = "motor"
+        self._device_config["name"] = f"EW-Motor #{rx11_index + 1}"
+        return await self.async_step_device_receiver_operating_mode()
+
+    async def async_step_device_receiver_type_heating(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle heating/cooling receiver type selection."""
+        rx11_index = self._device_config.get("rx11_index", 0)
+        self._device_config["receiver_kind"] = "heating_cooling"
+        self._device_config["name"] = f"EW-Heizung #{rx11_index + 1}"
+        self._device_config["operating_mode"] = 1  # Force toggle mode for heating/cooling
+        return await self.async_step_device_receiver_confirm()
         
     async def async_step_device_receiver_operating_mode(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EW receiver device - Step 2: Select operating mode."""
-        if user_input is not None:
-            operating_mode = user_input.get("operating_mode")
-            self._device_config["operating_mode"] = operating_mode
-            return await self.async_step_device_receiver_confirm()
-            
+        """Configure EW receiver device - Step 2: Select operating mode via menu."""
         receiver_kind = self._device_config.get("receiver_kind", "switch")
-        serial = self._device_config.get("serial_number", "Unbekannt")
+        description_placeholders = self._get_receiver_operating_mode_placeholders()
         
-        # Different operating modes based on device type
-        if receiver_kind == "heating_cooling":
-            # Heating/Cooling: Only toggle operation (mode 1)
-            mode_options = {
-                1: "🔘 Toggle-Bedienung (Ein/Aus mit automatischer Wiederholung)"
-            }
-            type_desc = "Heizen/Kühlen (Temperaturregelung)"
-            mode_descriptions = {
-                1: "**Toggle-Bedienung:** Eine Taste für Ein/Aus-Steuerung\n• Toggle zwischen Ein/Aus\n• Automatische Statuswiederholung alle 4 Stunden\n• Einfache und zuverlässige Bedienung"
-            }
-        elif receiver_kind == "switch":
-            # Switch: 1 or 2 button operation
-            mode_options = {
-                1: "🔘 1-Tast-Bedienung (Toggle)",
-                2: "🔘🔘 2-Tast-Bedienung (Ein + Aus)"
-            }
-            type_desc = "Schalter (Ein/Aus-Steuerung)"
-            mode_descriptions = {
-                1: "**1-Tast-Bedienung:** Eine Taste wechselt zwischen Ein und Aus\n• Einfache Toggle-Funktion\n• Ideal für Lichtschalter",
-                2: "**2-Tast-Bedienung:** Separate Tasten für Ein und Aus\n• Ein-Button: Gerät einschalten\n• Aus-Button: Gerät ausschalten\n• Präzise Kontrolle"
-            }
+        # Different menu options based on device type
+        if receiver_kind == "switch":
+            return self.async_show_menu(
+                step_id="device_receiver_operating_mode",
+                menu_options={
+                    "device_receiver_mode_1": "🔘 1-Tast (Toggle)",
+                    "device_receiver_mode_2": "🔘🔘 2-Tast (An + Aus)",
+                    "device_receiver_type": "⬅️ Zurück",
+                },
+                description_placeholders=description_placeholders,
+            )
         elif receiver_kind == "motor":
-            # Motor: 1, 2 or 3 button operation
-            mode_options = {
-                1: "🔘 1-Tast-Bedienung (Toggle)",
-                2: "🔘🔘 2-Tast-Bedienung (Ein + Aus)",
-                3: "🔘🔘🔘 3-Tast-Bedienung (Auf + Zu + Stopp)"
-            }
-            type_desc = "Motor/Rollo (Auf/Ab-Steuerung)"
-            mode_descriptions = {
-                1: "**1-Tast-Bedienung:** Eine Taste für Start/Stopp\n• Toggle-Funktion für Motor\n• Einfache Bedienung",
-                2: "**2-Tast-Bedienung:** Auf und Ab ohne separaten Stopp\n• Auf-Button: Motor vorwärts\n• Ab-Button: Motor rückwärts\n• Stopp durch nochmaliges Drücken",
-                3: "**3-Tast-Bedienung:** Auf, Ab und separater Stopp\n• Auf-Button: Motor vorwärts\n• Ab-Button: Motor rückwärts\n• Stopp-Button: Sofortiger Halt"
-            }
+            return self.async_show_menu(
+                step_id="device_receiver_operating_mode",
+                menu_options={
+                    "device_receiver_mode_1": "🔘 1-Tast (Toggle)",
+                    "device_receiver_mode_2": "🔘🔘 2-Tast (Auf + Zu)",
+                    "device_receiver_mode_3": "🔘🔘🔘 3-Tast (Auf + Zu + Stopp)",
+                    "device_receiver_type": "⬅️ Zurück",
+                },
+                description_placeholders=description_placeholders,
+            )
         else:
             # Fallback
-            mode_options = {
-                1: "🔘 1-Tast-Bedienung",
-                2: "🔘🔘 2-Tast-Bedienung"
-            }
-            type_desc = "Empfänger"
-            mode_descriptions = {
-                1: "**1-Tast-Bedienung:** Eine Steuerungstaste",
-                2: "**2-Tast-Bedienung:** Zwei Steuerungstasten"
-            }
-        
-        # Generate combined description
-        mode_desc_text = "\n\n".join([f"{desc}" for mode, desc in mode_descriptions.items() if mode in mode_options])
-            
-        return self.async_show_form(
-            step_id="device_receiver_operating_mode",
-            data_schema=vol.Schema({
-                vol.Required("operating_mode"): vol.In(mode_options)
-            }),
-            description_placeholders={
-                "device_name": self._device_config.get("name", "EW-Receiver"),
-                "receiver_kind": type_desc,
-                "instructions": (
-                    f"📥 **EW-Receiver Konfiguration - Schritt 2/3**\n\n"
-                    f"**📋 Gewählter Gerätetyp:** {type_desc}\n\n"
-                    f"**🎛️ Betriebsart auswählen:**\n\n"
-                    f"{mode_desc_text}\n\n"
-                    f"💡 **Hinweis:** Die Betriebsart bestimmt, welche Buttons in Home Assistant erstellt werden und wie der Empfänger gesteuert wird."
-                )
-            }
-        )
+            return self.async_show_menu(
+                step_id="device_receiver_operating_mode",
+                menu_options={
+                    "device_receiver_mode_1": "🔘 1-Tast",
+                    "device_receiver_mode_2": "🔘🔘 2-Tast",
+                    "device_receiver_type": "⬅️ Zurück",
+                },
+                description_placeholders=description_placeholders,
+            )
+
+    async def async_step_device_receiver_mode_1(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 1-button operating mode selection."""
+        self._device_config["operating_mode"] = 1
+        return await self.async_step_device_receiver_confirm()
+
+    async def async_step_device_receiver_mode_2(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 2-button operating mode selection."""
+        self._device_config["operating_mode"] = 2
+        return await self.async_step_device_receiver_confirm()
+
+    async def async_step_device_receiver_mode_3(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle 3-button operating mode selection."""
+        self._device_config["operating_mode"] = 3
+        return await self.async_step_device_receiver_confirm()
         
     async def async_step_device_receiver_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EW receiver device - Step 3: Confirmation and learning mode."""
-        if user_input is not None:
-            action = user_input.get("action")
-            if action == "confirm":
-                # Send Code A and mark receiver as used
-                try:
-                    entries = self.hass.config_entries.async_entries(DOMAIN)
-                    coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
-                    serial = self._device_config.get("serial_number")
-                    rx11_index = self._device_config.get("rx11_index")
-                    
-                    if coordinator and coordinator.transceiver and serial and rx11_index is not None:
-                        # Try to send Code A to real hardware
-                        try:
-                            success = await coordinator.transceiver.send_command_to_receiver(serial, bytes([0]))
-                            if success:
-                                _LOGGER.info("✅ Code A sent successfully to receiver %s", serial[-8:])
-                            else:
-                                _LOGGER.warning("⚠️ Code A sending failed, but continuing with device creation")
-                        except Exception as e:
-                            _LOGGER.warning("⚠️ Code A sending error (continuing): %s", e)
-                        
-                        # Mark receiver as used persistently in coordinator
-                        device_name = self._device_config.get("name", f"EW-Receiver (Index {rx11_index})")
-                        coordinator.mark_ew_receiver_index_used(rx11_index, serial, serial, device_name)
-                        _LOGGER.info("🔒 Marked receiver as used persistently: Index %d", rx11_index)
-                    
-                    # Always create the device
-                    self._device_config.update({
-                        "device_type": "ew_receiver",
-                        "type": "ew_receiver",  # Add type field for consistency
-                        "entity_type": "button"  # Always create button entities
-                    })
-                    _LOGGER.info("✅ Creating EW-Receiver device with serial: %s", serial[-8:] if serial else "Unknown")
-                    return await self.async_step_device_save()
-                    
-                except Exception as e:
-                    _LOGGER.error("Error in device creation: %s", e)
-                    return self.async_show_form(
-                        step_id="device_receiver_confirm",
-                        errors={"base": "device_creation_error"},
-                        **self._get_confirm_form_data()
-                    )
-            elif action == "cancel":
-                return self.async_abort(reason="user_cancelled")
-                
-        return self.async_show_form(
+        """Configure EW receiver device - Step 3: Confirmation menu."""
+        confirm_data = self._get_confirm_form_data()
+        
+        return self.async_show_menu(
             step_id="device_receiver_confirm",
-            **self._get_confirm_form_data()
+            menu_options={
+                "device_receiver_create": "✅ Bestätigen & Code A senden",
+                "device_receiver_operating_mode": "⬅️ Zurück zum Modus",
+            },
+            description_placeholders=confirm_data["description_placeholders"],
         )
+
+    async def async_step_device_receiver_create(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Create the EW-Receiver device and send Code A."""
+        try:
+            entries = self.hass.config_entries.async_entries(DOMAIN)
+            coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+            serial = self._device_config.get("serial_number")
+            rx11_index = self._device_config.get("rx11_index")
+            
+            if coordinator and coordinator.transceiver and serial and rx11_index is not None:
+                # Try to send Code A to real hardware
+                try:
+                    success = await coordinator.transceiver.send_command_to_receiver(serial, bytes([0]))
+                    if success:
+                        _LOGGER.info("✅ Code A sent successfully to receiver %s", serial[-8:])
+                    else:
+                        _LOGGER.warning("⚠️ Code A sending failed, but continuing with device creation")
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Code A sending error (continuing): %s", e)
+                
+                # Mark receiver as used persistently in coordinator
+                device_name = self._device_config.get("name", f"EW-Empfänger #{rx11_index + 1}")
+                coordinator.mark_ew_receiver_index_used(rx11_index, serial, serial, device_name)
+                _LOGGER.info("🔒 Marked receiver as used persistently: Index %d", rx11_index)
+            
+            # Always create the device
+            self._device_config.update({
+                "device_type": "ew_receiver",
+                "type": "ew_receiver",
+                "entity_type": "button"
+            })
+            _LOGGER.info("✅ Creating EW-Receiver device with serial: %s", serial[-8:] if serial else "Unknown")
+            return await self.async_step_device_save()
+                
+        except Exception as e:
+            _LOGGER.error("Error in device creation: %s", e)
+            return self.async_abort(reason="device_creation_error")
         
     async def async_step_device_receiver_manual(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Manual EW receiver configuration as fallback."""
@@ -856,7 +1023,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("rx11_index"): int
             }),
             description_placeholders={
-                "instruction": "Geben Sie die Seriennummer des EW-Empfängers manuell ein."
+                "instruction": "Enter the EW-Receiver serial number manually."
             }
         )
         
@@ -865,91 +1032,102 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get form data for confirmation dialog."""
         receiver_kind = self._device_config.get("receiver_kind", "switch")
         operating_mode = self._device_config.get("operating_mode", 1)
-        serial = self._device_config.get("serial_number", "Unbekannt")
+        serial = self._device_config.get("serial_number", "Unknown")
         name = self._device_config.get("name", "EW-Receiver")
-        rx11_index = self._device_config.get("rx11_index", "Unbekannt")
+        rx11_index = self._device_config.get("rx11_index", "Unknown")
         
         # Generate operating mode description
         if receiver_kind == "heating_cooling":
             if operating_mode == 1:
-                mode_desc = "Toggle-Bedienung (Ein/Aus mit 4h-Wiederholung)"
-                button_summary = "• Ein/Aus Toggle Switch\n• Automatische Statuswiederholung alle 4 Stunden"
+                mode_desc = "Toggle (On/Off, 4h repeat)"
+                button_summary = "• On/Off Toggle Switch\n• Auto status repeat every 4 hours"
             else:
-                # Fallback for any non-1 modes (should not happen for heating_cooling now)
-                mode_desc = "Toggle-Bedienung (Ein/Aus mit 4h-Wiederholung)"
-                button_summary = "• Ein/Aus Toggle Switch\n• Automatische Statuswiederholung alle 4 Stunden"
+                mode_desc = "Toggle (On/Off, 4h repeat)"
+                button_summary = "• On/Off Toggle Switch\n• Auto status repeat every 4 hours"
         elif operating_mode == 1:
-            mode_desc = "1-Tast-Bedienung (Toggle)"
+            mode_desc = "1-Button (Toggle)"
             button_summary = "• Toggle Button"
         elif operating_mode == 2:
             if receiver_kind == "switch":
-                mode_desc = "2-Tast-Bedienung (Ein + Aus)"
-                button_summary = "• Ein Button\n• Aus Button"
+                mode_desc = "2-Button (On + Off)"
+                button_summary = "• On Button\n• Off Button"
             elif receiver_kind == "motor":
-                mode_desc = "2-Tast-Bedienung (Ein + Aus)"
-                button_summary = "• Ein Button\n• Aus Button"
+                mode_desc = "2-Button (Up + Down)"
+                button_summary = "• Up Button\n• Down Button"
         elif operating_mode == 3:
-            mode_desc = "3-Tast-Bedienung (Auf + Zu + Stopp)"
-            button_summary = "• Auf Button\n• Zu Button\n• Stopp Button"
+            mode_desc = "3-Button (Up + Down + Stop)"
+            button_summary = "• Up Button\n• Down Button\n• Stop Button"
         else:
-            mode_desc = f"Betriebsmodus {operating_mode}"
-            button_summary = "• Standardkonfiguration"
+            mode_desc = f"Mode {operating_mode}"
+            button_summary = "• Standard configuration"
             
         # Learning mode instructions
         if receiver_kind == "heating_cooling":
-            learn_instructions = "Versetzen Sie den Empfänger in den Lernmodus für Toggle-Bedienung (Ein/Aus)."
+            learn_instructions = "Put receiver in learning mode for toggle operation (On/Off)."
         elif receiver_kind == "motor":
             if operating_mode == 2:
-                learn_instructions = "Versetzen Sie den Empfänger in den 2-Tasten Lernmodus (Auf + Ab)."
+                learn_instructions = "Put receiver in 2-button learning mode (Up + Down)."
             elif operating_mode == 3:
-                learn_instructions = "Versetzen Sie den Empfänger in den 3-Tasten Lernmodus (Auf + Ab + Stopp)."
+                learn_instructions = "Put receiver in 3-button learning mode (Up + Down + Stop)."
             else:
-                learn_instructions = f"Versetzen Sie den Empfänger in den {operating_mode}-Tasten Lernmodus."
+                learn_instructions = f"Put receiver in {operating_mode}-button learning mode."
         else:
-            learn_instructions = f"Versetzen Sie den Empfänger in den {operating_mode}-Tasten Lernmodus."
+            learn_instructions = f"Put receiver in {operating_mode}-button learning mode."
         
         return {
-            "data_schema": vol.Schema({
-                vol.Required("action"): vol.In({
-                    "confirm": "✅ Bestätigen und Code A senden",
-                    "cancel": "❌ Abbrechen"
-                })
-            }),
+            "data_schema": vol.Schema({}),
             "description_placeholders": {
                 "device_name": name,
-                "serial": serial[-12:] if serial else "Unbekannt",
+                "serial": serial[-12:] if serial else "Unknown",
                 "rx11_index": str(rx11_index),
                 "receiver_kind": receiver_kind.replace("_", "/").title(),
                 "operating_mode": mode_desc,
                 "button_summary": button_summary,
                 "learn_instructions": learn_instructions,
-                "instructions": (
-                    f"📥 **EW-Receiver Konfiguration - Schritt 3/3**\n\n"
-                    f"**📋 Konfiguration:**\n"
-                    f"• Gerät: {name}\n"
-                    f"• Seriennummer: {serial[-12:] if serial else 'Unbekannt'}\n"
-                    f"• RX11-Index: {rx11_index}\n"
-                    f"• Gerätetyp: {receiver_kind.replace('_', '/').title()}\n"
-                    f"• Betriebsart: {mode_desc}\n\n"
-                    f"**🎛️ Zu erstellende Buttons:**\n"
-                    f"{button_summary}\n\n"
-                    f"**📡 Lernvorgang:**\n\n"
-                    f"**1.** {learn_instructions}\n"
-                    f"**2.** Klicken Sie auf 'Bestätigen und Code A senden'\n"
-                    f"**3.** Das System sendet Code A zum Einlernen an den Empfänger\n"
-                    f"**4.** Das Gerät wird in Home Assistant angelegt\n\n"
-                    f"💡 **Hinweis:** Nach der Bestätigung wird der Empfänger automatisch konfiguriert und die entsprechenden Button-Entitäten in Home Assistant erstellt."
-                )
             }
         }
 
-    async def async_step_device_ewneo_receiver(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EWneo receiver device with learning process."""
-        # Direkt zum Einlernen springen - kein Gerätetypenauswahl vorher
-        return await self.async_step_device_ewneo_receiver_learn()
+    def _get_receiver_operating_mode_placeholders(self) -> dict[str, str]:
+        """Build description placeholders for the receiver operating mode step."""
+        receiver_kind = self._device_config.get("receiver_kind", "switch")
 
-    async def async_step_device_ewneo_receiver_learn(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Perform the EWneo receiver preparation (index, serial, filter setup)."""
+        if receiver_kind == "switch":
+            receiver_kind_label = "Switch"
+            mode_descriptions = "• 🔘 1-Button (Toggle)\n• 🔘🔘 2-Button (On + Off)"
+        elif receiver_kind == "motor":
+            receiver_kind_label = "Motor/Cover"
+            mode_descriptions = (
+                "• 🔘 1-Button (Toggle)\n"
+                "• 🔘🔘 2-Button (Up + Down)\n"
+                "• 🔘🔘🔘 3-Button (Up + Down + Stop)"
+            )
+        elif receiver_kind == "heating_cooling":
+            receiver_kind_label = "Heating/Cooling"
+            mode_descriptions = "• 🔘 1-Button (Toggle, 4h auto-repeat)"
+        else:
+            receiver_kind_label = receiver_kind.replace("_", "/").title()
+            mode_descriptions = "• 🔘 1-Button\n• 🔘🔘 2-Button"
+
+        return {
+            "receiver_kind": receiver_kind_label,
+            "mode_descriptions": mode_descriptions,
+        }
+
+    async def async_step_device_ewneo_receiver(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure EWneo receiver device - start with preparation."""
+        # Clean up any leftover preparation data
+        if hasattr(self, '_ewneo_preparation'):
+            delattr(self, '_ewneo_preparation')
+        return await self.async_step_device_ewneo_receiver_prepare()
+
+    async def async_step_device_ewneo_receiver_back(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Go back from EWneo receiver description to main menu."""
+        if hasattr(self, '_ewneo_preparation'):
+            delattr(self, '_ewneo_preparation')
+        return await self.async_step_device_type_select(user_input)
+
+    async def async_step_device_ewneo_receiver_prepare(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Step 1: Prepare EWneo receiver learning (get index, gateway serial, set filter)."""
         try:
             # Get coordinator
             entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
@@ -966,6 +1144,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not wrapper.is_connected():
                 return self.async_abort(reason="rx11_not_connected")
 
+            _LOGGER.info("=== EWNEO RECEIVER PREPARATION START ===")
+
             # Step 1: Get next available EWneo index from coordinator's persistent tracking
             _LOGGER.info("🔍 Getting next available EWneo index...")
             try:
@@ -977,7 +1157,6 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.info("✅ Using EWneo index: %d", ewneo_index)
 
             # Step 2: Get gateway serial number for this index
-            # Note: The RX11 has a fixed gateway serial for each index, even if not yet joined
             _LOGGER.info("📡 Loading gateway serial for index %d...", ewneo_index)
             gateway_serial = await coordinator.transceiver.rx11_ewb_get_serial_by_index(ewneo_index)
             
@@ -993,7 +1172,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not filter_success:
                 _LOGGER.warning("⚠️ Failed to add gateway to filter, but continuing...")
 
-            # Store preparation data for next step
+            # Store preparation data for the learning step
             self._ewneo_preparation = {
                 "coordinator": coordinator,
                 "wrapper": wrapper, 
@@ -1004,84 +1183,270 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.info("✅ EWneo preparation completed - Index: %d, Gateway: %s", 
                         ewneo_index, gateway_serial[-8:])
             
-            # Go to learning mode instruction step
-            return await self.async_step_device_ewneo_receiver_learning_mode()
+            # Proceed to description step before learning
+            return await self.async_step_device_ewneo_receiver_description()
 
         except Exception as e:
-            _LOGGER.error("Error during EWneo receiver preparation: %s", e)
+            _LOGGER.error("Error during EWneo preparation: %s", e)
             return self.async_abort(reason="ewneo_learning_failed")
 
-    async def async_step_device_ewneo_receiver_learning_mode(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Instruct user to put EWneo transceiver into learning mode."""
-        if user_input is not None:
-            if user_input.get("action") == "proceed":
-                # User confirmed device is in learning mode, proceed with join
-                return await self.async_step_device_ewneo_receiver_join()
-            else:
-                # User cancelled
-                return self.async_abort(reason="user_cancelled")
-        
-        if not hasattr(self, '_ewneo_preparation') or not self._ewneo_preparation:
-            return self.async_abort(reason="no_preparation_data")
-            
-        ewneo_index = self._ewneo_preparation["ewneo_index"]
-        gateway_serial = self._ewneo_preparation["gateway_serial"]
-        
-        return self.async_show_form(
-            step_id="device_ewneo_receiver_learning_mode",
-            data_schema=vol.Schema({
-                vol.Required("action", default="proceed"): vol.In({
-                    "proceed": "✅ Bereit - Gerät ist im Lernmodus",
-                    "cancel": "❌ Abbrechen"
-                })
-            }),
+    async def async_step_device_ewneo_receiver_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show EWneo receiver description with index and gateway serial before learning."""
+        prep = getattr(self, "_ewneo_preparation", None) or {}
+        ewneo_index = prep.get("ewneo_index")
+        gateway_serial = prep.get("gateway_serial")
+
+        return self.async_show_menu(
+            step_id="device_ewneo_receiver_description",
             description_placeholders={
-                "instructions": (
-                    f"**🔧 EWneo-Transceiver in Lernmodus versetzen**\n\n"
-                    f"**📋 Vorbereitung abgeschlossen:**\n"
-                    f"• EWneo-Index: `{ewneo_index}`\n"
-                    f"• Gateway-Serial: `{gateway_serial[-8:]}`\n"
-                    f"• Empfangsfilter: ✅ Gesetzt\n\n"
-                    f"**⚡ Jetzt erforderlich:**\n\n"
-                    f"1. **Versetzen Sie den EWneo-Transceiver in den Lernmodus:**\n"
-                    f"   • Drücken Sie die **Lerntaste** am EWneo-Gerät\n"
-                    f"   • Die **LED sollte blinken** oder anders signalisieren\n"
-                    f"   • Der Transceiver wartet nun auf Verbindungsaufbau\n\n"
-                    f"2. **Bestätigen Sie, wenn das Gerät bereit ist:**\n"
-                    f"   • Klicken Sie '✅ Bereit' wenn die Lern-LED aktiv ist\n"
-                    f"   • Das System führt dann `EWB_JOIN_DEVICE` aus\n\n"
-                    f"**⚠️ Wichtig:** Der Lernmodus ist zeitlich begrenzt. "
-                    f"Stellen Sie sicher, dass das Gerät bereit ist, bevor Sie fortfahren."
-                )
-            }
+                "ewneo_index": str(ewneo_index) if ewneo_index is not None else "-",
+                "gateway_serial": gateway_serial or "-",
+            },
+            menu_options={
+                "device_ewneo_receiver_learn_start": "▶️ EWneo-Empfänger lernen",
+                "device_ewneo_receiver_back": "⬅️ Zurück",
+            },
         )
 
-    async def async_step_device_ewneo_receiver_join(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Execute the EWB_JOIN_DEVICE command and handle the result."""
+    async def async_step_device_ewneo_receiver_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Start learning - immediately start the task and show progress."""
+        _LOGGER.warning("🔵 async_step_device_ewneo_receiver_learn_start CALLED! user_input=%s", user_input)
+        
+        # Check if preparation data exists
+        if not hasattr(self, '_ewneo_preparation') or not self._ewneo_preparation:
+            _LOGGER.error("❌ No preparation data!")
+            return self.async_abort(reason="no_preparation_data")
+        
+        coordinator = self._ewneo_preparation.get("coordinator")
+        ewneo_index = self._ewneo_preparation.get("ewneo_index")
+        gateway_serial = self._ewneo_preparation.get("gateway_serial")
+        
+        _LOGGER.warning("🔵 Preparation data: index=%s, gateway=%s", ewneo_index, gateway_serial[-8:] if gateway_serial else None)
+        
+        if not coordinator or ewneo_index is None or not gateway_serial:
+            _LOGGER.error("❌ Missing coordinator or index or gateway!")
+            return self.async_abort(reason="no_preparation_data")
+        
+        # Start the learning task immediately
+        _LOGGER.warning("🚀 Starting EWneo learning task from learn_start...")
+        self._ewneo_learn_task = self.hass.async_create_task(
+            self._do_ewneo_receiver_learning_with_timeout(coordinator, ewneo_index, gateway_serial)
+        )
+        
+        _LOGGER.warning("🔵 Task created, showing progress...")
+        
+        # Show progress immediately
+        return self.async_show_progress(
+            step_id="device_ewneo_receiver_learn_progress",
+            progress_action="waiting_for_ewneo_join",
+            progress_task=self._ewneo_learn_task,
+        )
+
+    async def async_step_device_ewneo_receiver_learn_progress(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Step 2: Perform the EWneo receiver learning with progress indicator."""
+        _LOGGER.warning("🟣 async_step_device_ewneo_receiver_learn_progress CALLED!")
+        
+        # Check if preparation data exists
+        if not hasattr(self, '_ewneo_preparation') or not self._ewneo_preparation:
+            _LOGGER.warning("🟣 No preparation data - aborting")
+            return self.async_abort(reason="no_preparation_data")
+        
         try:
-            if not hasattr(self, '_ewneo_preparation') or not self._ewneo_preparation:
-                return self.async_abort(reason="no_preparation_data")
-                
-            coordinator = self._ewneo_preparation["coordinator"]
-            wrapper = self._ewneo_preparation["wrapper"]
-            ewneo_index = self._ewneo_preparation["ewneo_index"]
-            gateway_serial = self._ewneo_preparation["gateway_serial"]
-
-            # Execute EWB_JOIN_DEVICE
-            _LOGGER.info("🔗 Starting EWneo receiver join process...")
-            join_result = await coordinator.transceiver.rx11_ewb_join_device(gateway_serial)
+            coordinator = self._ewneo_preparation.get("coordinator")
+            ewneo_index = self._ewneo_preparation.get("ewneo_index")
+            gateway_serial = self._ewneo_preparation.get("gateway_serial")
             
-            if not join_result:
-                return self.async_abort(reason="ewneo_join_failed")
-                
-            device_type_code, receiver_serial = join_result
-            _LOGGER.info("✅ EWneo receiver joined - Type: 0x%02X, Serial: %s", device_type_code, receiver_serial[-8:])
+            if not coordinator or ewneo_index is None or not gateway_serial:
+                _LOGGER.warning("🟣 Missing data - aborting")
+                return self.async_abort(reason="no_preparation_data")
 
-            # Map device type code to device type string
+            _LOGGER.warning("🟣 Task exists: %s, Task done: %s", 
+                           self._ewneo_learn_task is not None,
+                           self._ewneo_learn_task.done() if self._ewneo_learn_task else "N/A")
+
+            # Initialize learning task if not started
+            if self._ewneo_learn_task is None:
+                _LOGGER.warning("🟣 Task is None - starting new task...")
+                self._ewneo_learn_task = self.hass.async_create_task(
+                    self._do_ewneo_receiver_learning_with_timeout(coordinator, ewneo_index, gateway_serial)
+                )
+
+            # If task finished, route to next step
+            if self._ewneo_learn_task.done():
+                _LOGGER.warning("🟣 Task is DONE - getting result...")
+                result = "error"
+                try:
+                    result = self._ewneo_learn_task.result()
+                    _LOGGER.warning("🟣 Task result: %s", result)
+                except asyncio.CancelledError:
+                    _LOGGER.warning("🟣 Task was cancelled")
+                    result = "cancelled"
+                except Exception as e:
+                    _LOGGER.error("🟣 Task error: %s", e, exc_info=True)
+                    result = "error"
+                finally:
+                    self._ewneo_learn_task = None
+                    self._ewneo_poll_task = None
+
+                if result == "success":
+                    _LOGGER.warning("🟣 SUCCESS - going to device_confirm")
+                    return self.async_show_progress_done(next_step_id="device_confirm")
+                if result == "timeout":
+                    _LOGGER.warning("🟣 TIMEOUT - going to timeout menu")
+                    return self.async_show_progress_done(next_step_id="device_ewneo_receiver_learn_timeout")
+                if result == "cancelled":
+                    _LOGGER.warning("🟣 CANCELLED - going back")
+                    return self.async_show_progress_done(next_step_id="device_ewneo_receiver_description")
+                _LOGGER.warning("🟣 ERROR - aborting")
+                return self.async_abort(reason="ewneo_learning_failed")
+
+            # Show progress
+            _LOGGER.warning("🟣 Task NOT done - showing progress...")
+            return self.async_show_progress(
+                step_id="device_ewneo_receiver_learn_progress",
+                progress_action="waiting_for_ewneo_join",
+                progress_task=self._ewneo_learn_task,
+            )
+
+        except Exception as e:
+            _LOGGER.error("Error during EWneo receiver learning: %s", e, exc_info=True)
+            if hasattr(self, '_ewneo_preparation'):
+                delattr(self, '_ewneo_preparation')
+            return self.async_abort(reason="ewneo_learning_failed")
+
+    async def _do_ewneo_receiver_learning_with_timeout(self, coordinator, ewneo_index: int, gateway_serial: str) -> str:
+        """Run EWneo receiver learning with an enforced timeout for progress UI."""
+        _LOGGER.warning("🟠 _do_ewneo_receiver_learning_with_timeout ENTERED!")
+        try:
+            _LOGGER.warning("🟠 Calling _do_ewneo_receiver_learning via wait_for...")
+            # Add a small buffer to ensure the task completes and the UI advances
+            result = await asyncio.wait_for(
+                self._do_ewneo_receiver_learning(coordinator, ewneo_index, gateway_serial),
+                timeout=LEARNING_TIMEOUT_SECONDS + 2,
+            )
+            _LOGGER.warning("🟠 _do_ewneo_receiver_learning returned: %s", result)
+            return result
+        except asyncio.TimeoutError:
+            _LOGGER.warning("🟠 asyncio.TimeoutError in wait_for wrapper!")
+            return "timeout"
+        except Exception as e:
+            _LOGGER.error("🟠 Exception in _with_timeout: %s", e, exc_info=True)
+            raise
+
+    async def async_step_device_ewneo_receiver_learn_wait(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show wait menu while EWneo receiver learning is running."""
+        # Check if task is done and redirect
+        if self._ewneo_learn_task is not None and self._ewneo_learn_task.done():
+            return await self.async_step_device_ewneo_receiver_learn()
+
+        # If user clicked an option, handle it
+        if user_input is not None:
+            # User chose to continue waiting, go back to progress
+            return await self.async_step_device_ewneo_receiver_learn()
+
+        return self.async_show_menu(
+            step_id="device_ewneo_receiver_learn_wait",
+            menu_options={
+                "device_ewneo_receiver_learn_wait": "🔄 Weiter warten",
+                "device_ewneo_receiver_learn_cancel": "⬅️ Zurück",
+            },
+        )
+
+    async def async_step_device_ewneo_receiver_learn_cancel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Cancel EWneo receiver learning and go back."""
+        if self._ewneo_learn_task:
+            self._ewneo_learn_task.cancel()
+            try:
+                await self._ewneo_learn_task
+            except asyncio.CancelledError:
+                pass
+            self._ewneo_learn_task = None
+        self._ewneo_poll_task = None
+        if hasattr(self, '_ewneo_preparation'):
+            delattr(self, '_ewneo_preparation')
+        await self._cleanup_learning_mode()
+        return await self.async_step_device_ewneo_receiver()
+
+    async def async_step_device_ewneo_receiver_learn_timeout(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show timeout menu with retry/cancel options for EWneo receiver learning."""
+        # Reset the learning task so it can be restarted
+        self._ewneo_learn_task = None
+        
+        return self.async_show_menu(
+            step_id="device_ewneo_receiver_learn_timeout",
+            menu_options={
+                "device_ewneo_receiver_learn_start": "🔄 Erneut versuchen",
+                "device_ewneo_receiver_back": "⬅️ Zurück",
+            },
+        )
+
+    async def _do_ewneo_receiver_learning(self, coordinator, ewneo_index: int, gateway_serial: str) -> str:
+        """Run EWneo receiver join loop in a background task."""
+        _LOGGER.warning("🟢 _do_ewneo_receiver_learning ENTERED!")
+        _LOGGER.warning("🟢 coordinator=%s, ewneo_index=%s, gateway_serial=%s", 
+                       type(coordinator).__name__, ewneo_index, gateway_serial[-8:] if gateway_serial else None)
+        _LOGGER.info("=== EWNEO TRANSCEIVER LEARNING START ===")
+        _LOGGER.info("🔗 Starting EWneo receiver join loop (max 30 seconds)...")
+
+        try:
+            _LOGGER.warning("🟢 Inside try block, starting loop...")
+            start_time = time.time()
+            join_result = None
+            attempt = 0
+            join_timeout = 2.0  # 2 seconds per join attempt
+            
+            while (time.time() - start_time) < LEARNING_TIMEOUT_SECONDS:
+                attempt += 1
+                remaining = int(LEARNING_TIMEOUT_SECONDS - (time.time() - start_time))
+                
+                if remaining <= 0:
+                    break
+                    
+                _LOGGER.info("🔄 EWB_JOIN_DEVICE attempt %d (remaining: %ds)...", attempt, remaining)
+                
+                try:
+                    # Call join with 2s timeout per attempt
+                    join_result = await coordinator.transceiver.rx11_ewb_join_device(
+                        gateway_serial, 
+                        timeout=min(join_timeout, remaining)
+                    )
+                    
+                    if join_result:
+                        _LOGGER.info("✅ EWB_JOIN_DEVICE SUCCESS on attempt %d!", attempt)
+                        break
+                    
+                    _LOGGER.debug("⏳ Attempt %d: No device joined (timeout), retrying...", attempt)
+                    
+                except Exception as e:
+                    _LOGGER.warning("⏳ Join attempt %d failed: %s, retrying...", attempt, e)
+                    await asyncio.sleep(0.5)  # Brief pause before retry on error
+
+            if not join_result:
+                _LOGGER.warning("❌ EWneo learning timeout after %d attempts (30 seconds)", attempt)
+                # DON'T delete _ewneo_preparation here - let the timeout menu handle cleanup
+                # Recycle index on timeout
+                coordinator.mark_ewb_index_free(ewneo_index)
+                return "timeout"
+
+            device_type_code, receiver_serial = join_result
+            _LOGGER.info("✅ EWneo receiver joined - Type: 0x%02X, Serial: %s", 
+                        device_type_code, receiver_serial[-8:])
+
             from .const import DEVICE_TYPES
             device_type_name = DEVICE_TYPES.get(device_type_code, f"unknown_0x{device_type_code:02X}")
             
-            # Store the learned device data for final confirmation
+            # German-friendly device names for UI
+            EWNEO_DEVICE_NAMES = {
+                0x03: "Schalter",           # ewneo_switch - 1 channel
+                0x04: "Dimmer",             # ewneo_dimmer
+                0x05: "Motor",              # ewneo_motor - 1 channel
+                0x06: "2Kanal-Schalter",    # ewneo_dual_switch
+                0x07: "4Kanal-Schalter",    # ewneo_quad_switch
+                0x08: "2Kanal-Motor",       # ewneo_dual_motor
+                0x09: "4Kanal-Motor",       # ewneo_quad_motor
+            }
+            friendly_type_name = EWNEO_DEVICE_NAMES.get(device_type_code, "Gerät")
+
             self._learned_device = {
                 "device_type": "ewneo_receiver",
                 "serial_number": receiver_serial,
@@ -1093,65 +1458,237 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "neo_device": True,
                 "channels": 1,
                 "supports_feedback": True,
-                "is_learn_telegram": True
+                "is_learn_telegram": True,
             }
-            
-            _LOGGER.info("🎯 EWneo-Receiver joined successfully (Index: %d, Type: 0x%02X)", 
+
+            _LOGGER.info("🎯 EWneo-Receiver joined successfully (Index: %d, Type: 0x%02X)",
                         ewneo_index, device_type_code)
-            
-            # Mark the EWB index as used persistently in coordinator
-            # This also updates the wrapper tracking automatically
-            device_name = f"EWneo-{device_type_name} ({receiver_serial[-6:]})"
+
+            device_name = f"EWneo-{friendly_type_name} #{ewneo_index + 1}"
+            self._learned_device["name"] = device_name
             coordinator.mark_ewb_index_used(ewneo_index, gateway_serial, receiver_serial, device_name)
-            
-            # Clean up preparation data
-            delattr(self, '_ewneo_preparation')
-            
-            # Go to final confirmation step
-            return await self.async_step_device_ewneo_receiver_confirm()
 
+            # DON'T delete _ewneo_preparation here - it's needed by the progress callback
+            # It will be cleaned up in device_confirm or on error
+
+            return "success"
+            
+        except asyncio.CancelledError:
+            # Recycle index on cancel
+            if hasattr(self, '_ewneo_preparation'):
+                coordinator.mark_ewb_index_free(ewneo_index)
+                delattr(self, '_ewneo_preparation')
+            return "cancelled"
         except Exception as e:
-            _LOGGER.error("Error during EWneo receiver join: %s", e)
-            return self.async_abort(reason="ewneo_join_failed")
+            _LOGGER.error("Error during EWneo receiver learning: %s", e, exc_info=True)
+            # Recycle index on error
+            if hasattr(self, '_ewneo_preparation'):
+                coordinator.mark_ewb_index_free(ewneo_index)
+                delattr(self, '_ewneo_preparation')
+            return "error"
 
-    async def async_step_device_ewneo_receiver_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Confirm the learned EWneo device type and entity configuration."""
-        if user_input is not None:
-            # User confirmed the device - use device type determined from EwbJoinDeviceRequest
-            device_name = user_input.get("device_name")
-            device_type_code = self._learned_device.get("device_type_code")
+    async def async_step_device_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Unified confirmation step for all learned devices."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+        
+        device_type = self._learned_device.get("device_type", self._learned_device.get("type", "unknown"))
+        serial_number = self._learned_device.get("serial_number", "?")
+        
+        # Generate description based on device type
+        if device_type == "ew_transmitter":
+            button_count = self._learned_device.get("button_count", 4)
             
-            # Determine entity type based on device type code from EwbJoinDeviceRequest
+            # Get coordinator to retrieve next sender index for correct name
+            entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
+            coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+            
+            sender_index = "?"
+            if coordinator:
+                sender_index = str(coordinator.get_next_ew_sender_index())
+            
+            suggested_name = f"EW-Sender #{sender_index}"
+            last_telegram = self._learned_device.get("last_telegram", {})
+            button = last_telegram.get("button", "?")
+            
+            description = (
+                f"✅ **EW-Sender erfolgreich erkannt!**\n\n"
+                f"**🔍 Detected device info:**\n"
+                f"• Serial: `{serial_number[-8:]}`\n"
+                f"• Name: {suggested_name}\n"
+                f"• Button count: {button_count}\n"
+                f"• Button pressed: {button}\n\n"
+                f"**⚡ What will be created:**\n"
+                f"• 1 EW-Sender device\n"
+                f"• {button_count} button entities\n\n"
+                f"**⚙️ Gerät anlegen:**\n"
+                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
+            )
+        elif device_type in ["ew_sensor", "ewneo_sensor"]:
+            sensor_types = self._learned_device.get("sensor_types", [])
+            available_sensors = self._learned_device.get("available_sensors", [])
+            suggested_name = self._learned_device.get("name", "EWneo-Sensor #?")
+            
+            sensor_list = "\n".join([f"• {s.replace('_', ' ').title()}" for s in (sensor_types or available_sensors)])
+            if not sensor_list:
+                sensor_list = "• Auto-detection on reception"
+            
+            description = (
+                f"✅ **EWneo-Sensor successfully detected!**\n\n"
+                f"**🔍 Detected device info:**\n"
+                f"• Serial: `{serial_number[-8:]}`\n"
+                f"• Name: {suggested_name}\n"
+                f"• Detected sensors:\n{sensor_list}\n\n"
+                f"**⚡ What will be created:**\n"
+                f"• 1 EWneo-Sensor device\n"
+                f"• Sensor entities for all detected measurements\n"
+                f"• Battery status sensor\n\n"
+                f"**⚙️ Gerät anlegen:**\n"
+                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
+            )
+        elif device_type == "ewneo_receiver":
+            device_type_code = self._learned_device.get("device_type_code", 0)
+            device_type_name = self._learned_device.get("device_type_name", "unknown")
+            ewneo_index = self._learned_device.get("ewneo_index", "?")
+            
+            # Determine entity type for display
+            if device_type_code == 0x04:
+                entity_type_display = "Dimmer (Light)"
+            elif device_type_code in [0x05, 0x08, 0x09]:
+                entity_type_display = "Motor (Cover)"
+            elif device_type_code in [0x03, 0x06, 0x07]:
+                entity_type_display = "Switch"
+            else:
+                entity_type_display = "Switch"
+            
+            # Use stored name or generate fallback with index
+            EWNEO_DEVICE_NAMES = {
+                0x03: "Schalter",
+                0x04: "Dimmer",
+                0x05: "Motor",
+                0x06: "2Kanal-Schalter",
+                0x07: "4Kanal-Schalter",
+                0x08: "2Kanal-Motor",
+                0x09: "4Kanal-Motor",
+            }
+            friendly_type_name = EWNEO_DEVICE_NAMES.get(device_type_code, "Gerät")
+            suggested_name = self._learned_device.get("name", f"EWneo-{friendly_type_name} #{ewneo_index + 1}")
+            
+            description = (
+                f"✅ **EWneo-Transceiver successfully learned!**\n\n"
+                f"**🔍 Detected device info:**\n"
+                f"• Serial: `{serial_number[-8:]}`\n"
+                f"• Name: {suggested_name}\n"
+                f"• EWneo-Index: `{ewneo_index}`\n"
+                f"• Device type: `{device_type_name}` (Code: 0x{device_type_code:02X})\n"
+                f"• Entity type: `{entity_type_display}`\n\n"
+                f"**⚡ What will be created:**\n"
+                f"• 1 EWneo-Transceiver device\n"
+                f"• {entity_type_display} entity with status feedback\n\n"
+                f"**⚙️ Gerät anlegen:**\n"
+                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
+            )
+        else:
+            suggested_name = self._learned_device.get("name", f"ELDAT Device ({serial_number[-6:]})")
+            description = (
+                f"✅ **Device successfully detected!**\n\n"
+                f"**🔍 Detected device info:**\n"
+                f"• Serial: `{serial_number[-8:]}`\n"
+                f"• Name: {suggested_name}\n"
+                f"• Type: {device_type}\n\n"
+                f"**⚙️ Gerät anlegen:**\n"
+                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
+            )
+
+        self._learned_device["name"] = suggested_name
+
+        return self.async_show_menu(
+            step_id="device_confirm",
+            menu_options={
+                "device_confirm_create": "✅ Anlegen",
+                "device_confirm_rename": "✏️ Namen ändern",
+                "device_confirm_back": "⬅️ Zurück",
+            },
+            description_placeholders={
+                "description": description
+            }
+        )
+
+    async def async_step_device_confirm_create(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Create the learned device from the confirmation menu."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+
+        device_type = self._learned_device.get("device_type", self._learned_device.get("type", "unknown"))
+        serial_number = self._learned_device.get("serial_number", "?")
+
+        if device_type == "ewneo_receiver":
+            device_type_code = self._learned_device.get("device_type_code")
             if device_type_code == 0x04:  # EWB_DT_DIMMER
                 entity_type = "light"
-                # For dimmer devices, enable dimming support by default
                 supports_dimming = True
                 supports_color = False
-            elif device_type_code in [0x05, 0x08, 0x09]:  # EWB_DT_MOTOR, EWB_DT_DUAL_MOTOR, EWB_DT_QUAD_MOTOR
+            elif device_type_code in [0x05, 0x08, 0x09]:  # EWB_DT_MOTOR
                 entity_type = "cover"
                 supports_dimming = False
                 supports_color = False
-            elif device_type_code in [0x03, 0x06, 0x07]:  # EWB_DT_SWITCH, EWB_DT_DUAL_SWITCH, EWB_DT_QUAD_SWITCH
+            elif device_type_code in [0x03, 0x06, 0x07]:  # EWB_DT_SWITCH
                 entity_type = "switch"
                 supports_dimming = False
                 supports_color = False
-            else:  # Unknown device type - default to switch
+            else:
                 entity_type = "switch"
                 supports_dimming = False
                 supports_color = False
-            
-            # Update the learned device with final configuration
+
             self._learned_device.update({
                 "entity_type": entity_type,
-                "name": device_name,
                 "supports_dimming": supports_dimming,
                 "supports_color": supports_color,
             })
-            
-            _LOGGER.info("✅ EWneo device confirmed: %s as %s (type_code: 0x%02X)", 
-                        device_name, entity_type, device_type_code)
-            return await self.async_step_device_save()
 
+        _LOGGER.info("✅ Device confirmed: %s (%s)", self._learned_device.get("name"), serial_number[-8:])
+        return await self.async_step_device_save()
+
+    async def async_step_device_confirm_back(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Return from device confirmation menu."""
+        if not self._learned_device:
+            return await self.async_step_device_type_select()
+
+        device_type = self._learned_device.get("device_type", self._learned_device.get("type", "unknown"))
+        self._learned_device = None
+        if device_type == "ew_transmitter":
+            return await self.async_step_device_transmitter_description()
+        if device_type in ["ew_sensor", "ewneo_sensor"]:
+            return await self.async_step_device_sensor_description()
+        if device_type == "ewneo_receiver":
+            return await self.async_step_device_ewneo_receiver()
+        return await self.async_step_device_type_select()
+
+    async def async_step_device_confirm_rename(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Rename the learned device before creation."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+
+        if user_input is not None:
+            device_name = user_input.get("device_name")
+            if device_name:
+                self._learned_device["name"] = device_name
+            return await self.async_step_device_confirm()
+
+        current_name = self._learned_device.get("name", "")
+        return self.async_show_form(
+            step_id="device_confirm_rename",
+            data_schema=vol.Schema({
+                vol.Required("device_name", default=current_name): str,
+            }),
+            description_placeholders={
+                "current_name": current_name,
+            },
+        )
+        
+    async def async_step_device_ewneo_receiver_confirm_legacy(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Legacy: Confirm the learned EWneo device type and entity configuration."""
         if not self._learned_device:
             return self.async_abort(reason="no_learned_device")
 
@@ -1162,7 +1699,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ewneo_index = self._learned_device.get("ewneo_index")
         
         # Suggest default name and entity type based on device type
-        suggested_name = f"EWneo-Gerät ({serial_number[-6:]})"
+        suggested_name = f"EWneo-Device ({serial_number[-6:]})"
         suggested_entity_type = "switch"  # Default to switch
         
         # Try to determine better defaults based on device type code
@@ -1175,33 +1712,91 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 suggested_name = f"EWneo-Motor ({serial_number[-6:]})"
             elif device_type_code in [0x03, 0x06, 0x07]:  # EWB_DT_SWITCH, EWB_DT_DUAL_SWITCH, EWB_DT_QUAD_SWITCH
                 suggested_entity_type = "switch"
-                suggested_name = f"EWneo-Schalter ({serial_number[-6:]})"
+                suggested_name = f"EWneo-Switch ({serial_number[-6:]})"
             else:  # Unknown device type
                 suggested_entity_type = "switch"
-                suggested_name = f"EWneo-Gerät ({serial_number[-6:]})"
+                suggested_name = f"EWneo-Device ({serial_number[-6:]})"
 
-        return self.async_show_form(
+        if not self._learned_device.get("name"):
+            self._learned_device["name"] = suggested_name
+
+        return self.async_show_menu(
             step_id="device_ewneo_receiver_confirm",
+            menu_options={
+                "device_ewneo_receiver_confirm_create": "✅ Anlegen",
+                "device_ewneo_receiver_confirm_rename": "✏️ Namen ändern",
+                "device_ewneo_receiver_confirm_back": "⬅️ Zurück",
+            },
+            description_placeholders={
+                "ewneo_index": str(ewneo_index),
+                "serial": serial_number[-8:] if serial_number else "Unknown",
+                "device_name": self._learned_device.get("name", suggested_name),
+            }
+        )
+
+    async def async_step_device_ewneo_receiver_confirm_create(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Create EWneo receiver from legacy confirmation menu."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+
+        device_name = self._learned_device.get("name")
+        device_type_code = self._learned_device.get("device_type_code")
+
+        if device_type_code == 0x04:  # EWB_DT_DIMMER
+            entity_type = "light"
+            supports_dimming = True
+            supports_color = False
+        elif device_type_code in [0x05, 0x08, 0x09]:  # EWB_DT_MOTOR, EWB_DT_DUAL_MOTOR, EWB_DT_QUAD_MOTOR
+            entity_type = "cover"
+            supports_dimming = False
+            supports_color = False
+        elif device_type_code in [0x03, 0x06, 0x07]:  # EWB_DT_SWITCH, EWB_DT_DUAL_SWITCH, EWB_DT_QUAD_SWITCH
+            entity_type = "switch"
+            supports_dimming = False
+            supports_color = False
+        else:  # Unknown device type - default to switch
+            entity_type = "switch"
+            supports_dimming = False
+            supports_color = False
+
+        self._learned_device.update({
+            "entity_type": entity_type,
+            "name": device_name,
+            "supports_dimming": supports_dimming,
+            "supports_color": supports_color,
+        })
+
+        _LOGGER.info("✅ EWneo device confirmed: %s as %s (type_code: 0x%02X)",
+                    device_name, entity_type, device_type_code)
+        return await self.async_step_device_save()
+
+    async def async_step_device_ewneo_receiver_confirm_back(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Return from legacy EWneo receiver confirmation menu."""
+        self._learned_device = None
+        return await self.async_step_device_ewneo_receiver()
+
+    async def async_step_device_ewneo_receiver_confirm_rename(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Rename EWneo receiver before creation (legacy confirmation menu)."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+
+        if user_input is not None:
+            device_name = user_input.get("device_name")
+            if device_name:
+                self._learned_device["name"] = device_name
+            return await self.async_step_device_ewneo_receiver_confirm_legacy()
+
+        current_name = self._learned_device.get("name", "")
+        return self.async_show_form(
+            step_id="device_ewneo_receiver_confirm_rename",
             data_schema=vol.Schema({
-                vol.Required("device_name", default=suggested_name): str,
+                vol.Required("device_name", default=current_name): str,
             }),
             description_placeholders={
-                "instructions": (
-                    f"**📋 EWneo-Receiver erfolgreich eingelernt**\n\n"
-                    f"**🔍 Erkannte Geräteinformationen:**\n"
-                    f"• Seriennummer: `{serial_number[-8:]}`\n"
-                    f"• EWneo-Index: `{ewneo_index}`\n"
-                    f"• Gerätetyp: `{device_type_name}` (Code: 0x{device_type_code:02X})\n"
-                    f"• Entity-Typ: `{suggested_entity_type}` (automatisch bestimmt)\n\n"
-                    f"**ℹ️ Der Entity-Typ wird automatisch anhand des EwbJoinDeviceRequests bestimmt:**\n"
-                    f"• 0x04: Dimmer-Entität (EWB_DT_DIMMER)\n"
-                    f"• 0x05, 0x08, 0x09: Motor-Entität (EWB_DT_MOTOR/DUAL/QUAD)\n"
-                    f"• 0x03, 0x06, 0x07: Schalter-Entität (EWB_DT_SWITCH/DUAL/QUAD)\n"
-                    f"• Andere: Standard Schalter-Entität\n\n"
-                    f"**⚙️ Gerätename bestätigen:**\n"
-                    f"Bitte bestätigen Sie den Gerätenamen. Der Entity-Typ wird automatisch gesetzt."
-                )
-            }
+                "current_name": current_name,
+            },
         )
 
     async def async_step_device_save(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1274,6 +1869,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     name=device_name,
                     manufacturer=manufacturer,
                     model=model,
+                    serial_number=serial_number,
                     sw_version=device_data.get("firmware_version"),
                 )
                 _LOGGER.info("✅ Device registered in HA Device Registry: %s (ID: %s)", device_name, device_entry.id)
@@ -1557,10 +2153,10 @@ class EldatOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_manage_devices()
 
         action_options = {
-            "enable_learning": "🟢 Lernmodus aktivieren" if not learning_active else "",
-            "disable_learning": "🛑 Lernmodus deaktivieren" if learning_active else "",
-            "manage_devices": f"🔧 Geräte verwalten ({device_count} Geräte)",
-            "save_settings": "💾 Speichern"
+            "enable_learning": "🟢 Enable learning" if not learning_active else "",
+            "disable_learning": "🛑 Disable learning" if learning_active else "",
+            "manage_devices": f"🔧 Manage devices ({device_count})",
+            "save_settings": "💾 Save"
         }
         # Remove empty entries
         action_options = {k: v for k, v in action_options.items() if v}
@@ -1579,7 +2175,7 @@ class EldatOptionsFlow(config_entries.OptionsFlow):
             data_schema=data_schema,
             description_placeholders={
                 "device_count": str(device_count),
-                "learning_status": "aktiv" if learning_active else "inaktiv",
+                "learning_status": "active" if learning_active else "inactive",
                 "transceiver_type": self.config_entry.data.get(CONF_TRANSCEIVER_TYPE, "unknown"),
             }
         )
@@ -1621,20 +2217,20 @@ class EldatOptionsFlow(config_entries.OptionsFlow):
         # Build device selection options
         device_options = {}
         for serial, device_info in devices.items():
-            device_name = device_info.get("name", f"Gerät {serial[-6:]}")
+            device_name = device_info.get("name", f"Device {serial[-6:]}")
             device_type = device_info.get("type", "unknown")
             device_options[serial] = f"{device_name} ({device_type})"
 
         if not device_options:
             # No devices to manage
             data_schema = vol.Schema({
-                vol.Required("action", default="back"): vol.In({"back": "🔙 Zurück"})
+                vol.Required("action", default="back"): vol.In({"back": "🔙 Back"})
             })
         else:
             data_schema = vol.Schema({
                 vol.Required("action", default="back"): vol.In({
-                    "back": "🔙 Zurück",
-                    "remove_device": "🗑️ Gerät entfernen"
+                    "back": "🔙 Back",
+                    "remove_device": "🗑️ Remove device"
                 }),
                 vol.Optional("device_to_remove"): vol.In(device_options)
             })

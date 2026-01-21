@@ -19,10 +19,17 @@
       },
       "device_type_select": {
         "title": "Select Device Type",
-        "description": "{instructions}",
-        "data": {
-          "device_type": "Device Type"
+        "description": "Select the type of device you want to add.",
+        "menu_options": {
+          "device_transmitter_config": "🎛️ EW-Transmitter (Remote Control)",
+          "device_sensor": "🌡️ EWneo-Sensor (Temperature/Humidity)",
+          "device_receiver": "📥 EW-Receiver (Switch/Motor/Heating)",
+          "device_ewneo_receiver": "📥 EWneo-Switch/Motor (Bidirectional)",
+          "device_cancel": "❌ Cancel"
         }
+      },
+      "device_cancel": {
+        "title": "Cancel"
       },
       "device_transmitter": {
         "title": "Learn EW Transmitter",
@@ -33,28 +40,147 @@
       },
       "device_transmitter_verify": {
         "title": "Verify EW Transmitter",
-        "description": "{instructions}",
+        "description": "✅ **EW-Transmitter successfully detected!**\n\n**📋 Device information:**\n• Serial number: {serial}\n• Button count: {button_count}\n• Type: EW-Transmitter (Remote Control)\n\n**📡 Confirmation:**\n\nClick 'Confirm' to create the device.\nClick 'Cancel' to abort the process.",
         "data": {
           "action": "Action"
         }
       },
       "device_transmitter_config": {
-        "title": "Configure EW Transmitter",
-        "description": "{instructions}",
-        "data": {
-          "button_count": "Number of Buttons"
+        "title": "EW-Transmitter Configuration",
+        "description": "**⚙️ EW-Transmitter Configuration**\n\nSelect the button operation for your remote control.",
+        "menu_options": {
+          "device_transmitter_1button": "🔘 1-Button Operation",
+          "device_transmitter_2button": "🔘🔘 2-Button Operation",
+          "device_transmitter_3button": "🔘🔘🔘 3-Button Operation (Up/Down/Stop)",
+          "device_type_select": "⬅️ Back"
         }
       },
+      "device_transmitter_1button": {
+        "title": "1-Button Operation"
+      },
+      "device_transmitter_2button": {
+        "title": "2-Button Operation"
+      },
+      "device_transmitter_3button": {
+        "title": "3-Button Operation"
+      },
+      "device_transmitter_grouping": {
+        "title": "Grouping",
+        "description": "Select how buttons should be grouped.",
+        "menu_options": {
+          "device_transmitter_grouping_single": "🔘 Switch Individually",
+          "device_transmitter_grouping_group": "🔗 Switch as Group",
+          "device_transmitter_config": "⬅️ Back"
+        }
+      },
+      "device_transmitter_grouping_single": {
+        "title": "Switch Individually"
+      },
+      "device_transmitter_grouping_group": {
+        "title": "Switch as Group"
+      },
+      "device_transmitter_switch_mode": {
+        "title": "Switch Mode",
+        "description": "Select the switch mode.",
+        "menu_options": {
+          "device_transmitter_switch_impulse": "⚡ Impulse (State is reset)",
+          "device_transmitter_switch_permanent": "🔒 Permanent (State is retained)",
+          "device_transmitter_grouping": "⬅️ Back"
+        }
+      },
+      "device_transmitter_switch_impulse": {
+        "title": "Impulse Mode"
+      },
+      "device_transmitter_switch_permanent": {
+        "title": "Permanent Mode"
+      },
+      "device_transmitter_button_count": {
+        "title": "Button Count",
+        "description": "Select the number of buttons.",
+        "menu_options": {
+          "device_transmitter_buttons_1": "🔘 1 Button",
+          "device_transmitter_buttons_2": "🔘🔘 2 Buttons",
+          "device_transmitter_buttons_3": "🔘🔘🔘 3 Buttons",
+          "device_transmitter_buttons_4": "🔘🔘🔘🔘 4 Buttons",
+          "device_transmitter_switch_mode": "⬅️ Back"
+        }
+      },
+      "device_transmitter_buttons_1": {
+        "title": "1 Button"
+      },
+      "device_transmitter_buttons_2": {
+        "title": "2 Buttons"
+      },
+      "device_transmitter_buttons_3": {
+        "title": "3 Buttons"
+      },
+      "device_transmitter_buttons_4": {
+        "title": "4 Buttons"
+      },
+      "device_transmitter_2button_usage": {
+        "title": "2-Button Usage",
+        "description": "Select the usage for 2-button operation.",
+        "menu_options": {
+          "device_transmitter_2button_switch": "🔌 ON/OFF (Switch)",
+          "device_transmitter_2button_cover": "🏠 OPEN/CLOSE (Blind/Shutter)",
+          "device_transmitter_config": "⬅️ Back"
+        }
+      },
+      "device_transmitter_2button_switch": {
+        "title": "Switch Mode"
+      },
+      "device_transmitter_2button_cover": {
+        "title": "Cover Mode"
+      },
+      "device_transmitter_2button_button_count": {
+        "title": "Button Count (2-Button)",
+        "description": "Select the button count.",
+        "menu_options": {
+          "device_transmitter_2button_2": "🔘🔘 2 Buttons",
+          "device_transmitter_2button_4": "🔘🔘🔘🔘 4 Buttons",
+          "device_transmitter_2button_usage": "⬅️ Back"
+        }
+      },
+      "device_transmitter_2button_2": {
+        "title": "2 Buttons"
+      },
+      "device_transmitter_2button_4": {
+        "title": "4 Buttons"
+      },
       "device_transmitter_description": {
-        "title": "EW-Transmitter Learning - Instructions",
-        "description": "{instructions}",
-        "data": {
-          "action": "Action"
+        "title": "EW-Transmitter Learning",
+        "description": "🎛️ **EW-Transmitter Learning**\n\n**📋 Configuration:**\n• Name: EW-Sender #{sender_index}\n• Buttons: {button_count}\n• Mode: {operating_type}-Button Operation\n\n**📡 Learning Process:**\nPress any button on the EW-Transmitter when learning starts.\n\n🔴 **Important:** Have the EW-Transmitter ready!",
+        "menu_options": {
+          "device_transmitter_learn_start": "▶️ Start Learning",
+          "device_transmitter_config": "⬅️ Back"
+        }
+      },
+      "device_transmitter_learn_progress": {
+        "title": "EW-Transmitter Learning",
+        "description": "🔄 **Loading & waiting for radio signal...**\n\n🔴 **Press a button on the EW-Transmitter NOW!**\n\n⏳ The system waits up to 30 seconds for the telegram.",
+        "progress_action": {
+          "waiting_for_transmitter_telegram": "🔄 Waiting for radio signal... Press a button on the EW-Transmitter NOW!"
+        }
+      },
+      "device_transmitter_learn_timeout": {
+        "title": "Timeout",
+        "description": "⏰ **No signal received**\n\nThe system did not receive a radio signal. You can try again.",
+        "menu_options": {
+          "device_transmitter_learn_progress": "🔄 Try Again",
+          "device_transmitter_description": "⬅️ Back to Configuration"
+        }
+      },
+      "device_transmitter_already_exists": {
+        "title": "Device already exists",
+        "description": "⚠️ **This EW-Transmitter is already learned!**\n\n**📋 Serial:** `{serial}`\n\nThe device already exists in Home Assistant and cannot be added again. You can learn another transmitter.",
+        "menu_options": {
+          "device_transmitter_learn_progress": "🔄 Learn another transmitter",
+          "device_transmitter_description": "⬅️ Back"
         }
       },
       "device_transmitter_learn": {
-        "title": "Learning EW-Transmitter",
-        "description": "🎛️ **Waiting for EW-Transmitter signal...**\n\n📡 **Please press any button on your EW-Transmitter NOW!**\n\nThe system is listening for the radio signal. This may take up to 3 minutes.\n\n⚡ **Status:** Waiting for telegram reception...",
+        "title": "Learning EW Transmitter",
+        "description": "🎛️ **Waiting for EW Transmitter signal...**\n\n📡 **Please press any button on your EW Transmitter NOW!**\n\nThe system is listening for the radio signal. This may take up to 30 seconds.\n\n⚡ **Status:** Waiting for telegram reception...",
         "data": {}
       },
       "device_sensor": {
@@ -65,35 +191,81 @@
         }
       },
       "device_sensor_description": {
-        "title": "EWneo-Sensors Learning - Instructions",
-        "description": "{instructions}",
-        "data": {
-          "action": "Action"
+        "title": "EWneo-Sensor Learning",
+        "description": "🌡️ **EWneo-Sensor Learning**\n\n**📋 Device Type:** EWneo-Sensor (Temperature/Humidity/Weather)\n\n📊 **Auto-Detection:**\n• 🌡️ Temperature Sensor\n• 💧 Humidity Sensor\n• ☔ Rain Sensor\n• 💨 Wind Sensor\n• 🔋 Battery Status\n\n🔴 **Important:** Press the learn button on the EWneo-Sensor when learning starts!",
+        "menu_options": {
+          "device_sensor_learn_progress": "▶️ Start Learning",
+          "device_type_select": "⬅️ Back"
+        }
+      },
+      "device_sensor_learn_progress": {
+        "title": "EWneo-Sensor Learning",
+        "progress_action": {
+          "waiting_for_sensor_telegram": "🔄 Waiting for learn signal... Press the learn button on the EWneo-Sensor NOW!"
+        }
+      },
+      "device_sensor_learn_timeout": {
+        "title": "Timeout",
+        "description": "⏰ **No learn signal received**\n\nThe system did not receive a learn signal. Make sure you press the **learn button** on the sensor (not just a normal measurement signal).",
+        "menu_options": {
+          "device_sensor_learn_progress": "🔄 Try Again",
+          "device_sensor_description": "⬅️ Back"
         }
       },
       "device_sensor_learn_actual": {
-        "title": "Learning EWneo-Sensors",
-        "description": "🌡️ **Waiting for EWneo-Sensors signal...**\n\n📡 **Please trigger your EWneo-Sensors NOW!**\n\nThe system is listening for the radio signal. This may take up to 3 minutes.\n\n⚡ **Status:** Waiting for telegram reception...",
+        "title": "Learning EWneo Sensors",
+        "description": "🌡️ **Waiting for EWneo Sensors signal...**\n\n📡 **Please trigger your EWneo Sensors NOW!**\n\nThe system is listening for the radio signal. This may take up to 30 seconds.\n\n⚡ **Status:** Waiting for telegram reception...",
         "data": {}
       },
       "device_sensor_verify": {
         "title": "Verify EWneo Sensors",
-        "description": "{instructions}",
+        "description": "✅ **EWneo-Sensor successfully detected!**\n\n**📋 Sensor information:**\n• Serial number: {serial}\n• Type: EWneo-Sensor\n• Detected sensors will be created automatically\n\n**📡 Confirmation:**\n\nClick 'Confirm' to create the sensor.\nClick 'Cancel' to abort the process.",
         "data": {
           "action": "Action"
         }
       },
       "device_ewneo_receiver": {
         "title": "Add EWneo Switch/Motor",
-        "description": "{instructions}"
+        "description": "🔌 **Add EWneo-Switch/Motor**\n\nYou can add an EWneo-Switch/Motor to Home Assistant.\n\n**📋 Overview:**\n• EWneo devices are controlled bidirectionally via the gateway\n• Supports switches, dimmers, and motors\n• Status feedback from the device\n\n**📡 Learning process:**\n\n**1.** System prepares the connection\n**2.** Press the learn button on the EWneo device\n**3.** Device is automatically detected and added\n\n🔴 **Important:** Have the EWneo device with learn button ready!"
+      },
+      "device_ewneo_receiver_prepare": {
+        "title": "Preparing EWneo Switch/Motor",
+        "description": "🔧 **Preparing EWneo switch/motor...**\n\n📋 **Preparation steps:**\n• Determining EWneo index\n• Loading gateway serial number\n• Setting receive filter\n\n⚡ **Please wait a moment...**"
       },
       "device_ewneo_receiver_learn": {
-        "title": "Prepare EWneo Switch/Motor",
-        "description": "🔧 **Preparing EWneo switch/motor...**\n\n📋 **Preparation steps:**\n• Determining EWneo index\n• Loading gateway serial\n• Setting receive filter\n\n⚡ **Please wait a moment...**"
+        "title": "Learning EWneo Switch/Motor",
+        "description": "🔗 **Learning EWneo switch/motor...**\n\n🔴 **Press the LEARN BUTTON on your EWneo device NOW!**\n\n📡 **The system is sending connection requests...**\n\n• The LED on the device should be blinking\n• Connection attempts are repeated automatically\n• Timeout: 30 seconds\n\n⚡ **Status:** Waiting for device response..."
+      },
+      "device_ewneo_receiver_learn_wait": {
+        "title": "Learning EWneo-Switch/Motor",
+        "description": "🔄 **No response yet**\n\n🔴 **Press the LEARN BUTTON on your EWneo device!**\n\nChoose an option:",
+        "menu_options": {
+          "device_ewneo_receiver_learn": "🔄 Keep waiting",
+          "device_ewneo_receiver_learn_cancel": "⬅️ Back"
+        }
+      },
+      "device_ewneo_receiver_learn_cancel": {
+        "title": "Back"
+      },
+      "device_ewneo_receiver_learn_timeout": {
+        "title": "Timeout",
+        "description": "⏰ **No response received**\n\nThe system did not receive a valid response. You can try again.",
+        "menu_options": {
+          "device_ewneo_receiver_learn": "🔄 Try again",
+          "device_ewneo_receiver": "⬅️ Back"
+        }
+      },
+      "device_ewneo_receiver_description": {
+        "title": "EWneo Transceiver Learning - Instructions",
+        "description": "🔌 **EWneo-Transceiver Learning**\n\n**📋 Device data:**\n• 🔢 EWneo-Index: {ewneo_index}\n• 🔑 Gateway Serial: {gateway_serial}\n\n**📋 Device type:** EWneo-Switch/Motor (Bidirectional)\n\n**📡 Learning process:**\n\n**1.** Click 'Start'\n**2.** Press the learn button on the EWneo device\n**3.** System waits 30 seconds for the signal\n**4.** Device is automatically added\n\n⚡ **What will be created:**\n• One EWneo-Transceiver device\n• Switch/Dimmer/Motor entity\n• Status feedback from the device\n\n🔴 **Important:** Have the EWneo device with learn button ready!",
+        "menu_options": {
+          "device_ewneo_receiver_learn_start": "▶️ Learn EWneo Receiver",
+          "device_ewneo_receiver_back": "⬅️ Back"
+        }
       },
       "device_ewneo_receiver_learning_mode": {
         "title": "Put EWneo Transceiver in Learning Mode",
-        "description": "{instructions}",
+        "description": "🔗 **EWneo-Transceiver Learning Mode**\n\n**🔴 Press the LEARN BUTTON on the EWneo device NOW!**\n\n📡 The system is waiting for the device's learning mode.\n\n• The LED on the device should be blinking\n• Timeout: 30 seconds\n\n⚡ **Status:** Waiting for learning mode confirmation...",
         "data": {
           "action": "Action"
         }
@@ -104,7 +276,7 @@
       },
       "device_ewneo_receiver_confirm": {
         "title": "Configure EWneo Switch/Motor",
-        "description": "{instructions}",
+        "description": "✅ **EWneo device successfully found!**\n\n**📋 Device configuration:**\n• Name: {device_name}\n• EWneo-Index: {ewneo_index}\n• Serial: {serial}\n• Type: EWneo-Switch/Motor\n\n**⚙️ Configuration options:**\n\nSelect the entity type and optionally dimming and color support.\n\n💡 **Note:** The configuration can be changed later in the device settings.",
         "data": {
           "device_name": "Device Name",
           "entity_type": "Entity Type",
@@ -114,21 +286,21 @@
       },
       "device_receiver_type": {
         "title": "EW Receiver Device Type",
-        "description": "{instructions}",
+        "description": "📥 **EW-Receiver Configuration - Step 1/3**\n\n**📋 Device Info:**\n• Device: {device_name}\n• Serial: {serial}\n• Type: EW-Receiver (Actuator)\n\n**🎛️ Select device type:**\n\n**🔌 Switch:** Standard on/off for lighting, outlets, etc.\n**🏠 Motor/Cover:** Control for blinds, shutters with Up/Down/Stop\n**🌡️ Heating/Cooling:** Temperature control with toggle operation (4h auto-repeat)\n\n💡 **Note:** The device type determines available controls and button configuration.",
         "data": {
           "receiver_type": "Device Type"
         }
       },
       "device_receiver_operating_mode": {
         "title": "EW Receiver Operating Mode",
-        "description": "{instructions}",
+        "description": "📥 **EW-Receiver Configuration - Step 2/3**\n\n**📋 Selected device type:** {receiver_kind}\n\n**🎛️ Select operating mode:**\n\n{mode_descriptions}\n\n💡 **Note:** The operating mode determines which buttons are created in Home Assistant.",
         "data": {
           "operating_mode": "Operating Mode"
         }
       },
       "device_receiver_confirm": {
         "title": "EW Receiver Confirmation",
-        "description": "{instructions}",
+        "description": "📥 **EW-Receiver Configuration - Step 3/3**\n\n**📋 Configuration:**\n• Device: {device_name}\n• Serial: {serial}\n• RX11-Index: {rx11_index}\n• Type: {receiver_kind}\n• Mode: {operating_mode}\n\n**🎛️ Buttons to create:**\n{button_summary}\n\n**📡 Learning process:**\n\n**1.** {learn_instructions}\n**2.** Click 'Create & Send Code A'\n**3.** System sends Code A to the receiver\n**4.** Device is created in Home Assistant\n\n💡 **Note:** After confirmation, the receiver is automatically configured and button entities are created.",
         "data": {
           "action": "Action"
         }
@@ -142,29 +314,16 @@
       },
       "device_receiver_verify": {
         "title": "Verify EW Receiver",
-        "description": "{instructions}",
+        "description": "📝 **Verifying EW-Receiver...**\n\n📡 The system is verifying the configuration and ensuring the receiver has been learned correctly.\n\n⚡ **Please wait a moment...**",
         "data": {
           "action": "Action"
         }
       },
-      "device_ewneo_receiver": {
-        "title": "Configure EWneo Switch/Motor",
-        "description": "{instructions}",
-        "data": {
-          "entity_type": "Device Type",
-          "supports_dimming": "Supports Dimming",
-          "supports_color": "Supports Color"
-        }
-      },
-      "device_ewneo_receiver_learn": {
-        "title": "Learning EWneo Switch/Motor",
-        "description": "⚡ **EWneo Switch/Motor Learning Process**\n\n🔧 Automatic setup in progress...\n\n📡 This process will:\n• Find next available EWneo index\n• Load gateway serial number\n• Set receive filter\n• Learn the receiver device\n\nPlease wait...",
-        "data": {}
-      },
       "device_confirm": {
         "title": "Confirm Device",
-        "description": "Device successfully detected:\n\n📡 {device_name}\n🔑 Serial: ...{serial_number}\n\nDo you want to save this device?",
+        "description": "{description}",
         "data": {
+          "device_name": "Device Name",
           "action": "Action"
         }
       },
@@ -196,6 +355,13 @@
         }
       },
       "device_add_select": {
+      "device_confirm_rename": {
+        "title": "Rename Device",
+        "description": "Current name: {current_name}",
+        "data": {
+          "device_name": "Device Name"
+        }
+      },
         "title": "Add ELDAT Device",
         "description": "Select the device type you want to learn.",
         "data": {
@@ -206,6 +372,13 @@
       "device_add_select_options": {
         "title": "Add Device (Options)",
         "description": "Select the device type to learn via options flow.",
+      "device_ewneo_receiver_confirm_rename": {
+        "title": "Rename EWneo Device",
+        "description": "Current name: {current_name}",
+        "data": {
+          "device_name": "Device Name"
+        }
+      },
         "data": {
           "device_type": "Device Type",
           "learning_timeout": "Learning Timeout (seconds)"
@@ -240,6 +413,20 @@
         }
       }
     },
+    "progress": {
+      "waiting_for_transmitter_telegram": {
+        "title": "📡 Learning EW Transmitter",
+        "description": "**🔴 Press ANY BUTTON on the EW Transmitter NOW**\n\n🔄 **Waiting for radio signal...**\n\n⏳ The system is waiting up to 30 seconds for the telegram.\n\n📊 After successful reception, the device information will be displayed and you can confirm the device.\n\n❌ You can cancel this process at any time."
+      },
+      "waiting_for_sensor_telegram": {
+        "title": "🌡️ Learning EWneo Sensors",
+        "description": "**🔴 Press the LEARN BUTTON on the EWneo Sensors NOW**\n\n🔄 **Waiting for learn telegram...**\n\n⏳ The system is waiting up to 30 seconds for the learn telegram.\n\n📊 Available sensors will be automatically detected and displayed.\n\n📊 After successful reception, the sensor information will be displayed and you can confirm the sensor.\n\n❌ You can cancel this process at any time."
+      },
+      "waiting_for_ewneo_join": {
+        "title": "🔗 Learning EWneo Switch/Motor",
+        "description": "**🔴 Press the LEARN BUTTON on the EWneo device NOW!**\n\n🔄 **Sending connection requests...**\n\n📡 The system is repeatedly sending EWB_JOIN_DEVICE commands.\n\n⏳ Timeout: 30 seconds\n\n💡 **Tip:** The LED on the device should be blinking.\n\n❌ You can cancel this process at any time."
+      }
+    },
     "error": {
       "cannot_connect": "Failed to connect to device. Check the path and permissions.",
       "invalid_device": "Invalid or unsupported device",
@@ -254,7 +441,7 @@
       "device_type_mismatch": "Detected device type does not match selection.",
       "measurement_without_learning": "Measurement telegram received, but sensor must be learned first. Press the learning button on the sensor and try again.",
       "invalid_sensor_telegram": "Invalid sensor telegram received. Please press the learning button on the sensor.",
-      "no_available_ewneo_index": "No available EWneo index found. All 100 EWneo indices are occupied.",
+      "no_available_ewneo_index": "No available EWneo index found. All 128 EWneo indices (0-127) are occupied.",
       "ewneo_learning_failed": "EWneo receiver learning failed. Please check the connection and try again.",
       "ewneo_join_failed": "Connection to EWneo receiver failed. Make sure the device is in learning mode.",
       "no_preparation_data": "Preparation data for EWneo receiver missing. Please restart the process.",
@@ -262,6 +449,7 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "device_already_exists": "This transmitter is already learned and cannot be overwritten.",
       "invalid_discovery_info": "Invalid discovery information received.",
       "not_eldat_device": "Not an ELDAT device",
       "no_rx11_configured": "No RX11 transceiver configured. Please setup an RX11 first.",
@@ -273,11 +461,14 @@
       "no_coordinator": "Coordinator not available",
       "no_rx11_connection": "No RX11 connection available",
       "rx11_not_connected": "RX11 transceiver is not connected",
-      "no_available_ewneo_index": "No available EWneo index found. All indices (0-255) are already in use.",
+      "no_available_ewneo_index": "No available EWneo index found. All 128 indices (0-127) are already in use.",
       "no_gateway_serial": "Could not load gateway serial number",
       "ewneo_join_failed": "EWneo receiver could not be learned. Make sure the device is in learning mode.",
       "ewneo_learning_failed": "EWneo receiver learning process failed. Please check the connection and try again.",
-      "no_preparation_data": "Preparation data for EWneo receiver missing. Please restart the process."
+      "no_preparation_data": "Preparation data for EWneo receiver missing. Please restart the process.",
+      "no_learned_device": "No learned device available",
+      "user_cancelled": "Configuration cancelled by user"
+      ,"user_cancelled_silent": ""
     }
   },
   "options": {
@@ -299,34 +490,72 @@
     }
   },
   "selector": {
+    "device_path": {
+      "manual_entry": "🔧 Enter path manually",
+      "refresh_list": "🔄 Refresh device list",
+      "show_all_devices": "📋 Show all USB devices",
+      "back_to_main": "⬅️ Back to main selection"
+    },
+    "device_type": {
+      "ew_transmitter": "🎛️ EW Transmitter (Remote Control)",
+      "ew_sensor": "🌡️ EWneo Sensor (Temperature/Humidity/Weather)",
+      "ew_receiver": "📥 EW Receiver (configure without learning)",
+      "ewneo_receiver": "📥 EWneo Switch/Motor (Neo Actuator)"
+    },
     "button_count": {
-      "button_count_1": "🔘 Single button (1 button)",
-      "button_count_2": "🔘🔘 Dual button (2 buttons)",
-      "button_count_3": "🔘🔘🔘 Triple button (3 buttons A/B/C)",
-      "button_count_4": "🔘🔘🔘🔘 Quad button (4 buttons A/B/C/D)"
+      "1": "🔘 Single button (1 button)",
+      "2": "🔘🔘 Dual button (2 buttons)",
+      "3": "🔘🔘🔘 Triple button (3 buttons A/B/C)",
+      "4": "🔘🔘🔘🔘 Quad button (4 buttons A/B/C/D)"
     },
     "receiver_type": {
       "switch": "🔌 Switch",
       "motor": "🏠 Motor/Blind",
-      "heating_cooling": "🌡️ Heating/Cooling"
+      "heating_cooling": "🌡️ Heating/Cooling (toggle operation only)"
     },
     "operating_mode": {
-      "1": "🔘 1-button operation",
-      "2": "🔘🔘 2-button operation", 
-      "3": "🔘🔘🔘 3-button operation"
+      "mode_1": "🔘 Toggle operation (On/Off)",
+      "mode_1_toggle": "🔘 1-button operation (Toggle)",
+      "mode_2": "🔘🔘 2-button operation (On + Off)",
+      "mode_3": "🔘🔘🔘 3-button operation (Up + Down + Stop)"
     },
     "action": {
-      "wait": "⏳ Keep waiting",
-      "cancel": "❌ Cancel",
-      "proceed": "✅ Ready - Device is in learning mode",
+      "start_learning": "▶️ Start learning",
       "confirm": "✅ Confirm",
+      "confirm_send_code_a": "✅ Confirm and send Code A",
+      "create_device": "✅ Create device",
+      "cancel": "❌ Cancel",
+      "proceed": "✅ Ready - device is in learning mode",
+      "wait": "⏳ Keep waiting",
       "ok": "✅ OK",
-      "retry": "🔄 Try again"
+      "retry": "🔄 Retry",
+      "back": "⬅️ Back",
+      "save": "💾 Save",
+      "enable_learning": "🟢 Enable learning mode",
+      "disable_learning": "🛑 Disable learning mode",
+      "manage_devices": "🔧 Manage devices",
+      "remove_device": "🗑️ Remove device"
     },
     "entity_type": {
       "switch": "🔌 Switch (On/Off)",
-      "light": "💡 Light (with advanced functions)",
-      "cover": "🏠 Cover/Blind"
+      "light": "💡 Light (with extended features)",
+      "cover": "🏠 Blind/Shutter"
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "button_short_press": "Button {subtype} short pressed",
+      "button_long_press": "Button {subtype} long pressed",
+      "button_press": "Button {subtype} pressed (start)",
+      "button_release": "Button {subtype} released",
+      "channel_on": "Channel {subtype} switched on",
+      "channel_off": "Channel {subtype} switched off"
+    },
+    "trigger_subtype": {
+      "A": "A",
+      "B": "B",
+      "C": "C",
+      "D": "D"
     }
   }
 }

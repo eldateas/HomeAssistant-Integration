@@ -56,6 +56,11 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
 
 def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, Any]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
     """Try to get entity specs from the device class using transceivers registry."""
+    device_type = device_info.get("type") or device_info.get("device_type")
+    if device_type == "ew_transmitter":
+        # Use legacy specs for EW-Transmitter to respect operating_type/usage_type settings
+        return None
+
     try:
         from .transceivers.rx11.devices.registry import get_device_class_for_info
         
@@ -80,7 +85,8 @@ def _empty_entity_dict() -> Dict[str, List[Dict[str, Any]]]:
         "cover": [],
         "sensor": [],
         "binary_sensor": [],
-        "button": []
+        "button": [],
+        "select": []
     }
 
 
@@ -239,20 +245,228 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
 
 
 def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    """Create entities for EW-Transmitter devices (LEGACY)."""
-    entities = _empty_entity_dict()
-    button_count = device_info.get("button_count", 2)
+    """Create entities for EW-Transmitter devices (LEGACY).
     
-    # Create binary sensor for each button
-    button_labels = ["A", "B", "C", "D"]
-    for i in range(button_count):
-        entities["binary_sensor"].append({
-            "type": "binary_sensor",
-            "name": f"{device_info.get('name', 'Transmitter')} Button {button_labels[i]}",
-            "unique_id": f"{serial_number}_button_{i}",
-            "device_class": "motion",
-            "icon": "mdi:gesture-tap-button"
+    Supports different operating modes:
+    - 1-Tast-Bedienung: Individual button entities
+    - 2-Tast-Bedienung: 
+      - EIN/AUS (switch): 2 buttons = 1 switch, 4 buttons = 2 switches
+      - AUF/ZU (cover): 2 buttons = 1 cover, 4 buttons = 2 covers
+    - 3-Tast-Bedienung: Cover with Auf/Zu/Stopp (A→Auf, B→Zu, C/D→Stopp)
+    """
+    entities = _empty_entity_dict()
+    
+    operating_type = device_info.get("operating_type", "1")
+    button_count = device_info.get("button_count", 4)
+    grouping_mode = device_info.get("grouping_mode", "single")
+    usage_type = device_info.get("usage_type", "switch")  # "switch" or "cover"
+    switch_mode = device_info.get("switch_mode", "impulse")
+    base_name = device_info.get('name', 'Transmitter')
+    
+    _LOGGER.info("🔍 EW-Transmitter entity specs: serial=%s, operating_type=%s, button_count=%s, grouping_mode=%s, switch_mode=%s",
+                serial_number[-8:], operating_type, button_count, grouping_mode, switch_mode)
+    
+    if operating_type == "1":
+        # 1-Tast-Bedienung
+        button_labels = ["A", "B", "C", "D"]
+        
+        if grouping_mode == "single":
+            # Einzeln schalten - immer Binary Sensor pro Taste
+            # Bei "impulse": Status wird bei Loslassen zurückgesetzt
+            # Bei "permanent": Status bleibt erhalten (toggle)
+            for i in range(button_count):
+                entities["binary_sensor"].append({
+                    "type": "binary_sensor",
+                    "name": f"Taste {button_labels[i]}",
+                    "unique_id": f"{serial_number}_button_{i}",
+                    "button": button_labels[i],
+                    "button_index": i,
+                    "switch_mode": switch_mode,  # "impulse" oder "permanent"
+                    "device_class": "button",
+                    "icon": "mdi:gesture-tap-button",
+                })
+        else: # "group" or any other grouping mode
+            # Als Gruppe schalten - immer Sensor mit letztem Button
+            # Bei "impulse": Status wird zurückgesetzt
+            # Bei "permanent": Status bleibt erhalten
+            _LOGGER.info("📋 Creating grouped sensor for %s: button_count=%d, options=%s",
+                        serial_number[-8:], button_count, button_labels[:button_count])
+            options = button_labels[:button_count]
+            if switch_mode == "impulse":
+                options = options + ["Aus"]
+            entities["sensor"].append({
+                "type": "sensor",
+                "name": f"{base_name} Last Button",
+                "unique_id": f"{serial_number}_last_button",
+                "switch_mode": switch_mode,  # "impulse" oder "permanent"
+                "icon": "mdi:radiobox-marked",
+                "device_class": "enum",
+                "options": options,
+            })
+    
+    elif operating_type == "2":
+        # 2-Tast-Bedienung -> create state sensors (An/Aus) or switches (Auf/Zu)
+        is_switch_mode = usage_type == "switch" or switch_mode == "switch"
+        if is_switch_mode:
+            state_options = ["An", "Aus"]
+            icon = "mdi:light-switch"
+            if button_count == 2 or grouping_mode == "single":
+                # 2 buttons → 1 state sensor (A→state[0], B→state[1])
+                entities["sensor"].append({
+                    "type": "sensor",
+                    "sensor_type": "transmitter_state",
+                    "name": "Schalter",
+                    "unique_id": f"{serial_number}_state_1",
+                    "channel": 0,
+                    "device_class": "enum",
+                    "options": state_options,
+                    "button_map": {
+                        0: state_options[0],
+                        1: state_options[1],
+                    },
+                    "icon": icon,
+                    "operating_type": operating_type,
+                    "usage_type": usage_type,
+                })
+            else:
+                # 4 buttons → 2 state sensors (A/B, C/D)
+                entities["sensor"].append({
+                    "type": "sensor",
+                    "sensor_type": "transmitter_state",
+                    "name": "Schalter 1",
+                    "unique_id": f"{serial_number}_state_1",
+                    "channel": 0,
+                    "device_class": "enum",
+                    "options": state_options,
+                    "button_map": {
+                        0: state_options[0],
+                        1: state_options[1],
+                    },
+                    "icon": icon,
+                    "operating_type": operating_type,
+                    "usage_type": usage_type,
+                })
+                entities["sensor"].append({
+                    "type": "sensor",
+                    "sensor_type": "transmitter_state",
+                    "name": "Schalter 2",
+                    "unique_id": f"{serial_number}_state_2",
+                    "channel": 1,
+                    "device_class": "enum",
+                    "options": state_options,
+                    "button_map": {
+                        2: state_options[0],
+                        3: state_options[1],
+                    },
+                    "icon": icon,
+                    "operating_type": operating_type,
+                    "usage_type": usage_type,
+                })
+        else:
+            # Auf/Zu -> switch entity with persistent state
+            state_options = ["Auf", "Zu"]
+            icon = "mdi:window-shutter"
+            if button_count == 2 or grouping_mode == "single":
+                entities["binary_sensor"].append({
+                    "type": "binary_sensor",
+                    "sensor_type": "transmitter_state",
+                    "name": "Schalter",
+                    "unique_id": f"{serial_number}_state_1_binary",
+                    "state_key": "transmitter_state_1",
+                    "channel": 0,
+                    "device_class": "opening",
+                    "options": state_options,
+                    "button_map": {
+                        0: state_options[0],
+                        1: state_options[1],
+                    },
+                    "icon": icon,
+                    "operating_type": operating_type,
+                    "usage_type": usage_type,
+                    "on_label": state_options[0],
+                    "off_label": state_options[1],
+                })
+            else:
+                entities["binary_sensor"].append({
+                    "type": "binary_sensor",
+                    "sensor_type": "transmitter_state",
+                    "name": "Schalter 1",
+                    "unique_id": f"{serial_number}_state_1_binary",
+                    "state_key": "transmitter_state_1",
+                    "channel": 0,
+                    "device_class": "opening",
+                    "options": state_options,
+                    "button_map": {
+                        0: state_options[0],
+                        1: state_options[1],
+                    },
+                    "icon": icon,
+                    "operating_type": operating_type,
+                    "usage_type": usage_type,
+                    "on_label": state_options[0],
+                    "off_label": state_options[1],
+                })
+                entities["binary_sensor"].append({
+                    "type": "binary_sensor",
+                    "sensor_type": "transmitter_state",
+                    "name": "Schalter 2",
+                    "unique_id": f"{serial_number}_state_2_binary",
+                    "state_key": "transmitter_state_2",
+                    "channel": 1,
+                    "device_class": "opening",
+                    "options": state_options,
+                    "button_map": {
+                        2: state_options[0],
+                        3: state_options[1],
+                    },
+                    "icon": icon,
+                    "operating_type": operating_type,
+                    "usage_type": usage_type,
+                    "on_label": state_options[0],
+                    "off_label": state_options[1],
+                })
+    
+    elif operating_type == "3":
+        # 3-Tast-Bedienung: state sensor with Auf/Zu/Stopp
+        # A=Auf, B=Zu, C=Stopp (nur 3 Tasten)
+        state_options = ["Auf", "Zu", "Stopp"]
+        entities["sensor"].append({
+            "type": "sensor",
+            "sensor_type": "transmitter_state",
+            "name": "Schalter",
+            "unique_id": f"{serial_number}_state",
+            "device_class": "enum",
+            "options": state_options,
+            "button_map": {
+                0: "Auf",
+                1: "Zu",
+                2: "Stopp",
+            },
+            "icon": "mdi:window-shutter",
+            "operating_type": operating_type,
         })
+    
+    else:
+        # Fallback: Create binary sensor for each button
+        _LOGGER.warning("⚠️ Unknown operating_type '%s' for %s - using fallback binary sensors",
+                       operating_type, serial_number[-8:])
+        button_labels = ["A", "B", "C", "D"]
+        for i in range(button_count):
+            entities["binary_sensor"].append({
+                "type": "binary_sensor",
+                "name": f"Taste {button_labels[i]}",
+                "unique_id": f"{serial_number}_button_{i}",
+                "button_index": i,
+                "button_label": button_labels[i],
+                "device_class": "button",
+                "icon": "mdi:gesture-tap-button"
+            })
+    
+    _LOGGER.info("✅ EW-Transmitter entities created: binary_sensor=%d, sensor=%d, switch=%d, cover=%d",
+                len(entities.get("binary_sensor", [])), 
+                len(entities.get("sensor", [])),
+                len(entities.get("switch", [])),
+                len(entities.get("cover", [])))
     
     return entities
 
@@ -321,7 +535,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "temperature",
-            "name": f"{base_name} Temperature",
+            "name": f"{base_name} Temperatur",
             "unique_id": f"{serial_number}_temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
@@ -333,7 +547,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "humidity",
-            "name": f"{base_name} Humidity",
+            "name": f"{base_name} Luftfeuchtigkeit",
             "unique_id": f"{serial_number}_humidity",
             "device_class": "humidity",
             "unit_of_measurement": "%",
