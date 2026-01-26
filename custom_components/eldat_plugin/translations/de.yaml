@@ -50,6 +50,12 @@ eldat_plugin:
       data:
         receiver_kind: Gerätetyp
         operating_mode: Betriebsart
+    device_confirm_ewneo_sensor:
+      title: EWneo-Sensor bestätigen
+      description: "✅ **EWneo-Sensor erfolgreich erkannt!**\n\n**🔍 Erkannte Gerätedaten:**\n• Seriennummer: `{serial_short}`\n• Name: {suggested_name}\n• Erkannte Sensoren:\n{sensor_list}\n\n**⚡ Was wird angelegt:**\n• 1 EWneo-Sensor Gerät\n• Sensor-Entitäten für alle erkannten Messwerte\n• Batteriestatus-Sensor\n\n**⚙️ Gerät anlegen:**\nWählen Sie 'Anlegen' um das Gerät zu erstellen."
+      data:
+        device_name: Gerätename
+        action: Aktion
     abort:
       already_configured: "Gerät ist bereits konfiguriert"
       cannot_connect: "Kann nicht mit dem Gerät verbinden"

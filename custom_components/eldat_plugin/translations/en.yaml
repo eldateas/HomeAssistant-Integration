@@ -50,6 +50,12 @@ eldat_plugin:
       data:
         receiver_kind: Device Type
         operating_mode: Operating Mode
+    device_confirm_ewneo_sensor:
+      title: Confirm EWneo Sensor
+      description: "✅ **EWneo Sensor successfully detected!**\n\n**🔍 Detected device info:**\n• Serial: `{serial_short}`\n• Name: {suggested_name}\n• Detected sensors:\n{sensor_list}\n\n**⚡ What will be created:**\n• 1 EWneo Sensor device\n• Sensor entities for all detected measurements\n• Battery status sensor\n\n**⚙️ Create device:**\nSelect 'Create' to add the device."
+      data:
+        device_name: Device Name
+        action: Action
     abort:
       already_configured: "Device is already configured"
       cannot_connect: "Cannot connect to device"

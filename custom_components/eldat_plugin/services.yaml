@@ -48,6 +48,18 @@ remove_device:
       required: false
       default: false
       selector:
+
+refresh_entity_specs:
+  name: Refresh Entity Specs
+  description: Regenerate entity specifications for a device (updates icons, features, etc). Reload integration after running.
+  fields:
+    serial_number:
+      name: Serial Number
+      description: Serial number of the device to refresh
+      required: true
+      example: "1234567890ABCDEF"
+      selector:
+        text:
         boolean:
 
 remove_device_by_id:

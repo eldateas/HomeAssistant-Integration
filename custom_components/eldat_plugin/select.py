@@ -17,7 +17,7 @@ from .entity_specs import create_entity_specs_for_device
 _LOGGER = logging.getLogger(__name__)
 
 # Event name used for button presses (matches coordinator.py)
-EVENT_BUTTON_SHORT_PRESS = "eldat_button_short_press"
+EVENT_BUTTON_SHORT_PRESS = "eldat_plugin_button_press"
 
 
 async def async_setup_entry(

@@ -303,15 +303,15 @@ async def async_attach_trigger(
     
     # Map trigger types to event types
     event_type_map = {
-        TRIGGER_TYPE_BUTTON_SHORT_PRESS: "eldat_button_short_press",
+        TRIGGER_TYPE_BUTTON_SHORT_PRESS: "eldat_button_press",
         TRIGGER_TYPE_BUTTON_LONG_PRESS: "eldat_button_long_press",
-        TRIGGER_TYPE_BUTTON_PRESS: "eldat_button_press_start",
-        TRIGGER_TYPE_BUTTON_RELEASE: "eldat_button_press_end",
-        TRIGGER_TYPE_CHANNEL_ON: "eldat_button_press_start",
-        TRIGGER_TYPE_CHANNEL_OFF: "eldat_button_press_end",
+        TRIGGER_TYPE_BUTTON_PRESS: "eldat_button_press",
+        TRIGGER_TYPE_BUTTON_RELEASE: "eldat_button_release",
+        TRIGGER_TYPE_CHANNEL_ON: "eldat_button_press",
+        TRIGGER_TYPE_CHANNEL_OFF: "eldat_button_release",
     }
     
-    event_type = event_type_map.get(trigger_type, "eldat_button_short_press")
+    event_type = event_type_map.get(trigger_type, "eldat_plugin_button_press")
     
     event_match_key = "button_name"
     event_match_value = button_name

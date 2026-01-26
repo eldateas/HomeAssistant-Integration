@@ -83,7 +83,7 @@ Mit vollständiger 5-Byte EWB_RCV Datenauswertung:
 - Gespeicherte Positionen (#1-#3) Unterstützung
 
 #### **Positionless Mode** (ohne Runtime-Messung)  
-- Grundlegende Auf/Ab/Stop-Befehle
+- Grundlegende Auf/Stop/Zu-Befehle
 - Automatische Warnung bei Positionssteuerungs-Versuchen
 - Transparenter Fallback-Modus
 
@@ -324,7 +324,7 @@ Falls Home Assistant beim Start hängt:
 
 ### Position vs. Positionless-Probleme
 **Positionless-Modus** (kein Runtime-Measurement):
-- Nur Auf/Ab/Stop-Befehle verfügbar
+- Nur Auf/Stop/Zu-Befehle verfügbar
 - Position-Parameter werden abgelehnt
 - Log: "Position control not available - runtime measurement required"
 

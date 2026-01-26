@@ -88,21 +88,8 @@ async def async_setup_entry(
         device_type = device_info.get("type", "unknown")
         device_name = device_info.get("name", serial_number)
         
-        # ALWAYS create a remove button for EVERY device without exception
-        # This ensures even problematic/corrupted devices can be removed
-        remove_unique_id = f"{serial_number}_remove"
-        
-        # Always create/add remove button (Home Assistant handles duplicates automatically)
-        remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
-        buttons.append(remove_button)
-        entity_registry.mark_entity_created(remove_unique_id, serial_number)
-        
-        # Log creation/restoration
-        existing_entity = ha_entity_registry.async_get_entity_id("button", DOMAIN, remove_unique_id)
-        if existing_entity:
-            _LOGGER.debug("♻️ Re-adding existing remove button for device: %s", serial_number[-8:])
-        else:
-            _LOGGER.debug("✅ Creating new remove button for device: %s", serial_number[-8:])
+        # NOTE: Remove buttons are no longer created - devices can be deleted via the
+        # three-dot menu in the integration view (async_remove_config_entry_device)
         
         # Check if this device has configured button entities
         button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
@@ -153,10 +140,8 @@ async def async_setup_entry(
             # Create additional legacy button entities for bidirectional device types
             additional_buttons = _create_buttons_for_device(serial_number, device_info)
             if additional_buttons:
-                # Filter out the remove button since we already added it above
-                additional_buttons = [b for b in additional_buttons if not isinstance(b, DeviceRemoveButton)]
                 buttons.extend(additional_buttons)
-                has_action_buttons = len(additional_buttons) > 0  # Count legacy buttons as action buttons
+                has_action_buttons = len(additional_buttons) > 0
                 _LOGGER.debug("Created %d additional button entities for device: %s (%s)", 
                             len(additional_buttons), device_name, device_type)
         
@@ -208,41 +193,10 @@ async def async_setup_entry(
             
         _LOGGER.info("🔘 Handling device added event for %s (type: %s)", serial_number, device_type)
         
-        # ALWAYS create a remove button for every device (for easy cleanup of corrupted entries)
-        # Check HomeAssistant's entity registry (single source of truth)
-        from homeassistant.helpers import entity_registry as er
-        ha_entity_registry = er.async_get(coordinator.hass)
-        entity_registry = get_entity_registry()
+        # NOTE: Remove buttons are no longer created - devices can be deleted via the
+        # three-dot menu in the integration view (async_remove_config_entry_device)
         
         new_buttons = []
-        remove_unique_id = f"{serial_number}_remove"
-        
-        # ALWAYS create remove button for new devices, or when forced
-        # For existing devices, check if already created this session
-        should_create_remove_button = True
-        
-        if not (orphaned_repair or force_create):
-            # Only check session tracking for non-forced additions
-            if entity_registry.is_entity_created_this_session(remove_unique_id):
-                should_create_remove_button = False
-                _LOGGER.debug("Remove button %s already created this session, skipping", remove_unique_id[-16:])
-            else:
-                # Check if button already exists in HA registry
-                existing_entity = ha_entity_registry.async_get_entity_id("button", "eldat_plugin", remove_unique_id)
-                if existing_entity:
-                    should_create_remove_button = False
-                    _LOGGER.debug("Remove button %s already exists in HA, skipping", remove_unique_id[-16:])
-        
-        if should_create_remove_button:
-            # Create or recreate remove button
-            remove_button = DeviceRemoveButton(coordinator, serial_number, device_info)
-            new_buttons.append(remove_button)
-            entity_registry.mark_entity_created(remove_unique_id, serial_number)
-            
-            if orphaned_repair or force_create:
-                _LOGGER.info("🔄 Force-creating remove button for device %s", serial_number[-8:])
-            else:
-                _LOGGER.info("✅ Created remove button for device %s", serial_number[-8:])
         
         # For EW-Receivers, create additional configured button entities with press detection
         # Skip heating/cooling receivers as they use toggle switches instead
@@ -278,21 +232,19 @@ async def async_setup_entry(
                     except Exception as e:
                         _LOGGER.error("❌ Error creating EW-Receiver button for %s: %s", serial_number, e)
         elif device_type == "ew_transmitter":
-            # For EW-Transmitters, no additional action buttons needed, just the remove button
-            _LOGGER.info("✅ EW-Transmitter device %s - only remove button needed", serial_number[-8:])
+            # EW-Transmitters don't need action buttons - they only send signals
+            _LOGGER.debug("EW-Transmitter device %s - no button entities needed", serial_number[-8:])
         else:
-            # For other device types, create additional legacy buttons (excluding remove button)
+            # For other device types, create additional legacy buttons
             additional_buttons = _create_buttons_for_device(serial_number, device_info)
             if additional_buttons:
-                # Filter out the remove button since we already added it above
-                additional_buttons = [b for b in additional_buttons if not isinstance(b, DeviceRemoveButton)]
                 new_buttons.extend(additional_buttons)
                 _LOGGER.debug("Added %d additional legacy button entities for device: %s", 
                             len(additional_buttons), serial_number)
         
         if new_buttons:
             async_add_entities(new_buttons, update_before_add=False)
-            _LOGGER.info("✅ Added %d button entities (including remove) for device %s", 
+            _LOGGER.info("✅ Added %d button entities for device %s", 
                        len(new_buttons), serial_number[-8:])
             # Track this device as having button entities created
             devices_with_button_entities.add(serial_number)
@@ -333,11 +285,11 @@ async def async_setup_entry(
         new_buttons = []
         for entity_spec in button_entities:
             try:
-                # Check if this is a remove button
+                # Skip remove buttons - devices can be deleted via the UI menu
                 if entity_spec.get("action") == "remove_device":
-                    button = EldatRemoveButton(coordinator, serial_number, device_info)
-                else:
-                    button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
+                    continue
+                
+                button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                 new_buttons.append(button)
                 _LOGGER.info("✅ Created button entity: %s (%s)", entity_spec.get('name'), entity_spec.get('action'))
             except Exception as e:
@@ -535,7 +487,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                 
                 # Fire events for automation with proper types
                 if press_type == "short":
-                    self.hass.bus.async_fire("eldat_button_short_press", {
+                    self.hass.bus.async_fire("eldat_plugin_button_press", {
                         "device_id": self._serial_number,
                         "entity_id": self.entity_id,
                         "subtype": self._action,
@@ -641,7 +593,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                 success = await self._execute_short_press()
                 if success:
                     # Fire events for automation with proper types  
-                    self.hass.bus.async_fire("eldat_button_short_press", {
+                    self.hass.bus.async_fire("eldat_plugin_button_press", {
                         "device_id": self._serial_number,
                         "entity_id": self.entity_id,
                         "subtype": self._action,
@@ -1026,7 +978,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
         
         # Use device class specific icons if available
         if self._device_class == "garage":
-            return icon_map.get(self._button_type, "mdi:garage")
+            return icon_map.get(self._button_type, "mdi:window-shutter")
         elif self._device_class == "heat":
             return icon_map.get(self._button_type, "mdi:thermostat")
         else:
@@ -1213,8 +1165,15 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
         return cmd_bytes
 
 
+# DEPRECATED: This class is no longer used.
+# Devices can now be deleted via the three-dot menu in the integration view.
+# Kept for backwards compatibility with existing entities.
 class EldatRemoveButton(EldatEntity, ButtonEntity):
-    """Button entity for removing devices from ELDAT integration."""
+    """Button entity for removing devices from ELDAT integration.
+    
+    DEPRECATED: Use the device menu (three dots) -> 'Delete' instead.
+    This class is only kept for backwards compatibility.
+    """
     
     def __init__(self, coordinator: EldatCoordinator, serial_number: str, device_info: dict):
         """Initialize the remove button."""
@@ -1350,8 +1309,15 @@ class EldatTestButton(EldatEntity, ButtonEntity):
         return bytes([0x01, 0x00, 0x01])
 
 
+# DEPRECATED: This class is no longer used.
+# Devices can now be deleted via the three-dot menu in the integration view.
+# Kept for backwards compatibility with existing entities.
 class DeviceRemoveButton(ButtonEntity, EldatEntity):
-    """Button entity for removing ELDAT devices."""
+    """Button entity for removing ELDAT devices.
+    
+    DEPRECATED: Use the device menu (three dots) -> 'Delete' instead.
+    This class is only kept for backwards compatibility.
+    """
     
     def __init__(
         self,

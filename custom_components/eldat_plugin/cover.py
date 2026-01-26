@@ -1,6 +1,7 @@
 """Cover platform for ELDAT motor devices."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -38,8 +39,13 @@ async def async_setup_entry(
     for serial_number, device_info in coordinator.get_all_devices().items():
         entity_specs = device_info.get("entities", [])
         
+        _LOGGER.info("🔍 Checking device %s: type=%s, receiver_kind=%s, %d entity_specs", 
+                    serial_number[-6:], device_info.get("type"), 
+                    device_info.get("receiver_kind"), len(entity_specs))
+        
         for entity_spec in entity_specs:
             if entity_spec.get("type") == "cover":
+                _LOGGER.info("✅ Found cover entity_spec for %s", serial_number[-6:])
                 try:
                     if device_info.get("neo_device"):
                         # EWneo-Motor entity - check for multi-motor devices
@@ -163,28 +169,38 @@ class EldatCover(EldatEntity, CoverEntity):
         self._entity_spec = entity_spec
         
         # Get device class from entity_spec or default to SHUTTER
-        device_class_str = entity_spec.get("device_class", "blind")
+        device_class_str = entity_spec.get("device_class", "shade")
         if device_class_str == "blind":
             self._attr_device_class = CoverDeviceClass.BLIND
         elif device_class_str == "shutter":
             self._attr_device_class = CoverDeviceClass.SHUTTER
+        elif device_class_str == "shade":
+            self._attr_device_class = CoverDeviceClass.SHADE
         elif device_class_str == "garage":
             self._attr_device_class = CoverDeviceClass.GARAGE
         else:
             self._attr_device_class = CoverDeviceClass.SHUTTER
         
-        self._attr_supported_features = (
-            CoverEntityFeature.OPEN |
-            CoverEntityFeature.CLOSE |
-            CoverEntityFeature.STOP
-        )
+        # Set features based on entity_spec - only add STOP if supports_stop is True
+        self._supports_stop = entity_spec.get("supports_stop", True)
+        if self._supports_stop:
+            self._attr_supported_features = (
+                CoverEntityFeature.OPEN |
+                CoverEntityFeature.CLOSE |
+                CoverEntityFeature.STOP
+            )
+        else:
+            self._attr_supported_features = (
+                CoverEntityFeature.OPEN |
+                CoverEntityFeature.CLOSE
+            )
         
         # Set unique ID and name from entity_spec
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_cover")
         self._attr_name = entity_spec.get("name", device_info.get('name', 'Motor'))
         
         # Set icon from entity_spec
-        self._attr_icon = entity_spec.get("icon", "mdi:blinds")
+        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
         
         self._attr_is_closed = None
         self._attr_is_closing = False
@@ -193,25 +209,64 @@ class EldatCover(EldatEntity, CoverEntity):
         # Store operating mode for EW-Receiver
         self._operating_mode = entity_spec.get("operating_mode", device_info.get("operating_mode", 1))
         self._receiver_kind = entity_spec.get("receiver_kind", device_info.get("receiver_kind", "motor"))
+        
+        # Store button config for EW-Receiver (direct RX11 commands)
+        self._button_config = entity_spec.get("button_config", {})
+        self._rx11_index = device_info.get("rx11_index")
+        self._stateless = entity_spec.get("stateless", False)
     
     @property
     def is_closed(self) -> bool | None:
-        """Return if cover is closed."""
+        """Return if cover is closed. Returns None for stateless covers."""
+        if self._stateless:
+            return None
         return self._attr_is_closed
     
     @property
     def is_closing(self) -> bool:
         """Return if cover is closing."""
+        if self._stateless:
+            return False
         return self._attr_is_closing
     
     @property
     def is_opening(self) -> bool:
         """Return if cover is opening."""
+        if self._stateless:
+            return False
         return self._attr_is_opening
     
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
         try:
+            # For EW-Receiver with button_config, send command via coordinator
+            if self._button_config and "open" in self._button_config:
+                button_code = self._button_config["open"]
+                _LOGGER.info("📤 EW-Receiver Cover OPEN: serial=%s, button=%d, stateless=%s", 
+                           self._serial_number[-8:], button_code, self._stateless)
+                
+                # For stateless covers, don't track opening/closing states
+                if not self._stateless:
+                    self._attr_is_opening = True
+                    self._attr_is_closing = False
+                    self.async_write_ha_state()
+                
+                # Send command via coordinator (routes to RX11 for EW receivers)
+                success = await self._send_ew_command(button_code)
+                
+                if success:
+                    _LOGGER.info("✅ Cover %s OPEN command sent successfully", self._serial_number[-8:])
+                else:
+                    _LOGGER.warning("❌ Failed to send OPEN command for cover %s", self._serial_number[-8:])
+                
+                # For stateless covers, don't update state
+                if not self._stateless:
+                    self._attr_is_opening = False
+                    self._attr_is_closed = False
+                    self.async_write_ha_state()
+                return
+            
+            # Fallback: Try device instance for other device types
             device_instance = None
             if hasattr(self.coordinator.transceiver, '_device_instances'):
                 device_instance = self.coordinator.transceiver._device_instances.get(self._serial_number)
@@ -233,6 +288,9 @@ class EldatCover(EldatEntity, CoverEntity):
                 self._attr_is_opening = False
                 self._attr_is_closed = False
                 self.async_write_ha_state()
+            else:
+                _LOGGER.warning("No method to open cover %s - no button_config and no device_instance", 
+                              self._serial_number[-8:])
         except Exception as e:
             _LOGGER.error("Error opening cover %s channel %d: %s", 
                          self._serial_number[-6:], self._channel, e)
@@ -242,6 +300,34 @@ class EldatCover(EldatEntity, CoverEntity):
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
         try:
+            # For EW-Receiver with button_config, send command via coordinator
+            if self._button_config and "close" in self._button_config:
+                button_code = self._button_config["close"]
+                _LOGGER.info("📤 EW-Receiver Cover CLOSE: serial=%s, button=%d, stateless=%s", 
+                           self._serial_number[-8:], button_code, self._stateless)
+                
+                # For stateless covers, don't track opening/closing states
+                if not self._stateless:
+                    self._attr_is_closing = True
+                    self._attr_is_opening = False
+                    self.async_write_ha_state()
+                
+                # Send command via coordinator (routes to RX11 for EW receivers)
+                success = await self._send_ew_command(button_code)
+                
+                if success:
+                    _LOGGER.info("✅ Cover %s CLOSE command sent successfully", self._serial_number[-8:])
+                else:
+                    _LOGGER.warning("❌ Failed to send CLOSE command for cover %s", self._serial_number[-8:])
+                
+                # For stateless covers, don't update state
+                if not self._stateless:
+                    self._attr_is_closing = False
+                    self._attr_is_closed = True
+                    self.async_write_ha_state()
+                return
+            
+            # Fallback: Try device instance for other device types
             device_instance = None
             if hasattr(self.coordinator.transceiver, '_device_instances'):
                 device_instance = self.coordinator.transceiver._device_instances.get(self._serial_number)
@@ -263,6 +349,9 @@ class EldatCover(EldatEntity, CoverEntity):
                 self._attr_is_closing = False
                 self._attr_is_closed = True
                 self.async_write_ha_state()
+            else:
+                _LOGGER.warning("No method to close cover %s - no button_config and no device_instance", 
+                              self._serial_number[-8:])
         except Exception as e:
             _LOGGER.error("Error closing cover %s channel %d: %s", 
                          self._serial_number[-6:], self._channel, e)
@@ -271,7 +360,32 @@ class EldatCover(EldatEntity, CoverEntity):
     
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
+        # Only if stop is supported
+        if not self._supports_stop:
+            _LOGGER.debug("Stop not supported for cover %s", self._serial_number[-8:])
+            return
+            
         try:
+            # For EW-Receiver with button_config, send command directly via RX11
+            if self._button_config and "stop" in self._button_config:
+                button_code = self._button_config["stop"]
+                _LOGGER.info("📤 EW-Receiver Cover STOP: serial=%s, button=%d", 
+                           self._serial_number[-8:], button_code)
+                
+                self._attr_is_closing = False
+                self._attr_is_opening = False
+                self.async_write_ha_state()
+                
+                # Send command via RX11
+                success = await self._send_ew_command(button_code)
+                
+                if success:
+                    _LOGGER.info("✅ Cover %s STOP command sent successfully", self._serial_number[-8:])
+                else:
+                    _LOGGER.warning("❌ Failed to send STOP command for cover %s", self._serial_number[-8:])
+                return
+            
+            # Fallback: Try device instance for other device types
             device_instance = None
             if hasattr(self.coordinator.transceiver, '_device_instances'):
                 device_instance = self.coordinator.transceiver._device_instances.get(self._serial_number)
@@ -294,6 +408,24 @@ class EldatCover(EldatEntity, CoverEntity):
             self._attr_is_closing = False
             self._attr_is_opening = False
             self.async_write_ha_state()
+    
+    async def _send_ew_command(self, button_code: int) -> bool:
+        """Send EW command via Coordinator (which routes to RX11 for EW receivers)."""
+        try:
+            # Use coordinator.send_command like the switch entity does
+            # This properly routes to send_command_to_receiver for EW receivers
+            command = bytes([button_code])
+            success = await self.coordinator.send_command(
+                self._serial_number,
+                command,
+                action="cover_command"
+            )
+            _LOGGER.debug("EW cover command sent: serial=%s, button=%d, success=%s",
+                         self._serial_number[-8:], button_code, success)
+            return success
+        except Exception as e:
+            _LOGGER.error("Error sending EW cover command: %s", e)
+            return False
     
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""

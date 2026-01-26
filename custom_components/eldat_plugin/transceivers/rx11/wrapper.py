@@ -85,6 +85,34 @@ class RX11Wrapper:
         
         _LOGGER.info("✅ RX11 Pure Python wrapper initialized for %s", device_path)
     
+    def set_device_path(self, device_path: str) -> None:
+        """Update the device path for reconnection after USB port change.
+        
+        This recreates the RxModule with the new port path.
+        """
+        if device_path == self.device_path:
+            return
+        
+        _LOGGER.info("🔄 Updating RX11 device path: %s → %s", self.device_path, device_path)
+        
+        # Disconnect existing module if connected
+        if self._connected:
+            try:
+                self._module.dispose()
+            except Exception as e:
+                _LOGGER.debug("Error disposing old module: %s", e)
+        
+        self.device_path = device_path
+        self._connected = False
+        
+        # Create new module with new path
+        self._module = RxModule(port=device_path, baudrate=115200, debug=True)
+        
+        # Reset version cache to force re-fetch
+        self._hw_version_cache = None
+        self._fw_version_cache = None
+        self._versions_fetched = False
+    
     # ================================================================================================
     # CONNECTION MANAGEMENT
     # ================================================================================================
@@ -108,6 +136,8 @@ class RX11Wrapper:
                     
                     # Register disconnect callback for immediate notification on hardware errors
                     self._module.set_disconnect_callback(self._on_hardware_disconnect)
+                    # Register reconnect callback to restart receive loops after reconnect
+                    self._module.set_reconnect_callback(self._on_hardware_reconnect)
                     
                     # Test connection and fetch versions
                     await asyncio.sleep(0.3)  # Initial settle time
@@ -133,11 +163,11 @@ class RX11Wrapper:
                     
                     return True
                 else:
-                    _LOGGER.error("❌ Failed to connect to RX11")
+                    _LOGGER.debug("RX11 connect() returned False")
                     return False
                     
             except Exception as e:
-                _LOGGER.error("❌ Exception connecting to RX11: %s", e)
+                _LOGGER.debug("Exception connecting to RX11: %s", e)
                 return False
     
     async def disconnect(self):
@@ -169,22 +199,80 @@ class RX11Wrapper:
         This is called from the serial handler thread, so we need to be
         thread-safe and schedule any async operations properly.
         """
-        _LOGGER.warning("🔴 RX11 Hardware-Disconnect erkannt - aktualisiere Status sofort")
+        _LOGGER.warning("🔴 RX11 Hardware-Disconnect erkannt - stoppe RCV-Loop und aktualisiere Status")
         
         # Mark as disconnected immediately
         self._connected = False
         self._consecutive_errors += 1
         
-        # Notify coordinator to update listeners immediately
+        # Stop receive loops and health check on the event loop
         if self._coordinator and hasattr(self._coordinator, 'hass'):
             try:
-                # Schedule async update on the event loop
-                self._coordinator.hass.loop.call_soon_threadsafe(
-                    self._coordinator.async_update_listeners
+                # Schedule async operations to stop loops
+                async def stop_loops():
+                    try:
+                        # Stop EWB receive loop
+                        _LOGGER.info("⏹️ Stopping EWB receive loop due to disconnect...")
+                        await self.rx11_ewb_sensor_stop_receive_loop()
+                        
+                        # Stop health check
+                        _LOGGER.info("⏹️ Stopping health check due to disconnect...")
+                        await self._stop_health_check_task()
+                        
+                        # Notify coordinator after cleanup
+                        self._coordinator.async_update_listeners()
+                        _LOGGER.info("✅ RCV-Loop gestoppt und Coordinator benachrichtigt")
+                    except Exception as e:
+                        _LOGGER.error("❌ Fehler beim Stoppen der Loops: %s", e)
+                
+                # Schedule on event loop
+                asyncio.run_coroutine_threadsafe(
+                    stop_loops(),
+                    self._coordinator.hass.loop
                 )
-                _LOGGER.info("✅ Coordinator wurde über Hardware-Disconnect benachrichtigt")
             except Exception as e:
-                _LOGGER.warning("⚠️ Fehler beim Benachrichtigen des Coordinators: %s", e)
+                _LOGGER.warning("⚠️ Fehler beim Schedulen des Disconnect-Handlers: %s", e)
+    
+    def _on_hardware_reconnect(self) -> None:
+        """Called by RxModule after a successful reconnect.
+        
+        This is called from the serial handler thread, so we need to be
+        thread-safe and schedule any async operations properly.
+        """
+        _LOGGER.info("🔄 RX11 Hardware-Reconnect erfolgreich - starte RCV-Loop neu")
+        
+        # Mark as connected
+        self._connected = True
+        self._serial_error_count = 0
+        self._consecutive_errors = 0
+        
+        # Restart receive loops on the event loop
+        if self._coordinator and hasattr(self._coordinator, 'hass'):
+            try:
+                # Schedule async operations on the event loop
+                async def restart_loops():
+                    try:
+                        # Start fresh EWB receive loop (already stopped by disconnect handler)
+                        _LOGGER.info("🚀 Starting fresh EWB receive loop after reconnect...")
+                        await self.rx11_ewb_sensor_start_receive_loop()
+                        
+                        # Start fresh health check (already stopped by disconnect handler)
+                        _LOGGER.info("🏥 Starting fresh health check after reconnect...")
+                        await self._start_health_check()
+                        
+                        # Notify coordinator
+                        self._coordinator.async_update_listeners()
+                        _LOGGER.info("✅ RCV-Loop erfolgreich neugestartet nach Reconnect")
+                    except Exception as e:
+                        _LOGGER.error("❌ Fehler beim Neustarten der RCV-Loop: %s", e)
+                
+                # Schedule on event loop
+                asyncio.run_coroutine_threadsafe(
+                    restart_loops(),
+                    self._coordinator.hass.loop
+                )
+            except Exception as e:
+                _LOGGER.error("❌ Fehler beim Schedulen des Reconnect-Handlers: %s", e)
     
     def get_connection_stats(self) -> dict:
         """Get connection and error statistics."""
@@ -227,10 +315,21 @@ class RX11Wrapper:
                     hw_str = hw_str[:null_index]
                 version = hw_str.decode('ascii', errors='ignore').strip()
                 self._hw_version_cache = version
+                self._last_successful_communication = time.time()
                 return version
             else:
-                _LOGGER.warning("Hardware version query failed: 0x%02x", result)
+                error_name = self._get_error_name(result)
+                if result == 0xFF:  # ERR_FAILSTATE
+                    _LOGGER.warning("Hardware version query failed: %s (0x%02x) - Gerät im Fehlerzustand, Reconnect erforderlich", error_name, result)
+                    # Mark for reconnection
+                    self._consecutive_errors += 1
+                else:
+                    _LOGGER.warning("Hardware version query failed: %s (0x%02x)", error_name, result)
                 return None
+        except (OSError, IOError) as e:
+            _LOGGER.error("Hardware version I/O error (USB getrennt?): %s", e)
+            self._consecutive_errors += 1
+            return None
         except Exception as e:
             _LOGGER.error("Exception getting hardware version: %s", e)
             return None
@@ -250,10 +349,18 @@ class RX11Wrapper:
                 if incomplete:
                     version += " (incomplete)"
                 self._fw_version_cache = version
+                self._last_successful_communication = time.time()
                 return version
             else:
-                _LOGGER.warning("Firmware version query failed: 0x%02x", result)
+                error_name = self._get_error_name(result)
+                if result == 0xFF:  # ERR_FAILSTATE
+                    _LOGGER.warning("Firmware version query failed: %s (0x%02x) - Gerät im Fehlerzustand", error_name, result)
+                else:
+                    _LOGGER.warning("Firmware version query failed: %s (0x%02x)", error_name, result)
                 return None
+        except (OSError, IOError) as e:
+            _LOGGER.error("Firmware version I/O error (USB getrennt?): %s", e)
+            return None
         except Exception as e:
             _LOGGER.error("Exception getting firmware version: %s", e)
             return None
@@ -272,7 +379,11 @@ class RX11Wrapper:
     # ================================================================================================
     
     async def rx11_ew_receiver_get_serial_by_index(self, index: int) -> Optional[str]:
-        """Get EW receiver serial by index."""
+        """Get EW receiver serial by index.
+        
+        Returns the gateway serial for the given index from the RX11.
+        The RX11 has pre-configured gateway serials for each index (0-127).
+        """
         # Check cache first
         cached = self._get_cached_serial(index)
         if cached:
@@ -285,9 +396,13 @@ class RX11Wrapper:
             
             if result == ErrorCode.SUCCESS:
                 serial_hex = ''.join(f'{b:02X}' for b in serial)
-                if serial_hex != "00" * 16:
-                    self._cache_serial(index, serial_hex)
-                    return serial_hex
+                # Cache and return even if all zeros - the RX11 uses the index as address
+                # A null serial means the slot is available but has a valid address
+                self._cache_serial(index, serial_hex)
+                _LOGGER.debug("📋 EW serial at index %d: %s", index, serial_hex[-8:])
+                return serial_hex
+            else:
+                _LOGGER.warning("❌ Failed to get EW serial at index %d: error code %d", index, result)
             return None
         except Exception as e:
             _LOGGER.error("Exception getting EW serial at index %d: %s", index, e)
@@ -859,10 +974,14 @@ class RX11Wrapper:
                 health_check_errors = 0  # Reset errors after reconnect
                 continue
             
-            # Check if hardware error occurred - skip health checks during hardware error
+            # Check if hardware error occurred - initiate reconnect immediately
             if self._module.has_hardware_error:
-                _LOGGER.debug("🔴 Hardware-Fehler erkannt - Health check pausiert")
-                await asyncio.sleep(2.0)
+                _LOGGER.warning("🔴 Hardware-Fehler erkannt - initiiere sofortigen Reconnect")
+                self._connected = False
+                # Clear the hardware error flag before attempting reconnect
+                self._module.clear_hardware_error()
+                await self._handle_connection_lost()
+                health_check_errors = 0
                 continue
                 
             try:

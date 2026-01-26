@@ -1,36 +1,38 @@
 {
   "config": {
     "step": {
-      "user": {
-        "title": "ELDAT RX11 USB Transceiver einrichten",
-        "description": "Es wurden {found_devices} ELDAT Geräte gefunden: {device_list}.\n\n{status}\n\nWählen Sie ein Gerät aus der Liste oder verwenden Sie die anderen Optionen.",
+      "_comment_initial_setup": "===== INITIAL SETUP FLOW (Transceiver Einrichtung) =====",
+      "rx11_setup": {
+        "title": "ELDAT RX11 USB-Transceiver einrichten",
+        "description": "Wählen Sie den erkannten RX11 USB-Transceiver aus oder suchen Sie erneut nach angeschlossenen Geräten.",
         "data": {
-          "device_path": "USB-Gerät",
-          "device_name": "Name der Integration"
+          "device_path": "RX11 USB-Transceiver",
+          "device_name": "Name des Transceivers"
         },
         "data_description": {
-          "device_path": "Wählen Sie ein verfügbares Gerät oder manuelle Eingabe",
-          "device_name": "Anzeigename für die Integration"
+          "device_path": "Wählen Sie den RX11 aus der Liste oder klicken Sie auf 'Erneut suchen'",
+          "device_name": "Anzeigename für den Transceiver in Home Assistant"
         }
       },
       "device": {
         "title": "Neues ELDAT Gerät hinzufügen",
         "description": "Fügen Sie ein neues ELDAT Gerät über den RX11 Transceiver hinzu."
       },
+      "_comment_device_selection": "===== DEVICE TYPE SELECTION FLOW (Gerätetyp Auswahl) =====",
       "device_type_select": {
-        "title": "Gerätetyp auswählen",
-        "description": "Wählen Sie den Gerätetyp, den Sie hinzufügen möchten.",
+        "title": "Geräteauswahl",
+        "description": "Welches Gerät möchten Sie hinzufügen?",
         "menu_options": {
-          "device_transmitter_config": "🎛️ EW-Sender (Fernbedienung)",
-          "device_sensor": "🌡️ EWneo-Sensor (Temperatur/Feuchte)",
-          "device_receiver": "📥 EW-Receiver (Schalter/Motor/Heizung)",
-          "device_ewneo_receiver": "📥 EWneo-Schalter/Motor (Bidirektional)",
-          "device_cancel": "❌ Abbrechen"
+          "device_transmitter_config": "⚪ Easywave Sender",
+          "device_receiver": "⚪ Easywave Empfänger",
+          "device_sensor": "⚪ Easywave neo Sensor",
+          "device_ewneo_receiver": "⚪ Easywave neo Empfänger"
         }
       },
       "device_cancel": {
         "title": "Abbrechen"
       },
+      "_comment_transmitter_flow": "===== EW-TRANSMITTER LEARNING FLOW (EW-Sender Lernprozess) =====",
       "device_transmitter": {
         "title": "EW-Sender einlernen",
         "description": "Drücken Sie eine beliebige Taste am EW-Sender. Warten auf Telegramm...",
@@ -38,151 +40,99 @@
           "action": "Aktion"
         }
       },
-      "device_transmitter_verify": {
-        "title": "EW-Sender bestätigen",
-        "description": "✅ **EW-Sender erfolgreich erkannt!**\n\n**📋 Geräteinformationen:**\n• Seriennummer: {serial}\n• Tastenanzahl: {button_count}\n• Typ: EW-Sender (Fernbedienung)\n\n**📡 Bestätigung:**\n\nKlicken Sie auf 'Bestätigen' um das Gerät zu erstellen.\nKlicken Sie auf 'Abbrechen' um den Vorgang abzubrechen.",
-        "data": {
-          "action": "Aktion"
-        }
-      },
       "device_transmitter_config": {
-        "title": "EW-Sender Konfiguration",
-        "description": "**⚙️ EW-Sender Konfiguration**\n\nWählen Sie die Tastenbedienung für Ihre Fernbedienung.",
+        "title": "Betriebsart",
+        "description": "Welche Betriebsart möchten Sie nutzen?",
         "menu_options": {
-          "device_transmitter_1button": "🔘 1-Tast-Bedienung",
-          "device_transmitter_2button": "🔘🔘 2-Tast-Bedienung",
-          "device_transmitter_3button": "🔘🔘🔘 3-Tast-Bedienung (Auf/Zu/Stopp)",
+          "device_transmitter_1button": "⚪ 1-Tast-Bedienung",
+          "device_transmitter_2button": "⚪ 2-Tast-Bedienung",
+          "device_transmitter_3button": "⚪ 3-Tast-Bedienung",
           "device_type_select": "⬅️ Zurück"
         }
       },
-      "device_transmitter_1button": {
-        "title": "1-Tast-Bedienung"
-      },
-      "device_transmitter_2button": {
-        "title": "2-Tast-Bedienung"
-      },
-      "device_transmitter_3button": {
-        "title": "3-Tast-Bedienung"
-      },
       "device_transmitter_grouping": {
-        "title": "Gruppierung",
-        "description": "Wählen Sie, wie die Tasten gruppiert werden sollen.",
+        "title": "Bedienung",
+        "description": "Sollen die Tasten als eigenständige Entitäten oder in einer\nEntität, gruppiert als Zustände, angelegt werden?",
         "menu_options": {
-          "device_transmitter_grouping_single": "🔘 Einzeln schalten",
-          "device_transmitter_grouping_group": "🔗 Als Gruppe schalten",
+          "device_transmitter_grouping_single": "⚪ Einzeln schalten",
+          "device_transmitter_grouping_group": "⚪ Als Gruppe schalten",
           "device_transmitter_config": "⬅️ Zurück"
         }
       },
-      "device_transmitter_grouping_single": {
-        "title": "Einzeln schalten"
-      },
-      "device_transmitter_grouping_group": {
-        "title": "Als Gruppe schalten"
-      },
       "device_transmitter_switch_mode": {
-        "title": "Schaltmodus",
-        "description": "Wählen Sie den Schaltmodus.",
+        "title": "Verhalten",
+        "description": "Soll der Schaltzustand nach der Betätigung zurück gesetzt\nwerden oder permanent anstehen?",
         "menu_options": {
-          "device_transmitter_switch_impulse": "⚡ Impuls (Zustand wird zurückgesetzt)",
-          "device_transmitter_switch_permanent": "🔒 Dauer (Zustand bleibt erhalten)",
+          "device_transmitter_switch_impulse": "⚪ Impuls",
+          "device_transmitter_switch_permanent": "⚪ Dauer",
           "device_transmitter_grouping": "⬅️ Zurück"
         }
       },
-      "device_transmitter_switch_impulse": {
-        "title": "Impuls-Modus"
-      },
-      "device_transmitter_switch_permanent": {
-        "title": "Dauer-Modus"
-      },
       "device_transmitter_button_count": {
         "title": "Tastenanzahl",
-        "description": "Wählen Sie die Anzahl der Tasten.",
+        "description": "Bitte geben Sie die Anzahl der vorhandenen Tasten an.",
         "menu_options": {
-          "device_transmitter_buttons_1": "🔘 1 Taste",
-          "device_transmitter_buttons_2": "🔘🔘 2 Tasten",
-          "device_transmitter_buttons_3": "🔘🔘🔘 3 Tasten",
-          "device_transmitter_buttons_4": "🔘🔘🔘🔘 4 Tasten",
+          "device_transmitter_buttons_1": "⚪ 1 Taste",
+          "device_transmitter_buttons_2": "⚪ 2 Tasten",
+          "device_transmitter_buttons_3": "⚪ 3 Tasten",
+          "device_transmitter_buttons_4": "⚪ 4 Tasten",
           "device_transmitter_switch_mode": "⬅️ Zurück"
         }
       },
-      "device_transmitter_buttons_1": {
-        "title": "1 Taste"
-      },
-      "device_transmitter_buttons_2": {
-        "title": "2 Tasten"
-      },
-      "device_transmitter_buttons_3": {
-        "title": "3 Tasten"
-      },
-      "device_transmitter_buttons_4": {
-        "title": "4 Tasten"
-      },
       "device_transmitter_2button_usage": {
-        "title": "2-Tast-Verwendung",
-        "description": "Wählen Sie die Verwendung für die 2-Tast-Bedienung.",
+        "title": "Zustände",
+        "description": "Welche Zustände soll der Sender in Home Assistant einnehmen?",
         "menu_options": {
-          "device_transmitter_2button_switch": "🔌 EIN/AUS (Schalter)",
-          "device_transmitter_2button_cover": "🏠 AUF/ZU (Rollladen/Jalousie)",
+          "device_transmitter_2button_switch": "⚪ EIN/AUS",
+          "device_transmitter_2button_cover": "⚪ AUF/ZU",
           "device_transmitter_config": "⬅️ Zurück"
         }
       },
-      "device_transmitter_2button_switch": {
-        "title": "Schalter-Modus"
-      },
-      "device_transmitter_2button_cover": {
-        "title": "Rollladen-Modus"
-      },
       "device_transmitter_2button_button_count": {
-        "title": "Tastenanzahl (2-Tast)",
-        "description": "Wählen Sie die Tastenanzahl.",
+        "title": "Tastenanzahl",
+        "description": "Bitte geben Sie die Anzahl der vorhandenen Tasten an.",
         "menu_options": {
-          "device_transmitter_2button_2": "🔘🔘 2 Tasten",
-          "device_transmitter_2button_4": "🔘🔘🔘🔘 4 Tasten",
+          "device_transmitter_2button_2": "⚪ 2 Tasten",
+          "device_transmitter_2button_4": "⚪ 4 Tasten",
           "device_transmitter_2button_usage": "⬅️ Zurück"
         }
       },
-      "device_transmitter_2button_2": {
-        "title": "2 Tasten"
-      },
-      "device_transmitter_2button_4": {
-        "title": "4 Tasten"
-      },
       "device_transmitter_description": {
-        "title": "EW-Sender Lernen",
-        "description": "🎛️ **EW-Sender Lernen**\n\n**📋 Gerätedaten:**\n• Name: EW-Sender #{sender_index}\n• Tasten: {button_count}\n• Modus: {operating_type}-Tast-Bedienung\n\n**📡 Lernprozess:**\nDrücken Sie eine beliebige Taste auf dem EW-Sender, wenn das Lernen gestartet wird.\n\n🔴 **Wichtig:** Halten Sie den EW-Sender bereit!",
+        "title": "Sender einlernen",
+        "description": "Der Sender wird mit folgenden Einstellungen eingelernt:\n\n• **Betriebsart:** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Tastenanzahl:** {button_count_text}\n\nBitte betätigen Sie im nächsten Schritt eine Taste des gewählten Senders.",
         "menu_options": {
-          "device_transmitter_learn_start": "▶️ Lernen starten",
+          "device_transmitter_learn_start": "▶️ Sender einlernen",
           "device_transmitter_config": "⬅️ Zurück"
         }
       },
       "device_transmitter_learn_progress": {
-        "title": "EW-Sender Lernen",
-        "description": "🔄 **Laden & Warten auf Funksignal...**\n\n🔴 **Drücken Sie JETZT eine Taste am EW-Sender!**\n\n⏳ Das System wartet bis zu 30 Sekunden auf das Telegramm.",
-        "progress_action": {
-          "waiting_for_transmitter_telegram": "🔄 Warte auf Funksignal... Drücken Sie JETZT eine Taste auf dem EW-Sender!"
-        }
+        "title": "Sendertaste betätigen!"
       },
       "device_transmitter_learn_timeout": {
-        "title": "Timeout",
-        "description": "⏰ **Kein Signal empfangen**\n\nDas System hat kein Funksignal empfangen. Sie können es erneut versuchen.",
+        "title": "Zeitüberschreitung",
+        "description": "Es wurde kein Funksignal empfangen!\nVerringern Sie den Abstand zwischen Sender und Server und wiederholen Sie den Vorgang.",
         "menu_options": {
-          "device_transmitter_learn_progress": "🔄 Erneut versuchen",
-          "device_transmitter_description": "⬅️ Zurück zur Konfiguration"
+          "device_transmitter_learn_start": "🔄 Sender einlernen",
+          "device_transmitter_description": "⬅️ Zurück"
         }
       },
       "device_transmitter_already_exists": {
         "title": "Gerät bereits vorhanden",
-        "description": "⚠️ **Dieser EW-Sender ist bereits eingelernt!**\n\n**📋 Seriennummer:** `{serial}`\n\nDas Gerät existiert bereits in Home Assistant und kann nicht erneut angelegt werden. Sie können einen anderen Sender einlernen.",
+        "description": "**Dieser Easywave Sender ist bereits eingelernt!**\n\nDer Sendecode wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Sender.",
         "menu_options": {
-          "device_transmitter_learn_progress": "🔄 Anderen Sender einlernen",
+          "device_transmitter_learn_start": "🔄 Sender einlernen",
           "device_transmitter_description": "⬅️ Zurück"
         }
       },
-      "device_transmitter_learn": {
-        "title": "EW-Sender Einlernen",
-        "description": "🎛️ **Warten auf EW-Sender Signal...**\n\n📡 **Bitte drücken Sie JETZT eine beliebige Taste am EW-Sender!**\n\nDas System wartet auf das Funksignal. Dies kann bis zu 30 Sekunden dauern.\n\n⚡ **Status:** Warten auf Telegrammempfang...",
-        "data": {}
+      "device_transmitter_verify": {
+        "title": "Einlernen erfolgreich",
+        "description": "Der Sender wurde erfolgreich eingelernt!\n\nVergeben Sie einen Namen für das neue Gerät:",
+        "data": {
+          "device_name": "Gerätename",
+          "area_id": "Bereich (optional)"
+        }
       },
+      "_comment_sensor_flow": "===== EWNEO-SENSOR LEARNING FLOW (EWneo-Sensor Lernprozess) =====",
       "device_sensor": {
         "title": "EWneo-Sensoren einlernen",
         "description": "Lösen Sie den EWneo-Sensoren aus oder warten Sie auf eine automatische Messung. Warten auf Telegramm...",
@@ -191,39 +141,42 @@
         }
       },
       "device_sensor_description": {
-        "title": "EWneo-Sensor Lernen",
-        "description": "🌡️ **EWneo-Sensor Lernen**\n\n**📋 Gerätetyp:** EWneo-Sensor (Temperatur/Feuchte/Wetter)\n\n📊 **Auto-Erkennung:**\n• 🌡️ Temperatursensor\n• 💧 Feuchtesensor\n• ☔ Regensensor\n• 💨 Windsensor\n• 🔋 Batteriestatus\n\n🔴 **Wichtig:** Drücken Sie die Lerntaste am EWneo-Sensor, wenn das Lernen gestartet wird!",
+        "title": "Sensor einlernen",
+        "description": "Home Assistant erkennt selbständig, welche Messdaten vom Sensor erhoben werden.\n\nBitte betätigen Sie im nächsten Schritt die Lerntaste auf der Rückseite des Sensors.",
         "menu_options": {
-          "device_sensor_learn_progress": "▶️ Lernen starten",
+          "device_sensor_learn_start": "▶️ Sensor einlernen",
           "device_type_select": "⬅️ Zurück"
         }
       },
       "device_sensor_learn_progress": {
-        "title": "EWneo-Sensor Lernen",
+        "title": "Lerntaste betätigen!",
         "progress_action": {
           "waiting_for_sensor_telegram": "🔄 Warte auf Lernsignal... Drücken Sie JETZT die Lerntaste am EWneo-Sensor!"
         }
       },
       "device_sensor_learn_timeout": {
-        "title": "Timeout",
-        "description": "⏰ **Kein Lernsignal empfangen**\n\nDas System hat kein Lernsignal empfangen. Stellen Sie sicher, dass Sie die **Lerntaste** am Sensor drücken (nicht nur ein normales Messsignal).",
+        "title": "Zeitüberschreitung",
+        "description": "Es wurde kein Funksignal empfangen!\nVerringern Sie den Abstand zwischen Sensor und Server und wiederholen Sie den Vorgang.",
         "menu_options": {
-          "device_sensor_learn_progress": "🔄 Erneut versuchen",
-          "device_sensor_description": "⬅️ Zurück"
+          "device_sensor_learn_start": "🔄 Sensor einlernen"
         }
-      },
-      "device_sensor_learn_actual": {
-        "title": "EWneo-Sensoren Einlernen",
-        "description": "🌡️ **Warten auf EWneo-Sensoren Signal...**\n\n📡 **Bitte aktivieren Sie JETZT Ihren EWneo-Sensoren!**\n\nDas System wartet auf das Funksignal. Dies kann bis zu 30 Sekunden dauern.\n\n⚡ **Status:** Warten auf Telegrammempfang...",
-        "data": {}
       },
       "device_sensor_verify": {
-        "title": "EWneo-Sensor bestätigen",
-        "description": "✅ **EWneo-Sensor erfolgreich erkannt!**\n\n**📋 Sensorinformationen:**\n• Seriennummer: {serial}\n• Typ: EWneo-Sensor\n• Erkannte Sensoren werden automatisch erstellt\n\n**📡 Bestätigung:**\n\nKlicken Sie auf 'Bestätigen' um den Sensor zu erstellen.\nKlicken Sie auf 'Abbrechen' um den Vorgang abzubrechen.",
+        "title": "Einlernen erfolgreich",
+        "description": "Der Sensor wurde erfolgreich eingelernt!\n\nErkannte Sensoren:\n{sensor_list}\n\nVergeben Sie einen Namen für das neue Gerät:",
         "data": {
-          "action": "Aktion"
+          "device_name": "Gerätename",
+          "area_id": "Bereich (optional)"
         }
       },
+      "device_sensor_already_exists": {
+        "title": "Gerät bereits vorhanden",
+        "description": "**Dieser Easywave neo Sensor ist bereits eingelernt!**\n\nDer Sensor wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Sensor.",
+        "menu_options": {
+          "device_sensor_learn_start": "🔄 Sensor einlernen"
+        }
+      },
+      "_comment_ewneo_receiver_flow": "===== EWNEO-RECEIVER LEARNING FLOW (EWneo-Empfänger Lernprozess - Bidirektional) =====",
       "device_ewneo_receiver": {
         "title": "EWneo-Switch/Motor hinzufügen",
         "description": "🔌 **EWneo-Switch/Motor hinzufügen**\n\nSie können einen EWneo-Switch/Motor zu Home Assistant hinzufügen.\n\n**📋 Übersicht:**\n• EWneo-Geräte werden bidirektional über das Gateway gesteuert\n• Unterstützt Schalter, Dimmer und Motoren\n• Status-Rückmeldung vom Gerät\n\n**📡 Einlernvorgang:**\n\n**1.** System bereitet die Verbindung vor\n**2.** Drücken Sie die Lerntaste am EWneo-Gerät\n**3.** Gerät wird automatisch erkannt und hinzugefügt\n\n🔴 **Wichtig:** Halten Sie das EWneo-Gerät mit Lerntaste bereit!"
@@ -254,7 +207,7 @@
         "title": "Timeout",
         "description": "⏰ **Keine Antwort empfangen**\n\nDas System hat keine gültige Antwort erhalten. Sie können es erneut versuchen.",
         "menu_options": {
-          "device_ewneo_receiver_learn": "🔄 Erneut versuchen",
+          "device_ewneo_receiver_learn_start": "🔄 Erneut versuchen",
           "device_ewneo_receiver_back": "⬅️ Zurück"
         }
       },
@@ -287,23 +240,72 @@
           "supports_color": "Unterstützt Farben"
         }
       },
+      "device_ewneo_receiver_learn_start": {
+        "title": "EWneo-Empfänger lernen starten"
+      },
+      "device_ewneo_receiver_learn_progress": {
+        "title": "EWneo-Empfänger Lernprozess"
+      },
+      "device_ewneo_receiver_confirm_create": {
+        "title": "EWneo-Gerät erstellen"
+      },
+      "device_ewneo_receiver_confirm_back": {
+        "title": "Zurück"
+      },
+      "device_ewneo_receiver_confirm_legacy": {
+        "title": "EWneo-Gerät bestätigen (Legacy)"
+      },
+      "_comment_ew_receiver_flow": "===== EW-RECEIVER CONFIGURATION FLOW (EW-Empfänger Konfiguration - Unidirektional) =====",
       "device_receiver_type": {
-        "title": "EW-Receiver - Gerätetyp wählen",
-        "description": "📥 **EW-Receiver Konfiguration - Schritt 1/3**\n\n**📋 Geräteinformationen:**\n• Gerät: {device_name}\n• Seriennummer: {serial}\n• Typ: EW-Receiver (Aktor)\n\n**🎛️ Gerätetyp wählen:**\n\n**🔌 Schalter:** Standard An/Aus für Beleuchtung, Steckdosen, etc.\n**🏠 Motor/Abdeckung:** Steuerung für Jalousien, Rolläden mit Auf/Ab/Stop\n**🌡️ Heizung/Kühlung:** Temperaturregelung mit Toggle-Betrieb (4h Auto-Wiederholung)\n\n💡 **Hinweis:** Der Gerätetyp bestimmt verfügbare Steuerungen und Tastenkonfiguration.",
-        "data": {
-          "receiver_type": "Gerätetyp"
+        "title": "Betriebsart",
+        "description": "Welche Betriebsart möchten Sie nutzen?",
+        "menu_options": {
+          "device_receiver_mode_impulse": "⚪ IMPULS (1-Tast)",
+          "device_receiver_mode_on_off": "⚪ EIN/AUS (2-Tast)",
+          "device_receiver_mode_up_down": "⚪ AUF/ZU (2-Tast)",
+          "device_receiver_mode_up_stop_down": "⚪ AUF/STOPP/ZU (3-Tast)",
+          "device_receiver_mode_heating": "⚪ EIN/AUS (Heizung)",
+          "device_receiver_mode_universal": "⚪ UNIVERSAL (4-Tast)",
+          "device_type_select": "⬅️ Zurück"
         }
       },
-      "device_receiver_operating_mode": {
-        "title": "EW-Receiver - Betriebsart wählen",
-        "description": "📥 **EW-Receiver Konfiguration - Schritt 2/3**\n\n**📋 Gewählter Gerätetyp:** {receiver_kind}\n\n**🎛️ Betriebsart wählen:**\n\n{mode_descriptions}\n\n💡 **Hinweis:** Die Betriebsart bestimmt, welche Tasten in Home Assistant erstellt werden.",
-        "data": {
-          "operating_mode": "Betriebsart"
+      "device_receiver_description": {
+        "title": "Empfänger einlernen",
+        "description": "Bringen Sie Ihren Empfänger bitte jetzt in den Programmiermodus für **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhytmus blinkt.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Weiter",
+          "device_receiver_type": "⬅️ Zurück"
         }
+      },
+      "device_receiver_learn_start": {
+        "title": "Empfänger einlernen starten"
+      },
+      "device_receiver_confirm_learning": {
+        "title": "Einlernen bestätigen",
+        "description": "Hat die LED am Empfänger für 4s durchgängig geleuchtet bzw. wurde der Einlernvorgang vom Empfänger quittiert? (s. Bedienungsanleitung)",
+        "menu_options": {
+          "device_receiver_verify": "✅ Ja",
+          "device_receiver_description": "❌ Nein"
+        }
+      },
+      "device_receiver_verify": {
+        "title": "Einlernen erfolgreich",
+        "description": "Home Assistant wurde erfolgreich in den Empfänger eingelernt!\n\nStellen Sie sicher, dass der Programmiermodus am Empfänger beendet wurde, die LED darf nicht mehr blinken.\n\nVergeben Sie einen Namen für das neue Gerät:",
+        "data": {
+          "device_name": "Gerätename",
+          "area_id": "Bereich (optional):"
+        }
+      },
+      "device_receiver_create": {
+        "title": "Empfänger erstellen"
       },
       "device_receiver_confirm": {
         "title": "EW-Receiver - Bestätigung",
         "description": "📥 **EW-Receiver Konfiguration - Schritt 3/3**\n\n**📋 Konfiguration:**\n• Gerät: {device_name}\n• Seriennummer: {serial}\n• RX11-Index: {rx11_index}\n• Typ: {receiver_kind}\n• Modus: {operating_mode}\n\n**🎛️ Zu erstellende Tasten:**\n{button_summary}\n\n**📡 Einlernvorgang:**\n\n**1.** {learn_instructions}\n**2.** Klicken Sie auf 'Anlegen & Code A senden'\n**3.** System sendet Code A an den Empfänger\n**4.** Gerät wird in Home Assistant erstellt\n\n💡 **Hinweis:** Nach Bestätigung wird der Empfänger automatisch konfiguriert und Tasten-Entitäten werden erstellt.",
+        "menu_options": {
+          "device_receiver_create": "✅ Empfänger anlegen",
+          "device_receiver_type": "⬅️ Zurück"
+        },
         "data": {
           "action": "Aktion"
         }
@@ -315,13 +317,7 @@
           "action": "Aktion"
         }
       },
-      "device_receiver_verify": {
-        "title": "EW-Receiver überprüfen",
-        "description": "📝 **EW-Receiver wird überprüft...**\n\n📡 Das System überprüft die Konfiguration und stellt sicher, dass der Empfänger korrekt eingelernt wurde.\n\n⚡ **Bitte warten Sie einen Moment...**",
-        "data": {
-          "action": "Aktion"
-        }
-      },
+      "_comment_device_confirmation": "===== DEVICE CONFIRMATION & FINALIZATION (Gerätebestätigung & Abschluss) =====",
       "device_confirm": {
         "title": "Gerät bestätigen",
         "description": "{description}",
@@ -329,6 +325,19 @@
           "device_name": "Gerätename",
           "action": "Aktion"
         }
+      },
+      "device_confirm_create": {
+        "title": "Gerät erstellen"
+      },
+      "device_confirm_back": {
+        "title": "Zurück"
+      },
+      "device_save": {
+        "title": "Gerät speichern"
+      },
+      "device_save_success": {
+        "title": "Anlegen erfolgreich",
+        "description": "Das Gerät **{device_name}** ist jetzt verfügbar und die Entitäten wurden erstellt."
       },
       "ew_receiver_config": {
         "title": "EW-Receiver konfigurieren",
@@ -352,6 +361,7 @@
           "action": "Aktion"
         }
       },
+      "_comment_manual_advanced": "===== MANUAL & ADVANCED OPTIONS (Manuelle & Erweiterte Optionen) =====",
       "show_all_devices": {
         "title": "Alle USB-Geräte anzeigen",
         "description": "Gefunden: {total_devices} USB-Geräte ({eldat_devices} ELDAT-Geräte).\n\n{warning}",
@@ -460,6 +470,7 @@
       "learning_aborted": "Anlernen abgebrochen.",
       "learning_failed": "Geräte-Anlernen fehlgeschlagen.",
       "no_coordinator": "Kein Coordinator verfügbar.",
+      "no_rx11_found": "Kein ELDAT RX11 USB-Transceiver gefunden. Bitte schließen Sie den RX11 an einen USB-Port an und klicken Sie auf 'Erneut suchen'.",
       "no_devices_found": "Keine ELDAT USB-Geräte gefunden. Verbinden Sie Ihr Gerät und aktualisieren Sie die Liste.",
       "no_usb_devices_found": "Keine USB-Geräte gefunden.",
       "no_device_selected": "Kein Gerät ausgewählt.",
@@ -468,7 +479,6 @@
       "invalid_sensor_telegram": "Ungültiges Sensor-Telegramm empfangen. Bitte drücken Sie die Lerntaste am Sensor.",
       "communication_failed": "Kommunikationstest mit EW-Receiver fehlgeschlagen. Prüfen Sie, ob der Receiver im Lernmodus ist.",
       "communication_error": "Fehler beim Kommunikationstest aufgetreten.",
-      "user_cancelled": "Vom Benutzer abgebrochen.",
       "no_available_ewneo_index": "Kein verfügbarer EWneo-Index gefunden. Alle 128 EWneo-Indizes (0-127) sind belegt.",
       "ewneo_learning_failed": "EWneo-Empfänger Einlernen fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
       "ewneo_join_failed": "Verbindung zum EWneo-Empfänger fehlgeschlagen. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
@@ -483,9 +493,8 @@
       "no_rx11_configured": "Kein RX11 Transceiver konfiguriert. Bitte richten Sie zuerst einen RX11 ein.",
       "rx11_not_available": "RX11 Transceiver nicht verfügbar",
       "yaml_not_supported": "YAML-Konfiguration wird nicht unterstützt. Bitte verwenden Sie die Benutzeroberfläche.",
-      "user_cancelled": "Konfiguration vom Benutzer abgebrochen.",
-      "user_cancelled_silent": "",
-      "device_added": "✅ Gerät erfolgreich hinzugefügt!\n\n📡 {device_name}\n🔑 Seriennummer: ...{serial_number}\n\nDas Gerät ist jetzt verfügbar und die Entitäten wurden erstellt.",
+      "user_cancelled": "",
+      "device_added": "Das Gerät **{device_name}** ist jetzt verfügbar und die Entitäten wurden erstellt.",
       "learning_timeout": "Zeitüberschreitung beim Einlernen des Geräts. Bitte versuchen Sie es erneut.",
       "no_available_ewneo_index": "Kein verfügbarer EWneo-Index gefunden. Alle 128 Indizes (0-127) sind bereits verwendet.",
       "ewneo_learning_failed": "EWneo-Empfänger Einlernen fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
@@ -496,6 +505,11 @@
       "no_rx11_connection": "Keine RX11-Verbindung verfügbar",
       "rx11_not_connected": "RX11 Transceiver ist nicht verbunden",
       "no_gateway_serial": "Konnte Gateway-Seriennummer nicht laden",
+      "transceiver_not_available": "Transceiver nicht verfügbar",
+      "no_available_receivers": "Keine verfügbaren Empfänger gefunden",
+      "no_receiver_serial": "Konnte Empfänger-Seriennummer nicht laden",
+      "receiver_load_failed": "Empfänger konnte nicht geladen werden",
+      "device_creation_error": "Fehler beim Erstellen des Geräts",
       "unknown": "Unbekannter Fehler aufgetreten"
     }
   },
@@ -559,7 +573,7 @@
       "retry": "🔄 Erneut versuchen",
       "back": "⬅️ Zurück",
       "save": "💾 Speichern",
-      "enable_learning": "🟢 Lernmodus aktivieren",
+      "enable_learning": "⚪ Lernmodus aktivieren",
       "disable_learning": "🛑 Lernmodus deaktivieren",
       "manage_devices": "🔧 Geräte verwalten",
       "remove_device": "🗑️ Gerät entfernen"

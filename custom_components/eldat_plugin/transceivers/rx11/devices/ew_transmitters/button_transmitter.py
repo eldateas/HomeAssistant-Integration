@@ -103,6 +103,7 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         self._button_press_times: Dict[int, datetime] = {}
         self._button_last_actions: Dict[int, str] = {}
         self._button_labels = self.BUTTON_LABELS[:button_count]
+        self._battery_low = False  # Track battery low status
     
     @property
     def button_count(self) -> int:
@@ -141,6 +142,17 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
                 icon="mdi:gesture-tap-button"
             ))
         
+        # Create battery status binary sensor
+        battery_warning_spec = self._create_base_entity_spec(
+            "binary_sensor",
+            name="Batteriestand",
+            device_class="battery",
+            icon="mdi:battery"
+        )
+        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning"
+        battery_warning_spec["sensor_type"] = "battery_warning"
+        specs["binary_sensor"].append(battery_warning_spec)
+        
         return specs
     
     def process_telegram(self, telegram_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,33 +161,43 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         button = telegram_data.get("button", 0)
         current_time = datetime.now()
         
+        if info_type == 0:
+            # Update battery low status
+            is_low_battery = telegram_data.get("is_low_battery", False)
+            self._battery_low = is_low_battery
+            _LOGGER.warning(
+                "🔋 Low battery detected for EW %d-Button Transmitter %s",
+                self._button_count,
+                self.serial_number[-6:]
+            )
+        
         # Handle different telegram formats
         if info_type in [TELEGRAM_BUTTON_RELEASE, TELEGRAM_EW_BUTTON_RELEASE]:
             self._handle_button_release(button, current_time, telegram_data)
         elif info_type in [TELEGRAM_BUTTON_PUSH, TELEGRAM_EW_BUTTON_PRESS]:
-            self._handle_button_push(button, current_time, telegram_data)
+            self._handle_button_press(button, current_time, telegram_data)
         
         return self.get_button_data()
     
-    def _handle_button_push(
+    def _handle_button_press(
         self, 
         button: int, 
         timestamp: datetime, 
         telegram_data: Dict[str, Any]
     ) -> None:
-        """Handle button push event."""
+        """Handle button press event."""
         # Support both 0-indexed and 1-indexed button IDs
         button_id = self._normalize_button_id(button, telegram_data)
         
         if 0 <= button_id < self._button_count:
             self._button_press_times[button_id] = timestamp
-            self._button_last_actions[button_id] = 'push'
+            self._button_last_actions[button_id] = 'press'
             self.set_button_state(button_id, True)
             self.register_button_press(button_id)  # From ButtonBehaviorMixin
             self._last_seen = timestamp
             
             _LOGGER.debug(
-                "EW %d-Button Transmitter %s button %s pushed", 
+                "EW %d-Button Transmitter %s button %s pressed", 
                 self._button_count,
                 self.serial_number[-6:], 
                 self._button_labels[button_id]
@@ -256,6 +278,7 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
             "button_count": self._button_count,
             "button_states": {},
             "last_actions": {},
+            "battery_warning": self._battery_low,  # Add battery warning status
         }
         
         # Add button states and actions

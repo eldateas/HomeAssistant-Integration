@@ -23,7 +23,7 @@ CONF_TRANSCEIVER_TYPE: Final = "transceiver_type"
 
 # Default Values
 DEFAULT_SCAN_INTERVAL: Final = 5
-DEFAULT_DEVICE_NAME: Final = "ELDAT Integration"
+DEFAULT_DEVICE_NAME: Final = "ELDAT RX11 USB-Transceiver"
 
 # USB und Device Settings
 USB_DEVICE_PATH: Final = "device_path"

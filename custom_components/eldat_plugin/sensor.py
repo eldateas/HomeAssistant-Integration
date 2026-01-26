@@ -137,7 +137,7 @@ async def async_setup_entry(
                 _LOGGER.warning("Device added event missing serial_number or device_info")
                 return
             
-            # Spezielle Behandlung für EW-Transmitter (brauchen nur Battery-Sensoren!)
+            # Spezielle Behandlung für EW-Transmitter (battery warning now in binary_sensor platform)
             device_type = device_info.get("type", "unknown")
             
             # Check HA's entity registry before creating anything
@@ -147,7 +147,7 @@ async def async_setup_entry(
             entity_registry = get_entity_registry()
             
             if device_type == "ew_transmitter":
-                _LOGGER.info("🔋 Creating battery sensor for EW-Transmitter: %s", serial_number[-6:])
+                _LOGGER.info("� Creating sensors for EW-Transmitter: %s", serial_number[-6:])
                 new_sensors = _create_sensors_for_device(coordinator, serial_number, device_info)
                 
                 # Filter out already existing sensors
@@ -162,7 +162,7 @@ async def async_setup_entry(
                 
                 if sensors_to_add:
                     async_add_entities(sensors_to_add, update_before_add=False)
-                    _LOGGER.info("✅ Added %d sensor entities (battery) for EW-Transmitter %s", len(sensors_to_add), serial_number[-6:])
+                    _LOGGER.info("✅ Added %d sensor entities for EW-Transmitter %s", len(sensors_to_add), serial_number[-6:])
                 return
             
             # Nur EW-Sensor devices bekommen temperature/humidity sensors
@@ -218,7 +218,7 @@ async def async_setup_entry(
                 _LOGGER.info("📋 Entities to create: %s", [e.get('sensor_type') for e in entities])
             
             # Check if we have entity specs or need to create from device info
-            if not entities and device_type in ["ew_sensor", "ew_transceiver"]:
+            if not entities and device_type in ["ew_sensor", "ewneo_sensor", "ew_transceiver"]:
                 # Create entities based on device capabilities
                 _LOGGER.info("🌡️ No entity specs provided, creating EW-Sensor entities from device info")
                 new_sensors = _create_sensors_for_device(coordinator, serial_number, device_info)
@@ -389,8 +389,8 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
             _LOGGER.info("📝 EW-Receiver serial for device %s: %s", 
                         serial_number[-8:], ew_receiver_serial[-8:])
         
-        # Create sensor entities for EW-Sensors (temperature, humidity, battery)
-        default_sensors = ["temperature", "humidity", "battery"]
+        # Create sensor entities for EW-Sensors (temperature, humidity only - battery is binary_sensor)
+        default_sensors = ["temperature", "humidity"]
         
         for sensor_type in default_sensors:
             unique_id = f"{serial_number}_{sensor_type}"
@@ -409,7 +409,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                     device_info=device_info,
                     entity_spec={
                         "unique_id": unique_id,
-                        "name": "Temperature",
+                        "name": "Temperatur",
                         "sensor_type": "temperature",
                         "device_class": SensorDeviceClass.TEMPERATURE,
                         "unit_of_measurement": UnitOfTemperature.CELSIUS,
@@ -425,27 +425,11 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                     device_info=device_info,
                     entity_spec={
                         "unique_id": unique_id,
-                        "name": "Humidity",
+                        "name": "Luftfeuchtigkeit",
                         "sensor_type": "humidity",
                         "device_class": SensorDeviceClass.HUMIDITY,
                         "unit_of_measurement": PERCENTAGE,
                         "icon": "mdi:water-percent",
-                        "current_value": last_value,
-                        "ew_receiver_serial": ew_receiver_serial
-                    }
-                )
-            elif sensor_type == "battery":
-                sensor = EWneoSensorEntity(
-                    coordinator=coordinator,
-                    serial_number=serial_number,
-                    device_info=device_info,
-                    entity_spec={
-                        "unique_id": unique_id,
-                        "name": "Battery",
-                        "sensor_type": "battery",
-                        "device_class": SensorDeviceClass.BATTERY,
-                        "unit_of_measurement": PERCENTAGE,
-                        "icon": "mdi:battery",
                         "current_value": last_value,
                         "ew_receiver_serial": ew_receiver_serial
                     }
@@ -462,8 +446,8 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                 _LOGGER.info("🔄 Created %s sensor for %s (no stored value)", 
                            sensor_type, serial_number[-8:])
     
-    # Battery sensor for devices that need battery monitoring (including EW-Transmitter for low battery warnings)
-    # Note: ew_sensor and ewneo_sensor get battery sensors created above in the main sensor block
+    # Battery sensor for devices that need battery monitoring (not EW-Transmitter or EWneo-Sensor)
+    # Note: ew_sensor, ewneo_sensor, and ew_transmitter get battery warnings via binary_sensor platform
     elif device_type in ["ew_transceiver", "ewneo_transceiver", "ewneo_bidi_transmitter"]:
         sensors.append(EldatBatterySensor(
             coordinator=coordinator,
@@ -482,17 +466,11 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
             ))
             _LOGGER.info("🌡️ Created legacy temperature sensor for %s", serial_number[-8:])
         
-    # EW-Transmitter devices get battery sensors and optionally a "Last Button" sensor for grouped mode
+    # EW-Transmitter devices get optionally a "Last Button" sensor for grouped mode
+    # Battery warning is now handled by binary_sensor platform
     elif device_type == "ew_transmitter":
-        _LOGGER.warning("🔋 Creating sensors for EW-Transmitter %s (grouping_mode=%s, switch_mode=%s)", 
+        _LOGGER.warning("📊 Creating sensors for EW-Transmitter %s (grouping_mode=%s, switch_mode=%s)", 
                        serial_number[-8:], device_info.get("grouping_mode"), device_info.get("switch_mode"))
-        
-        # Battery sensor (always created)
-        sensors.append(EldatBatterySensor(
-            coordinator=coordinator,
-            serial_number=serial_number,
-            device_info=device_info,
-        ))
         
         # Check if we need a "Last Button" sensor for grouped mode
         from .entity_specs import create_entity_specs_for_device
@@ -1042,13 +1020,13 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         
         # Listen for button press events
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_short_press", _handle_button_press)
+            self.hass.bus.async_listen("eldat_plugin_button_press", _handle_button_press)
         )
         
         # Listen for button release events (for impulse mode reset)
         if self._switch_mode == "impulse":
             self.async_on_remove(
-                self.hass.bus.async_listen("eldat_button_press_end", _handle_button_release)
+                self.hass.bus.async_listen("eldat_plugin_button_release", _handle_button_release)
             )
         
         _LOGGER.info("📍 Last Button sensor %s registered for events", self._attr_name)
@@ -1100,7 +1078,7 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
 
     def _resolve_state_icons(self) -> tuple[str, str]:
         options = set(self._options)
-        if {"An", "Aus"}.issubset(options):
+        if {"Ein", "Aus"}.issubset(options):
             return "mdi:light-switch", "mdi:light-switch-off"
         if {"Auf", "Zu"}.issubset(options):
             return "mdi:window-shutter-open", "mdi:window-shutter"
@@ -1145,18 +1123,17 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
                     )
 
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_short_press", _handle_button_event)
-        )
-        self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press_start", _handle_button_event)
+            self.hass.bus.async_listen("eldat_button_press", _handle_button_event)
         )
 
     @property
     def icon(self) -> str:
-        if self._current_state in ("An", "Auf"):
+        if self._current_state in ("Ein", "Auf"):
             return self._icon_on
         if self._current_state in ("Aus", "Zu"):
             return self._icon_off
+        if self._current_state == "Stopp":
+            return "mdi:stop-circle"
         return self._attr_icon
 
 
@@ -1203,7 +1180,6 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
         """Return battery icon based on level."""
         if self._battery_level is None:
             return "mdi:battery-unknown"
-        
         if self._battery_level <= 10:
             return "mdi:battery-outline"
         elif self._battery_level <= 20:
@@ -1278,18 +1254,31 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
         """Setup live telegram event listeners for real-time battery updates."""
         from .const import EVENT_DEVICE_UPDATED, EVENT_TELEGRAM_RECEIVED
         
+        _LOGGER.warning("🎧 Battery sensor %s setting up event listeners for serial: %s", 
+                      self.entity_id, self._serial_number)
+        
         async def handle_device_update(event):
             """Handle device update event."""
             try:
                 data = event.data
+                event_serial = data.get("serial_number")
+                _LOGGER.warning("🔍 Battery sensor %s received EVENT_DEVICE_UPDATED: serial=%s, my_serial=%s, battery_level=%s",
+                              self.entity_id, event_serial[-6:] if event_serial else "None", 
+                              self._serial_number[-6:], data.get("battery_level"))
+                
                 if data.get("serial_number") == self._serial_number:
                     battery_level = data.get("battery_level")
                     if battery_level is not None:
-                        _LOGGER.info("📡 Battery sensor %s device update: %d%% (device: %s)",
+                        _LOGGER.warning("📡 Battery sensor %s device update: %d%% (device: %s)",
                                     self.entity_id, battery_level, self._serial_number[-6:])
                         await self.update_battery_level(battery_level)
+                    else:
+                        _LOGGER.warning("⚠️ Battery sensor %s: battery_level is None in event data", self.entity_id)
+                else:
+                    _LOGGER.debug("Battery sensor %s: serial mismatch (%s != %s)", 
+                                self.entity_id, event_serial, self._serial_number)
             except Exception as e:
-                _LOGGER.error("❌ Battery sensor %s device update error: %s", self.entity_id, e)
+                _LOGGER.error("❌ Battery sensor %s device update error: %s", self.entity_id, e, exc_info=True)
 
         async def handle_telegram(event):
             """Handle telegram event with live battery data."""
@@ -1314,6 +1303,9 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
         
         self.coordinator.hass.bus.async_listen(EVENT_DEVICE_UPDATED, handle_device_update)
         self.coordinator.hass.bus.async_listen(EVENT_TELEGRAM_RECEIVED, handle_telegram)
+        
+        _LOGGER.warning("✅ Battery sensor %s event listeners registered for serial: %s", 
+                      self.entity_id, self._serial_number)
 
     async def _handle_button_event(self, event) -> None:
         """Handle button press/release event (for EW-Transmitter)."""
@@ -1336,55 +1328,30 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
             _LOGGER.error("Error handling button event in battery sensor %s: %s", self.entity_id, e)
 
     async def _handle_sensor_update(self, event) -> None:
-        """Handle sensor update event."""
-        try:
-            event_data = event.data
-            event_serial = event_data.get("serial_number")
-            
-            # Check if this event is for our device
-            if event_serial != self._serial_number:
-                return
-            
-            # Get battery level from sensor update
-            battery_level = event_data.get("battery_level")
-            if battery_level is not None:
-                _LOGGER.info("📊 Battery sensor %s sensor update: %d%% (device: %s)", 
-                           self.entity_id, battery_level, self._serial_number[-6:])
-                await self.update_battery_level(battery_level)
-                
-        except Exception as e:
-            _LOGGER.error("Error handling sensor update in battery sensor %s: %s", self.entity_id, e)
-            event_serial = event_data.get("device_id") or event_data.get("serial_number")
-            
-            if event_serial != self._serial_number:
-                return
-            
-            battery_level = event_data.get("battery_level")
-            if battery_level is not None:
-                _LOGGER.info("🔋 Battery sensor %s updating to %d%% (from button event)", 
-                            self.name, battery_level)
-                self.update_battery_level(battery_level)
-                
-        except Exception as e:
-            _LOGGER.error("Error handling button event in battery sensor %s: %s", self.name, e)
-
-    async def _handle_sensor_update(self, event) -> None:
         """Handle sensor update event (for EW-Sensor)."""
         try:
             event_data = event.data
             event_serial = event_data.get("serial_number")
             
+            _LOGGER.warning("📊 Battery sensor %s received sensor_update event: serial=%s, my_serial=%s, battery_level=%s",
+                          self.entity_id, event_serial[-6:] if event_serial else "None",
+                          self._serial_number[-6:], event_data.get("battery_level"))
+            
+            # Check if this event is for our device
             if event_serial != self._serial_number:
+                _LOGGER.debug("Battery sensor %s: serial mismatch in sensor_update", self.entity_id)
                 return
             
             battery_level = event_data.get("battery_level")
             if battery_level is not None:
-                _LOGGER.info("🔋 Battery sensor %s updating to %d%% (from sensor_update)", 
-                            self.name, battery_level)
-                self.update_battery_level(battery_level)
+                _LOGGER.warning("🔋 Battery sensor %s sensor_update: %d%% (device: %s)", 
+                            self.entity_id, battery_level, self._serial_number[-6:])
+                await self.update_battery_level(battery_level)
+            else:
+                _LOGGER.warning("⚠️ Battery sensor %s: battery_level is None in sensor_update event", self.entity_id)
                 
         except Exception as e:
-            _LOGGER.error("Error handling sensor update in battery sensor %s: %s", self.name, e)
+            _LOGGER.error("Error handling sensor update in battery sensor %s: %s", self.entity_id, e, exc_info=True)
 
 
 class EldatSignalStrengthSensor(EldatEntity, SensorEntity):

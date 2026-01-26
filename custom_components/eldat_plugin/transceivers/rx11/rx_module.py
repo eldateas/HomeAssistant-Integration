@@ -363,7 +363,7 @@ def encode_state_array(state: bytes) -> bytes:
 # ICP DATA PARSING
 # ====================================================================================================
 
-def parse_icp_data(icp: ICP, function: int) -> dict[str, Any]:
+def parse_icp_data(self, icp: ICP, function: int) -> dict[str, Any]:
     """Parse ICP data based on the function code."""
     data = icp.data
     result = {}
@@ -495,9 +495,11 @@ class RxModule:
         self._last_error: Optional[str] = None
         self._last_successful_communication = time.time()
         self._reconnect_attempts = 0
-        self._max_reconnect_attempts = 10
         self._reconnect_delay_base = 1.0  # seconds
         self._health_check_interval = 30.0  # seconds
+        
+        # Cancel tolerance - allow unknown handle ICPs for a short time after cancel_all_io
+        self._cancel_tolerance_until: float = 0.0  # timestamp until which to tolerate unknown handles
         
         # RX state
         self._rx_sop = False
@@ -517,6 +519,7 @@ class RxModule:
         
         # Disconnect callback for immediate notification
         self._disconnect_callback: Optional[Callable[[], None]] = None
+        self._reconnect_callback: Optional[Callable[[], None]] = None
     
     # ================================================================================================
     # PROPERTIES
@@ -526,6 +529,10 @@ class RxModule:
         """Set a callback to be called when a disconnect/hardware error occurs."""
         self._disconnect_callback = callback
     
+    def set_reconnect_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """Set a callback to be called after a successful reconnect."""
+        self._reconnect_callback = callback
+    
     def _notify_disconnect(self) -> None:
         """Notify the disconnect callback if registered."""
         if self._disconnect_callback is not None:
@@ -533,6 +540,14 @@ class RxModule:
                 self._disconnect_callback()
             except Exception as e:
                 _LOGGER.warning("Fehler beim Aufrufen des Disconnect-Callbacks: %s", e)
+    
+    def _notify_reconnect(self) -> None:
+        """Notify the reconnect callback if registered."""
+        if self._reconnect_callback is not None:
+            try:
+                self._reconnect_callback()
+            except Exception as e:
+                _LOGGER.warning("Fehler beim Aufrufen des Reconnect-Callbacks: %s", e)
     
     @property
     def is_connected(self) -> bool:
@@ -595,6 +610,9 @@ class RxModule:
             
             # Reset queues
             self._reset_queues()
+
+            # Cancel all requests
+            self.cancel_all_io_request()
             
             # Reset RX state
             self._rx_sop = False
@@ -622,6 +640,7 @@ class RxModule:
             )
             self._serial_handler_thread.start()
             
+            # Only mark as connected after successful thread start
             self._connected = True
             
             if self.debug:
@@ -630,7 +649,8 @@ class RxModule:
             return True
             
         except Exception as e:
-            _LOGGER.error("Failed to connect to RxModule: %s", e)
+            # Use debug level to avoid log spam during reconnect attempts
+            _LOGGER.debug("RxModule connection failed: %s", e)
             return False
     
     def dispose(self):
@@ -662,48 +682,95 @@ class RxModule:
         if self.debug:
             _LOGGER.info("RxModule disconnected")
     
-    def _reconnect(self) -> bool:
-        """Attempt to reconnect to the RX11 module with exponential backoff."""
-        if self._shutdown_requested:
-            return False
+    def _find_eldat_usb_port(self) -> Optional[str]:
+        """Find ELDAT USB device by VID/PID, handling port changes.
+        
+        Returns the device path if found, None otherwise.
+        """
+        try:
+            import serial.tools.list_ports
             
-        with self._protocol_lock:
-            if not self._connection_healthy:
-                # Already reconnecting
-                return False
-            self._connection_healthy = False
+            ports = list(serial.tools.list_ports.comports())
+            
+            # Look for ELDAT USB devices (VID: 0x155A, PID: 0x1006 or 0x1014)
+            for port in ports:
+                if port.vid == 0x155A and port.pid in [0x1006, 0x1014]:
+                    _LOGGER.info("🔍 Found ELDAT device at %s (VID:0x%04X PID:0x%04X)", 
+                               port.device, port.vid, port.pid)
+                    return port.device
+            
+            _LOGGER.debug("No ELDAT USB device found")
+            return None
+            
+        except ImportError:
+            _LOGGER.warning("pyserial not available for USB device detection")
+            return None
+        except Exception as e:
+            _LOGGER.error("Error searching for USB device: %s", e)
+            return None
+
+    def _reconnect(self) -> bool:
+        """Attempt to reconnect to the RX11 module with exponential backoff.
+        
+        If the original port is not available, searches for the device by VID/PID
+        to handle USB port changes (e.g., /dev/ttyUSB0 -> /dev/ttyUSB1).
+        """
         
         _LOGGER.warning("Connection lost - attempting reconnect...")
-        
-        # Cancel all pending requests
+        # Notify disconnect callback
+        self._notify_disconnect()
         self.cancel_all_io_request()
         
-        # Close existing connection
+        # Completely cleanup existing connection before reconnecting
         if self._serial:
             try:
                 self._serial.close()
+
+                # Reset buffers before closing
+                self._serial.reset_input_buffer()
+                self._serial.reset_output_buffer()
             except Exception:
                 pass
+            
+            # Allow time for serial port to be released by OS
+            time.sleep(0.1)
             self._serial = None
         
+        # Reset connection state
+        self._connected = False
+        
+        original_port = self.port
+        
         # Attempt reconnect with exponential backoff
-        while self._reconnect_attempts < self._max_reconnect_attempts and not self._shutdown_requested:
+        while not self._shutdown_requested:
             delay = min(self._reconnect_delay_base * (2 ** self._reconnect_attempts), 60.0)
-            _LOGGER.info("Reconnect attempt %d/%d after %.1fs delay...", 
-                        self._reconnect_attempts + 1, 
-                        self._max_reconnect_attempts, 
-                        delay)
+            _LOGGER.info("Reconnect attempt %d after %.1fs delay...", 
+                        self._reconnect_attempts + 1, delay)
             
             time.sleep(delay)
             
             with self._protocol_lock:
                 self._reconnect_attempts += 1
             
+            # First, try the original/current port
             if self.connect():
-                _LOGGER.info("Reconnect successful!")
+                _LOGGER.info("✅ Reconnect successful on %s!", self.port)
+                # Notify reconnect callback to restart receive loops
+                self._notify_reconnect()
                 return True
+            
+            # If original port failed, search for device by VID/PID
+            new_port = self._find_eldat_usb_port()
+            if new_port and new_port != self.port:
+                _LOGGER.info("🔄 USB port changed: %s → %s", original_port, new_port)
+                self.port = new_port
+                
+                if self.connect():
+                    _LOGGER.info("✅ Reconnect successful on new port %s!", self.port)
+                    # Notify reconnect callback to restart receive loops
+                    self._notify_reconnect()
+                    return True
         
-        _LOGGER.error("Failed to reconnect after %d attempts", self._reconnect_attempts)
         return False
     
     def _check_connection_health(self):
@@ -880,10 +947,11 @@ class RxModule:
         try:
             # First check if serial port is still valid (USB might have been removed)
             if not self._check_serial_port_valid():
-                _LOGGER.error("ERROR [writeToBuffer] - Serial port no longer valid (USB disconnected?)")
+                _LOGGER.error("ERROR [writeToBuffer] - Serial port no longer valid (USB disconnected?)")  
                 with self._protocol_lock:
                     self._state_good = False
                     self._connection_healthy = False
+                    self._reconnect()
                 return
             
             # Encode the packet
@@ -899,6 +967,7 @@ class RxModule:
                                     bytes_written, len(packet))
                         with self._protocol_lock:
                             self._state_good = False
+                            self._connection_healthy = False
                         return
                     
                     if self.debug:
@@ -977,18 +1046,16 @@ class RxModule:
                 except (serial.SerialException, OSError) as e:
                     if not self._shutdown_requested:
                         error_str = str(e)
-                        if "Input/output error" in error_str or "Errno 5" in error_str:
-                            _LOGGER.error("🔴 RX11 USB Hardware-Fehler: %s - Gerät wurde möglicherweise getrennt", e)
-                        elif "device disconnected" in error_str.lower() or "no such device" in error_str.lower():
-                            _LOGGER.error("🔴 RX11 USB Gerät getrennt: %s", e)
-                        else:
-                            _LOGGER.error("🔴 RX11 Serial-Port Fehler: %s", e)
+                        # Log only once as WARNING (not ERROR) to reduce log spam
+                        _LOGGER.warning("🔴 RX11 USB getrennt - Reconnect wird gestartet")
+                        _LOGGER.debug("Disconnect details: %s", e)
                         with self._protocol_lock:
                             self._state_good = False
                             self._connection_healthy = False
                             self._hardware_error = True
                             self._last_error = error_str
-                        # Notify disconnect callback if registered
+                            self._connected = False  # Immediately mark as disconnected
+                        # Notify disconnect callback if registered - this triggers reconnect
                         self._notify_disconnect()
                     break
                 
@@ -1001,16 +1068,15 @@ class RxModule:
             except (serial.SerialException, OSError) as e:
                 if not self._shutdown_requested:
                     error_str = str(e)
-                    if "Input/output error" in error_str or "Errno 5" in error_str:
-                        _LOGGER.error("🔴 RX11 USB Hardware-Fehler im Handler: %s - Gerät nicht verfügbar", e)
-                    else:
-                        _LOGGER.error("🔴 RX11 Serial-Handler Fehler (USB getrennt?): %s", e)
+                    _LOGGER.warning("🔴 RX11 Verbindung unterbrochen")
+                    _LOGGER.debug("Serial handler error: %s", e)
                     with self._protocol_lock:
                         self._state_good = False
                         self._connection_healthy = False
                         self._hardware_error = True
                         self._last_error = error_str
-                    # Notify disconnect callback if registered
+                        self._connected = False  # Immediately mark as disconnected
+                    # Notify disconnect callback if registered - this triggers reconnect
                     self._notify_disconnect()
                 break
             except Exception as e:
@@ -1018,6 +1084,7 @@ class RxModule:
                     _LOGGER.error("Unexpected error in serial handler: %s", e)
                     with self._protocol_lock:
                         self._state_good = False
+                        self._connection_healthy = False
                 time.sleep(0.01)
         
         _LOGGER.info("Serial handler thread exiting")
@@ -1035,7 +1102,9 @@ class RxModule:
             if self._rx_sop:
                 # Unexpected SOP
                 self._state_good = False
+                self._connection_healthy = False
                 _LOGGER.error("ERROR [RxHandler] - Unexpected data on SOP")
+                self._reconnect()
                 return
             self._rx_sop = True
             self._rx_stuffing = False
@@ -1043,15 +1112,16 @@ class RxModule:
         
         # Must have SOP before processing other bytes
         if not self._rx_sop:
-            self._state_good = False
-            _LOGGER.error("ERROR [RxHandler] - Unexpected byte without SOP: 0x%02x", byte)
+            # _LOGGER.error("ERROR [RxHandler] - Unexpected byte without SOP: 0x%02x", byte)
             return
         
         # Handle EOP
         if byte == EOP:
             if self._rx_stuffing:
                 self._state_good = False
+                self._connection_healthy = False
                 _LOGGER.error("ERROR [RxHandler] - Unexpected EOP on Unstuffing")
+                self._reconnect()
                 return
             # Debug: Log complete packet before processing
             _LOGGER.info("Complete packet received (len=%d): %s", len(self._rx_raw_buffer), self._rx_raw_buffer.hex())
@@ -1091,6 +1161,8 @@ class RxModule:
             self._rx_stuffing = False
             with self._protocol_lock:
                 self._state_good = False
+                self._connection_healthy = False
+                self._reconnect()
     
     def _process_complete_packet(self):
         """Process a complete received packet."""
@@ -1130,7 +1202,9 @@ class RxModule:
         if self._tx_req_sent_size == 0:
             with self._protocol_lock:
                 self._state_good = False
+                self._connection_healthy = False
             _LOGGER.error("ERROR [RxHandler] - Unexpected IPP")
+            self._reconnect()
             return
         
         # Move request from sent to pending
@@ -1141,14 +1215,18 @@ class RxModule:
         if handle == 0:
             with self._protocol_lock:
                 self._state_good = False
+                self._connection_healthy = False
             _LOGGER.error("ERROR [RxHandler] - Unexpected zero handle")
+            self._reconnect()
             return
         
         # Check for duplicate handle
         if handle in self._req_pending:
             with self._protocol_lock:
                 self._state_good = False
+                self._connection_healthy = False
             _LOGGER.error("ERROR [RxHandler] - Duplicated handle: 0x%04x", handle)
+            self._reconnect()
             return
         
         # Store in pending with handle
@@ -1172,13 +1250,26 @@ class RxModule:
             # Look in pending requests
             req = self._req_pending.pop(handle, None)
             if not req:
+                # Check if we're in the tolerance period after cancel_all_io
+                if time.time() < self._cancel_tolerance_until:
+                    # This is expected after restart - device sends ICP for pre-restart operations
+                    _LOGGER.debug("ICP for unknown handle 0x%04x during cancel tolerance period (expected after restart)", handle)
+                    return
+                
+                # Outside tolerance period - this is a real error
+                self._state_good = False
+                self._connection_healthy = False
                 _LOGGER.warning("ERROR [RxHandler] - ICP for unknown handle: 0x%04x", handle)
+                self._reconnect()
                 return
         else:
             # Synchronous request (no handle)
             req = self._dequeue_sent()
             if not req:
+                self._state_good = False
+                self._connection_healthy = False
                 _LOGGER.error("ERROR [RxHandler] - Unexpected synchronous ICP")
+                self._reconnect()
                 return
         
         # Validate ICP length
@@ -1186,13 +1277,17 @@ class RxModule:
             if icp_byte_count != req.expected_icp_byte_count:
                 with self._protocol_lock:
                     self._state_good = False
-                _LOGGER.error("ERROR [RxHandler] - Unexpected ICP length: %d / %d",
+                    self._connection_healthy = False
+                _LOGGER.error("ERROR [RxHandler] - Unexpected ICP length: %d / %d - initiating reconnect",
                             icp_byte_count, req.expected_icp_byte_count)
+                self._reconnect()
                 return
         elif icp_byte_count != 3:
             with self._protocol_lock:
                 self._state_good = False
-            _LOGGER.error("ERROR [RxHandler] - Unexpected error ICP length: %d", icp_byte_count)
+                self._connection_healthy = False
+            _LOGGER.error("ERROR [RxHandler] - Unexpected error ICP length: %d - initiating reconnect", icp_byte_count)
+            self._reconnect()
             return
         
         if self.debug:
@@ -1207,6 +1302,7 @@ class RxModule:
             else:
                 with self._protocol_lock:
                     self._state_good = False
+                    self._connection_healthy = False
                 _LOGGER.error("ERROR [RxHandler] - QueuedRequest full")
                 return
         
@@ -1268,6 +1364,10 @@ class RxModule:
                     req.icp = ICP(handle=0, result=ErrorCode.ERR_CANCELED)
                     req.signal()
             self._req_pending.clear()
+            
+            # Allow unknown handle ICPs for 2 seconds after cancel
+            # This is normal after restart - device may still send ICPs for pre-restart operations
+            self._cancel_tolerance_until = time.time() + 2.0
     
     # ================================================================================================
     # HIGH-LEVEL API FUNCTIONS
@@ -1283,7 +1383,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EW_GET_FD_SERIAL)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EW_GET_FD_SERIAL)
             serial = parsed.get('gateway', bytes(16))
             return req.icp.result, serial
         return req.icp.result, bytes(16)
@@ -1297,7 +1397,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EW_RCV_BUTTON)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EW_RCV_BUTTON)
             info_type = parsed.get('info_type', 0)
             transmitter = parsed.get('receiver_or_transmitter', bytes(16))
             info_data = parsed.get('info_data', bytes(8))
@@ -1359,7 +1459,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EW_RCV_EX)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EW_RCV_EX)
             info_type = parsed.get('info_type', 0)
             transmitter = parsed.get('receiver_or_transmitter', bytes(16))
             info_data = parsed.get('info_data', bytes(8))
@@ -1376,7 +1476,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EWB_GET_FD_SERIAL)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EWB_GET_FD_SERIAL)
             serial = parsed.get('gateway', bytes(16))
             return req.icp.result, serial
         return req.icp.result, bytes(16)
@@ -1412,7 +1512,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EWB_JOIN_DEVICE)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EWB_JOIN_DEVICE)
             device_type = parsed.get('device_type', 0)
             receiver = parsed.get('receiver', bytes(16))
             return req.icp.result, device_type, receiver
@@ -1438,7 +1538,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EWB_RCV)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EWB_RCV)
             info_type = parsed.get('info_type', 0)
             receiver_transmitter = parsed.get('receiver_or_transmitter', bytes(16))
             info_data = parsed.get('info_data', bytes(8))
@@ -1458,7 +1558,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EWB_CHANGE_STATE)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EWB_CHANGE_STATE)
             recent_mode = parsed.get('mode', 0)
             recent_state = parsed.get('state', bytes(4))
             return req.icp.result, recent_mode, recent_state
@@ -1476,7 +1576,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EWB_QUERY_STATE)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EWB_QUERY_STATE)
             recent_mode = parsed.get('mode', 0)
             state = parsed.get('state', bytes(4))
             return req.icp.result, recent_mode, state
@@ -1495,7 +1595,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.EWB_TRLRN_CONTROL)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.EWB_TRLRN_CONTROL)
             recent_mode = parsed.get('mode', 0)
             recent_state = parsed.get('state', bytes(4))
             return req.icp.result, recent_mode, recent_state
@@ -1510,7 +1610,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.MA_QUERY_HW_VER)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.MA_QUERY_HW_VER)
             hw_str = parsed.get('hw_version_str', bytes(16))
             return req.icp.result, hw_str
         return req.icp.result, bytes(16)
@@ -1524,7 +1624,7 @@ class RxModule:
         req.wait(timeout)
         
         if req.icp.result == ErrorCode.SUCCESS:
-            parsed = parse_icp_data(req.icp, FunctionCode.MA_QUERY_FW_VER)
+            parsed = parse_icp_data(self, req.icp, FunctionCode.MA_QUERY_FW_VER)
             major = parsed.get('major_version', 0)
             minor = parsed.get('minor_version', 0)
             incomplete = parsed.get('incomplete_fw', False)

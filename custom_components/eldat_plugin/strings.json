@@ -13,6 +13,18 @@
           "device_name": "Anzeigename für die Integration"
         }
       },
+      "rx11_setup": {
+        "title": "ELDAT RX11 USB-Transceiver einrichten",
+        "description": "Wählen Sie den erkannten RX11 USB-Transceiver aus oder suchen Sie erneut nach angeschlossenen Geräten.",
+        "data": {
+          "device_path": "RX11 USB-Transceiver",
+          "device_name": "Name des Transceivers"
+        },
+        "data_description": {
+          "device_path": "Wählen Sie den RX11 aus der Liste oder klicken Sie auf 'Erneut suchen'",
+          "device_name": "Anzeigename für den Transceiver in Home Assistant"
+        }
+      },
       "device": {
         "title": "Neues ELDAT Gerät hinzufügen",
         "description": "Fügen Sie ein neues ELDAT Gerät über den RX11 Transceiver hinzu."
@@ -165,9 +177,9 @@
       },
       "device_transmitter_already_exists": {
         "title": "Gerät bereits vorhanden",
-        "description": "⚠️ **Dieser EW-Sender ist bereits eingelernt!**\n\n**📋 Seriennummer:** `{serial}`\n\nDas Gerät existiert bereits in Home Assistant und kann nicht erneut angelegt werden. Sie können einen anderen Sender einlernen.",
+        "description": "**Dieser Easywave Sender ist bereits eingelernt!**\n\nDer Sendecode wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Sender.",
         "menu_options": {
-          "device_transmitter_learn_progress": "🔄 Anderen Sender einlernen",
+          "device_transmitter_learn_start": "🔄 Sender einlernen",
           "device_transmitter_description": "⬅️ Zurück"
         }
       },
@@ -265,6 +277,14 @@
           "action": "Action"
         }
       },
+      "device_confirm_ewneo_sensor": {
+        "title": "EWneo-Sensor bestätigen",
+        "description": "✅ **EWneo-Sensor erfolgreich erkannt!**\n\n**🔍 Erkannte Gerätedaten:**\n• Seriennummer: `{serial_short}`\n• Name: {suggested_name}\n• Erkannte Sensoren:\n{sensor_list}\n\n**⚡ Was wird angelegt:**\n• 1 EWneo-Sensor Gerät\n• Sensor-Entitäten für alle erkannten Messwerte\n• Batteriestatus-Sensor\n\n**⚙️ Gerät anlegen:**\nWählen Sie 'Anlegen' um das Gerät zu erstellen.",
+        "data": {
+          "device_name": "Gerätename",
+          "action": "Aktion"
+        }
+      },
       "device_confirm_rename": {
         "title": "Rename Device",
         "description": "Current name: {current_name}",
@@ -356,6 +376,10 @@
         "data": {
           "device_name": "Device Name"
         }
+      },
+      "device_save_success": {
+        "title": "Successfully Added",
+        "description": "The device **{device_name}** is now available and entities have been created."
       },
       "ew_receiver_config": {
         "title": "Configure EW-Receiver",
@@ -459,6 +483,7 @@
       "learning_aborted": "Learning aborted.",
       "learning_failed": "Device learning failed.",
       "no_coordinator": "No coordinator available.",
+      "no_rx11_found": "Kein ELDAT RX11 USB-Transceiver gefunden. Bitte schließen Sie den RX11 an einen USB-Port an und klicken Sie auf 'Erneut suchen'.",
       "no_devices_found": "No ELDAT USB devices found. Connect your device and refresh the list.",
       "no_usb_devices_found": "No USB devices found.",
       "no_device_selected": "No device selected.",
@@ -469,7 +494,6 @@
       "sensor_parse_error": "Error processing sensor telegram: {error}",
       "communication_failed": "Communication test with EW-Receiver failed. Check if the receiver is in learning mode.",
       "communication_error": "Error during communication test.",
-      "user_cancelled": "Cancelled by user.",
       "no_receivers_found": "No EW-Receivers found. Check the connection to the RX11.",
       "scan_failed": "Error scanning for EW-Receivers.",
       "invalid_selection": "Invalid selection made.",
@@ -490,7 +514,7 @@
       "no_rx11_configured": "No RX11 Transceiver configured. Please set up an RX11 first.",
       "rx11_not_available": "RX11 Transceiver not available",
       "yaml_not_supported": "YAML configuration is not supported. Please use the user interface.",
-      "device_added": "✅ Device successfully added!\n\n📡 {device_name}\n🔑 Serial number: ...{serial_number}\n\nThe device is now available and entities have been created.",
+      "device_added": "The device **{device_name}** is now available and entities have been created.",
       "learning_timeout": "Timeout while learning the device. Please try again.",
       "device_removed": "Device was removed",
       "unknown": "Unknown error occurred",
@@ -503,8 +527,8 @@
       "ewneo_learning_failed": "EWneo-Switch/Motor learning process failed. Please check the connection and try again.",
       "no_learned_device": "No learned device available",
       "no_preparation_data": "No preparation data available - please restart the process",
-      "user_cancelled": "User cancelled the process"
-      ,"user_cancelled_silent": ""
+      "user_cancelled": ""
+
     }
   },
   "options": {

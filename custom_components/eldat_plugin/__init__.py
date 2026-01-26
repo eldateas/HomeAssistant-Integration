@@ -10,7 +10,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -283,6 +283,114 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the ELDAT component."""
     # YAML configuration not supported - use UI
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Remove a device from the integration via the UI menu.
+    
+    This is called when a user clicks "Delete" on a device in the integration view.
+    Returns True if removal was successful, False otherwise.
+    """
+    _LOGGER.info("🗑️ User requested removal of device: %s (%s)", 
+                device_entry.name, device_entry.id)
+    
+    # Get coordinator
+    coordinator = hass.data.get(DOMAIN, {}).get(config_entry.entry_id)
+    if not coordinator:
+        _LOGGER.error("❌ Coordinator not found for config entry %s", config_entry.entry_id)
+        return False
+    
+    # Extract serial number from device identifiers
+    serial_number = None
+    for identifier in device_entry.identifiers:
+        if identifier[0] == DOMAIN:
+            # Identifier format is (DOMAIN, serial_number)
+            serial_number = identifier[1]
+            break
+    
+    if not serial_number:
+        _LOGGER.warning("⚠️ Could not find serial number for device %s", device_entry.id)
+        # Allow deletion anyway - this might be an orphaned device
+        return True
+    
+    # Don't allow deletion of the main RX11 transceiver device
+    # The RX11 gateway identifier is "{config_entry.entry_id}_gateway"
+    is_rx11_gateway = (
+        serial_number.endswith("_gateway") or
+        "gateway" in serial_number.lower() or
+        serial_number == config_entry.entry_id or
+        "RX11" in (device_entry.name or "").upper()
+    )
+    
+    if is_rx11_gateway:
+        # Check if there are other devices besides the RX11
+        device_registry = dr.async_get(hass)
+        other_devices = []
+        
+        for device in device_registry.devices.values():
+            # Check if device belongs to this config entry
+            if config_entry.entry_id not in device.config_entries:
+                continue
+            # Skip the RX11 gateway itself
+            if device.id == device_entry.id:
+                continue
+            # This is another device
+            other_devices.append(device)
+        
+        if other_devices:
+            # There are other devices - show warning message
+            device_names = [d.name or "Unbekannt" for d in other_devices[:5]]
+            device_list = ", ".join(device_names)
+            if len(other_devices) > 5:
+                device_list += f" und {len(other_devices) - 5} weitere"
+            
+            _LOGGER.info("ℹ️ User tried to delete RX11 transceiver with %d other devices present", len(other_devices))
+            raise HomeAssistantError(
+                f"Der RX11 USB-Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind."
+                f"Bitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, "
+                f"oder entfernen Sie die gesamte Integration unter:"
+                f"Einstellungen → Geräte & Dienste → ELDAT Integration → Löschen"
+            )
+        else:
+            # No other devices - remove the entire integration
+            _LOGGER.info("🗑️ No other devices present - removing entire ELDAT integration")
+            
+            # Schedule the config entry removal (can't do it synchronously here)
+            async def remove_integration():
+                await asyncio.sleep(0.5)  # Small delay to let the current operation complete
+                await hass.config_entries.async_remove(config_entry.entry_id)
+                _LOGGER.info("✅ ELDAT integration removed successfully")
+            
+            hass.async_create_task(remove_integration())
+            
+            # Return True to allow the device removal to proceed
+            return True
+    
+    try:
+        # Use coordinator's removal method for proper cleanup
+        success = await coordinator.async_remove_device(serial_number, force=True)
+        
+        if success:
+            _LOGGER.info("✅ Device %s removed successfully via UI", serial_number[-8:] if len(serial_number) > 8 else serial_number)
+            
+            # Fire event for UI notifications
+            hass.bus.async_fire("eldat_device_removed", {
+                "serial_number": serial_number,
+                "device_name": device_entry.name,
+                "removal_method": "ui_menu"
+            })
+        else:
+            _LOGGER.warning("⚠️ Coordinator removal returned False for %s, allowing device registry cleanup anyway", serial_number[-8:] if len(serial_number) > 8 else serial_number)
+        
+        # Always return True to allow Home Assistant to clean up the device registry
+        return True
+        
+    except Exception as e:
+        _LOGGER.error("❌ Error removing device %s: %s", serial_number, e, exc_info=True)
+        # Return True anyway to allow cleanup of orphaned devices
+        return True
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

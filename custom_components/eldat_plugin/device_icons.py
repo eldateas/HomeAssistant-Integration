@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 DEVICE_ICONS = {
     "ew_receiver": {
         "switch": "mdi:light-switch",
-        "motor": "mdi:blinds",
+        "motor": "mdi:window-shutter",
         "heating_cooling": "mdi:thermostat",
     },
     "ew_transmitter": "mdi:gesture-tap-button",
@@ -25,7 +25,7 @@ DEVICE_ICONS = {
     "ewneo_receiver": {
         "switch": "mdi:light-switch",
         "dimmer": "mdi:lightbulb-outline",
-        "motor": "mdi:blinds",
+        "motor": "mdi:window-shutter",
     }
 }
 

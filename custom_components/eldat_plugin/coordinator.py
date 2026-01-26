@@ -143,11 +143,11 @@ class EldatCoordinator(DataUpdateCoordinator):
             is_switch_mode = usage_type == "switch"
             if is_switch_mode:
                 if button_count <= 2:
-                    return "An" if button == 0 else "Aus" if button == 1 else None
+                    return "Ein" if button == 0 else "Aus" if button == 1 else None
                 if button in (0, 1):
-                    return "An 1" if button == 0 else "Aus 1"
+                    return "Ein 1" if button == 0 else "Aus 1"
                 if button in (2, 3):
-                    return "An 2" if button == 2 else "Aus 2"
+                    return "Ein 2" if button == 2 else "Aus 2"
             else:
                 if button_count <= 2:
                     return "Auf" if button == 0 else "Zu" if button == 1 else None
@@ -1153,6 +1153,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                     _LOGGER.warning("⚠️ Skipping invalid registered device %s", serial_number[-8:])
                     continue
                 
+                # Regenerate entity specs to ensure entities list is present
+                device_info = await self._regenerate_entity_specs(serial_number, device_info)
+                
                 # Restore to legacy devices dict for platform compatibility
                 self.devices[serial_number] = device_info
                 self._known_devices.add(serial_number)
@@ -1495,8 +1498,11 @@ class EldatCoordinator(DataUpdateCoordinator):
                 self._reconnect_attempts += 1
                 self._last_reconnect_time = current_time
                 
-                _LOGGER.warning("🔴 RX11 nicht verfügbar - Reconnect-Versuch %d...", 
-                              self._reconnect_attempts)
+                # Only log first attempt and every 10th attempt to reduce spam
+                if self._reconnect_attempts == 1:
+                    _LOGGER.warning("🔴 RX11 getrennt - starte Reconnect...")
+                elif self._reconnect_attempts % 10 == 0:
+                    _LOGGER.info("🔄 RX11 Reconnect läuft (Versuch %d)...", self._reconnect_attempts)
                 
                 try:
                     # Try to reconnect
@@ -1505,18 +1511,16 @@ class EldatCoordinator(DataUpdateCoordinator):
                     connected = await self.transceiver.connect()
                     
                     if connected:
-                        _LOGGER.info("✅ RX11 erfolgreich verbunden nach %d Versuchen!", 
+                        _LOGGER.info("✅ RX11 verbunden nach %d Versuchen", 
                                    self._reconnect_attempts)
                         self._reconnect_attempts = 0
                         is_connected = True
                         # Immediately update all listeners on successful reconnect
                         self.async_update_listeners()
-                    else:
-                        _LOGGER.warning("⚠️ RX11 Reconnect fehlgeschlagen (Versuch %d) - USB-Gerät nicht gefunden", 
-                                       self._reconnect_attempts)
+                    # Don't log every failed attempt - reduce spam
                 except Exception as e:
-                    _LOGGER.warning("⚠️ RX11 Reconnect-Fehler (Versuch %d): %s", 
-                                   self._reconnect_attempts, e)
+                    _LOGGER.debug("Reconnect attempt %d failed: %s", 
+                                  self._reconnect_attempts, e)
         else:
             # Reset reconnect counter on successful connection
             if hasattr(self, '_reconnect_attempts') and self._reconnect_attempts > 0:
@@ -1556,9 +1560,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Run ghost device cleanup every 120 updates (approximately every 2 hours)
             if self._update_count % 120 == 0:
                 try:
-                    await self.async_cleanup_ghost_devices()
+                    await self.async_cleanup_devices(mode='ghost')
                 except Exception as e:
-                    _LOGGER.error("Error during periodic ghost device cleanup: %s", e)
+                    _LOGGER.error("❌ Error during periodic ghost device cleanup: %s", e)
             
             return {
                 "hw_version": self._cached_hw_version,
@@ -1588,8 +1592,27 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Fire button events IMMEDIATELY for EW-Transmitters, but NOT for EWneo devices
             if (telegram_data.get("type") == "ew_transmitter" or telegram_data.get("info_type") in [0, 1]) and not is_ewneo_device:
-                _LOGGER.warning("🔵 Firing button events for EW-Transmitter telegram")
-                await self._fire_button_events(serial_number, telegram_data)
+                _LOGGER.warning("🔵 Firing events for EW-Transmitter telegram")
+                
+                # Get the function/action from telegram
+                action = telegram_data.get("function")
+                battery_recovered = telegram_data.get("battery_recovered", False)
+                
+                # Fire battery events separately from button events
+                if action == "battery_low":
+                    _LOGGER.warning("🔋 Firing battery_low event (transmitter-wide)")
+                    await self._fire_battery_event(serial_number, telegram_data, "battery_low")
+                    
+                else:
+                    # Normal button press/release - fire button events
+                    _LOGGER.warning("🔘 Firing button events (press/release)")
+                    await self._fire_button_events(serial_number, telegram_data)
+                    
+                    # Fire battery_ok event only when battery was recovered (second normal press after battery_low)
+                    if battery_recovered:
+                        _LOGGER.warning("🔋 Firing battery_ok event (battery recovered/replaced)")
+                        await self._fire_battery_event(serial_number, telegram_data, "battery_ok")
+                    
             elif is_ewneo_device:
                 _LOGGER.warning("🔄 Processing EWneo device telegram %s as state update", serial_number[-8:])
             
@@ -1627,13 +1650,32 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     if "battery_level" in telegram_data:
                         self.devices[serial_number]["battery_level"] = telegram_data["battery_level"]
-                        _LOGGER.debug("Battery updated: %d%%", telegram_data["battery_level"])
-                    
-                    # IMMEDIATELY fire sensor update events with FULL serial
-                    await self._fire_specific_entity_events(serial_number, telegram_data)
+                        _LOGGER.warning("🔋 Battery updated in devices dict: %d%%", telegram_data["battery_level"])
             else:
-                _LOGGER.warning("Device NOT found in coordinator.devices! Serial: %s...%s", 
-                              serial_number[:8], serial_number[-8:])
+                # Device not in self.devices, but is registered - add it now!
+                if is_registered and serial_number in self._registered_devices:
+                    _LOGGER.warning("📝 Adding registered device to devices dict: %s...%s", 
+                                  serial_number[:8], serial_number[-8:])
+                    self.devices[serial_number] = self._registered_devices[serial_number].copy()
+                    self.devices[serial_number]["last_seen"] = time.time()
+                    self.devices[serial_number]["last_telegram"] = telegram_data
+                    
+                    # Update measurements
+                    if "temperature" in telegram_data:
+                        self.devices[serial_number]["temperature"] = telegram_data["temperature"]
+                    if "humidity" in telegram_data:
+                        self.devices[serial_number]["humidity"] = telegram_data["humidity"]
+                    if "battery_level" in telegram_data:
+                        self.devices[serial_number]["battery_level"] = telegram_data["battery_level"]
+                        _LOGGER.warning("🔋 Battery set in newly added device: %d%%", telegram_data["battery_level"])
+                else:
+                    _LOGGER.warning("Device NOT found in coordinator.devices! Serial: %s...%s", 
+                                  serial_number[:8], serial_number[-8:])
+            
+            # Fire specific entity events for sensors (temperature, humidity, battery) if registered
+            if is_registered and telegram_data.get("type") in ["ewneo_sensor", "ew_sensor"]:
+                _LOGGER.warning("🌡️ Firing sensor-specific events for registered sensor %s", serial_number[-8:])
+                await self._fire_specific_entity_events(serial_number, telegram_data)
             
             # ALWAYS fire telegram event with FULL serial (even if not in devices dict)
             self.hass.bus.async_fire(
@@ -1647,14 +1689,20 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Fire device updated event if device exists in registry
             if serial_number in self.devices:
                 _LOGGER.warning("📢 Firing EVENT_DEVICE_UPDATED with full serial: %s", serial_number[:8]+"..."+serial_number[-8:])
-                self.hass.bus.async_fire(
-                    EVENT_DEVICE_UPDATED,
-                    {
-                        "serial_number": serial_number,
-                        "device_info": self.devices[serial_number],
-                        "telegram_data": telegram_data,
-                    }
-                )
+                
+                # Extract battery_level from telegram_data if present
+                event_data = {
+                    "serial_number": serial_number,
+                    "device_info": self.devices[serial_number],
+                    "telegram_data": telegram_data,
+                }
+                
+                # Add battery_level to top level for easier access by sensors
+                if "battery_level" in telegram_data:
+                    event_data["battery_level"] = telegram_data["battery_level"]
+                    _LOGGER.warning("🔋 Including battery_level in EVENT_DEVICE_UPDATED: %d%%", telegram_data["battery_level"])
+                
+                self.hass.bus.async_fire(EVENT_DEVICE_UPDATED, event_data)
                 
                 # Process EWneo device state updates
                 if is_ewneo_device:
@@ -1835,133 +1883,98 @@ class EldatCoordinator(DataUpdateCoordinator):
         except Exception as e:
             _LOGGER.error("❌ Error adding sensor entities for transceiver %s: %s", serial_number[-8:], e)
 
-    async def _fire_button_events(self, serial_number: str, telegram_data: Dict[str, Any]) -> None:
-        """Fire button events for EW-Transmitter devices immediately, regardless of registration."""
+    async def _fire_battery_event(self, serial_number: str, telegram_data: Dict[str, Any], event_type: str) -> None:
+        """Fire battery-related events (battery_low, battery_ok).
+        
+        Battery events are transmitter-wide and independent of button actions.
+        
+        Args:
+            serial_number: Device serial number
+            telegram_data: Telegram data
+            event_type: Either "battery_low" or "battery_ok"
+        """
         try:
-            button = telegram_data.get("button")
-            # Use 'function' field from telegram, fallback to 'action' or 'is_release' detection
-            action = telegram_data.get("function") or telegram_data.get("action")
+            device_name = self.devices.get(serial_number, {}).get("name", "Unknown")
             
-            # If no explicit action, determine from is_push/is_release flags
-            if not action:
-                if telegram_data.get("is_release"):
-                    action = "release"
-                elif telegram_data.get("is_push"):
-                    action = "press"
-                else:
-                    action = "press"  # Default fallback
-            
-            if button is None:
-                _LOGGER.warning("Button data missing from EW-Transmitter telegram")
-                return
-                
-            _LOGGER.info("🔍 Button event details: button=%s, action=%s, function=%s, is_push=%s, is_release=%s", 
-                         button, action, telegram_data.get("function"), 
-                         telegram_data.get("is_push"), telegram_data.get("is_release"))
-                
-            # Determine event type based on action
-            if action in ["press", "push", "on", "1", 1]:
-                # Check for low battery condition
-                is_low_battery = telegram_data.get("is_low_battery", False)
-                if is_low_battery:
-                    event_type = "eldat_plugin_button_low_battery"
-                    is_push = True
-                    is_release = False
-                    _LOGGER.warning("🔋 Low battery detected for device %s button %s", serial_number[-8:], button)
-                else:
-                    event_type = "eldat_plugin_button_press"
-                    is_push = True
-                    is_release = False
-            elif action in ["release", "off", "0", 0]:
-                event_type = "eldat_plugin_button_release"
-                is_push = False
-                is_release = True
-            else:
-                event_type = "eldat_plugin_button_press"  # Default to press
-                is_push = True
-                is_release = False
-            
+            # Prepare transmitter-wide battery event data
             event_data = {
-                "device_id": serial_number,  # Use serial_number directly for device automation
+                "device_id": serial_number,
                 "serial_number": serial_number,
-                "button": button,
-                "action": action,
-                "is_push": is_push,
-                "is_release": is_release,
-                "is_low_battery": telegram_data.get("is_low_battery", False),
-                "battery_level": telegram_data.get("battery_level", 100),
-                "battery_status": telegram_data.get("battery_status", "good"),
-                "telegram": telegram_data
+                "device_name": device_name,
+                "event_type": event_type,
+                "is_low_battery": event_type == "battery_low",
+                "battery_status": "low" if event_type == "battery_low" else "normal"
             }
             
-            _LOGGER.info("🚨 Firing %s for device %s button %s (action=%s)", 
-                         event_type, serial_number[-8:], button, action)
-                         
-            # Fire original event for backward compatibility
-            self.hass.bus.async_fire(event_type, event_data)
+            # Fire appropriate event
+            if event_type == "battery_low":
+                self.hass.bus.async_fire("eldat_plugin_battery_low", event_data)
+                _LOGGER.warning("🪫 Battery LOW event: %s (transmitter-wide)", serial_number[-8:])
+                
+            elif event_type == "battery_ok":
+                self.hass.bus.async_fire("eldat_plugin_battery_ok", event_data)
+                _LOGGER.warning("🔋 Battery OK event: %s (transmitter-wide)", serial_number[-8:])
             
-            # Fire device automation compatible events
+        except Exception as e:
+            _LOGGER.error("Error firing battery event for %s: %s", serial_number[-8:], e)
+
+    async def _fire_button_events(self, serial_number: str, telegram_data: Dict[str, Any]) -> None:
+        """Fire button events for EW-Transmitter devices (press/release only).
+        
+        Supported actions:
+        - press: Button pressed
+        - release: Button released
+        
+        Note: Battery events (battery_low, battery_ok) are handled separately.
+        """
+        try:
+            button = telegram_data.get("button")
+            action = telegram_data.get("function")  # Use function field from telegram
+            
+            # Only handle press and release here
+            if action not in ["press", "release"]:
+                _LOGGER.warning("⚠️ Unexpected action '%s' in _fire_button_events - should be press/release only", action)
+                return
+            
+            # Push and release require button info
+            if button is None or action is None:
+                _LOGGER.warning("Button or action missing from telegram (button=%s, action=%s)", button, action)
+                return
+                
+            _LOGGER.warning("🔍 Button event: device=%s, button=%s, action=%s", 
+                          serial_number[-8:], button, action)
+            
+            device_name = self.devices.get(serial_number, {}).get("name", "Unknown")
             button_name = telegram_data.get("button_name", f"button_{button}")
             action_label = self._get_transmitter_action_label(serial_number, button)
             if not action_label:
                 action_label = button_name
+                
+            # Prepare button-specific event data
+            event_data = {
+                "device_id": serial_number,
+                "serial_number": serial_number,
+                "button": button,
+                "button_name": button_name,
+                "action": action,
+                "action_label": action_label,
+                "device_name": device_name,
+                "is_press": action == "press",
+                "is_release": action == "release"
+            }
             
-            # Fire device trigger compatible events
-            if action in ["press", "push", "on", "1", 1]:
-                # Check for low battery condition
-                if telegram_data.get("is_low_battery", False):
-                    # Battery low event
-                    self.hass.bus.async_fire("eldat_button_battery_low", {
-                        "device_id": serial_number,
-                        "serial_number": serial_number,
-                        "subtype": action_label,
-                        "button": button,
-                        "button_name": button_name,
-                        "action_label": action_label,
-                        "raw_button_name": button_name,
-                        "battery_level": telegram_data.get("battery_level", 0),
-                        "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
-                    })
-                    _LOGGER.warning("🪫 Battery low event fired for %s button %s (level: %s%%)", 
-                                  serial_number[-8:], button_name, telegram_data.get("battery_level", 0))
-                    
-                # Button press start event
-                self.hass.bus.async_fire("eldat_button_press_start", {
-                    "device_id": serial_number,
-                    "serial_number": serial_number,
-                    "subtype": action_label,
-                    "button": button,
-                    "button_name": button_name,
-                    "action_label": action_label,
-                    "raw_button_name": button_name,
-                    "is_low_battery": telegram_data.get("is_low_battery", False),
-                    "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
-                })
+            # Fire appropriate event
+            if action == "press":
+                self.hass.bus.async_fire("eldat_plugin_button_press", event_data)
+                # ALSO fire the event that binary_sensor and device_trigger are listening for
+                self.hass.bus.async_fire("eldat_button_press", event_data)
+                _LOGGER.warning("🔘 Button press: %s button %s", serial_number[-8:], button_name)
                 
-                # Short press event (for immediate action)
-                self.hass.bus.async_fire("eldat_button_short_press", {
-                    "device_id": serial_number,
-                    "serial_number": serial_number,
-                    "subtype": action_label,
-                    "button": button,
-                    "button_name": button_name,
-                    "action_label": action_label,
-                    "raw_button_name": button_name,
-                    "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
-                })
-                
-            elif action in ["release", "off", "0", 0]:
-                # Button press end event
-                self.hass.bus.async_fire("eldat_button_press_end", {
-                    "device_id": serial_number,
-                    "serial_number": serial_number,
-                    "subtype": action_label,
-                    "button": button,
-                    "button_name": button_name,
-                    "action_label": action_label,
-                    "raw_button_name": button_name,
-                    "device_name": self.devices.get(serial_number, {}).get("name", "Unknown")
-                })
+            elif action == "release":
+                self.hass.bus.async_fire("eldat_plugin_button_release", event_data)
+                # ALSO fire the event that binary_sensor and device_trigger are listening for
+                self.hass.bus.async_fire("eldat_button_release", event_data)
+                _LOGGER.warning("🔓 Button release: %s button %s", serial_number[-8:], button_name)
             
         except Exception as e:
             _LOGGER.error("Error firing button events for %s: %s", serial_number[-8:], e)
@@ -1980,7 +1993,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             if device_type == "ew_transmitter" or info_type == 1:
                 button = telegram_data.get("button")
                 function = telegram_data.get("function")
-                is_push = telegram_data.get("is_push", False)
+                is_press = telegram_data.get("is_press", False)
                 is_release = telegram_data.get("is_release", False)
                 is_low_battery = telegram_data.get("is_low_battery", False)
                 button_name = telegram_data.get("button_name", f"Button {button}")
@@ -1990,7 +2003,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
                 if button is not None:
                     # Determine event type based on new parsing format
-                    if is_push:
+                    if is_press:
                         if is_low_battery:
                             event_type = f"{DOMAIN}_button_low_battery"
                         else:
@@ -2007,26 +2020,38 @@ class EldatCoordinator(DataUpdateCoordinator):
                             event_type = f"{DOMAIN}_button_press"  # Default to press
                     
                     # Fire button event
-                    self.hass.bus.async_fire(
-                        event_type,
-                        {
-                            "device_id": serial_number,
-                            "serial_number": serial_number,
-                            "button": button,
-                            "button_name": button_name,
-                            "action_label": action_label,
-                            "raw_button_name": button_name,
-                            "function": function,
-                            "is_push": is_push,
-                            "is_release": is_release,
-                            "is_low_battery": is_low_battery,
-                            "battery_level": telegram_data.get("battery_level", 100),
-                            "battery_status": telegram_data.get("battery_status", "good"),
-                            "additional_info": telegram_data.get("additional_info"),
-                            "raw_data": telegram_data.get("raw_data"),
-                            "timestamp": telegram_data.get("timestamp"),
-                        }
-                    )
+                    event_dict = {
+                        "device_id": serial_number,
+                        "serial_number": serial_number,
+                        "button": button,
+                        "button_name": button_name,
+                        "action_label": action_label,
+                        "raw_button_name": button_name,
+                        "function": function,
+                        "is_press": is_press,
+                        "is_release": is_release,
+                        "is_low_battery": is_low_battery,
+                        "battery_status": telegram_data.get("battery_status", "good"),
+                        "additional_info": telegram_data.get("additional_info"),
+                        "raw_data": telegram_data.get("raw_data"),
+                        "timestamp": telegram_data.get("timestamp"),
+                    }
+                    
+                    # Only add battery_level if explicitly present
+                    if "battery_level" in telegram_data:
+                        event_dict["battery_level"] = telegram_data["battery_level"]
+                    
+                    self.hass.bus.async_fire(event_type, event_dict)
+                    
+                    # ALSO fire the events that binary_sensor and device_trigger are listening for
+                    if is_press:
+                        self.hass.bus.async_fire("eldat_button_press", event_dict)
+                        _LOGGER.debug("Fired eldat_button_press event for device %s button %s (%s)", 
+                                    serial_number[-6:], button, button_name)
+                    elif is_release:
+                        self.hass.bus.async_fire("eldat_button_release", event_dict)
+                        _LOGGER.debug("Fired eldat_button_release event for device %s button %s (%s)", 
+                                    serial_number[-6:], button, button_name)
                     
                     _LOGGER.debug("Fired %s event for device %s button %s (%s)", 
                                 event_type, serial_number[-6:], button, button_name)
@@ -2643,9 +2668,27 @@ class EldatCoordinator(DataUpdateCoordinator):
             return False
             
         try:
-            # Convert bytes to appropriate format if needed for the transceiver
-            if isinstance(command, bytes):
-                # Use transceiver-specific command sending for bytes
+            # Get device info to determine device type
+            device_info = self._registered_devices.get(serial_number) or self.devices.get(serial_number, {})
+            device_type = device_info.get("type", "")
+            is_ew_receiver = device_type == "ew_receiver"
+            
+            # For EW-Receiver devices, always use send_command_to_receiver
+            if is_ew_receiver:
+                # Convert bytes to command format for send_command_to_receiver
+                if isinstance(command, bytes):
+                    # send_command_to_receiver expects bytes directly
+                    command_bytes = command
+                else:
+                    command_bytes = command
+                    
+                if hasattr(self.transceiver, 'send_command_to_receiver'):
+                    result = await self.transceiver.send_command_to_receiver(serial_number, command_bytes)
+                else:
+                    _LOGGER.error("Transceiver does not support send_command_to_receiver for EW receiver")
+                    return False
+            elif isinstance(command, bytes):
+                # Non-EW-Receiver with bytes - use send_command_to_device
                 if hasattr(self.transceiver, 'send_command_to_device'):
                     result = await self.transceiver.send_command_to_device(serial_number, command)
                 else:
@@ -3168,10 +3211,17 @@ class EldatCoordinator(DataUpdateCoordinator):
                 if receiver_info:
                     ew_receiver_index, ew_receiver_serial = receiver_info
                     
-                    # Store mapping persistently in device registry
-                    self.device_registry.store_ew_receiver_mapping(
-                        ew_receiver_index, ew_receiver_serial, device_serial
-                    )
+                    # Store mapping persistently in device manager
+                    # Update the device with the RX11 index
+                    device = self.device_manager.get_device(device_serial)
+                    if device:
+                        self.device_manager.add_device(
+                            serial_number=device_serial,
+                            device_type=device.device_type,
+                            name=device.name,
+                            rx11_index=ew_receiver_index
+                        )
+                        await self.device_manager.save()
                     
                     # Mark receiver as used to prevent double allocation
                     if hasattr(self.transceiver, '_rx11_wrapper'):
@@ -3306,12 +3356,17 @@ class EldatCoordinator(DataUpdateCoordinator):
             return super().async_add_listener(update_callback)
 
     async def async_cleanup_ghost_devices(self) -> None:
-        """Detect and remove ghost devices that are no longer needed."""
+        """Detect and remove ghost devices that are no longer needed.
+        
+        DEPRECATED: This method is deprecated. Use async_cleanup_devices(mode='ghost') instead.
+        This implementation now delegates to the new unified cleanup system.
+        """
+        _LOGGER.warning("async_cleanup_ghost_devices is deprecated, use async_cleanup_devices(mode='ghost')")
         try:
             _LOGGER.info("🧹 Starting ghost device cleanup...")
             
-            # Get current devices from device registry
-            current_devices = await self.device_registry.get_all_devices()
+            # Use device_manager instead of the non-existent device_registry
+            current_devices = self.device_manager.get_all_devices()
             
             # Get Home Assistant device and entity registries  
             ha_device_registry = dr.async_get(self.hass)
@@ -3320,38 +3375,24 @@ class EldatCoordinator(DataUpdateCoordinator):
             ghost_devices = []
             current_time = time.time()
             
-            for device_id, device_entry in current_devices.items():
-                # Extract data from EepromEntry structure
-                serial_number = device_entry.serial_number.receiver_transmitter
+            for serial_number, device_entry in current_devices.items():
                 device_data = {
                     "name": device_entry.name,
-                    "device_type": DeviceType(device_entry.information.device_type).name,
+                    "device_type": device_entry.device_type,
                     "last_seen": device_entry.last_seen,
                     "created_at": device_entry.created_at,
-                    "unique_id": device_entry.unique_id,
-                    "area": device_entry.area
                 }
                 
                 # Skip if device has been seen recently (within 24 hours)
                 last_seen = device_entry.last_seen
-                if last_seen and isinstance(last_seen, str):
-                    try:
-                        # Convert ISO format to timestamp
-                        from datetime import datetime
-                        last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-                        last_seen_timestamp = last_seen_dt.timestamp()
-                        hours_since_seen = (current_time - last_seen_timestamp) / 3600
-                        if hours_since_seen < 24:
-                            continue
-                    except (ValueError, AttributeError):
-                        # Invalid datetime format, treat as old device
-                        hours_since_seen = 999
-                else:
-                    hours_since_seen = 999  # No last_seen data
+                hours_since_seen = self._calculate_hours_since_seen(last_seen, current_time)
                 
-                # Check if device type suggests it might be temporary
-                device_type = DeviceType(device_entry.information.device_type)
-                if device_type == DeviceType.EW_SENDER:
+                if hours_since_seen < 24:
+                    continue
+                
+                # Check if device type suggests it might be temporary (EW_TRANSMITTER)
+                device_type_str = device_entry.device_type.upper() if isinstance(device_entry.device_type, str) else str(device_entry.device_type)
+                if "TRANSMITTER" in device_type_str or device_type_str == "EW_SENDER":
                     # EW-Transmitters are often used temporarily and become ghost devices
                     ghost_devices.append((serial_number, device_data, "Transmitter device not seen recently"))
                 elif device_entry.created_at:
@@ -3373,7 +3414,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 _LOGGER.info("✅ No ghost devices detected")
                 
         except Exception as e:
-            _LOGGER.error("Error during ghost device cleanup: %s", e)
+            _LOGGER.error("❌ Error during ghost device cleanup: %s", e)
 
     async def async_prevent_ghost_device_creation(self, serial_number: str, device_data: Dict[str, Any]) -> bool:
         """Prevent creation of devices that are likely to become ghost devices."""
@@ -3536,12 +3577,12 @@ class EldatCoordinator(DataUpdateCoordinator):
         try:
             _LOGGER.info("🔍 Checking for ghost devices (max_age=%d hours)...", max_age_hours)
             
-            current_devices = await self.device_registry.get_all_devices()
+            # Use device_manager instead of the non-existent device_registry
+            current_devices = self.device_manager.get_all_devices()
             ghost_devices = []
             current_time = time.time()
             
-            for device_id, device_entry in current_devices.items():
-                serial_number = device_entry.serial_number.receiver_transmitter
+            for serial_number, device_entry in current_devices.items():
                 last_seen = device_entry.last_seen
                 
                 # Calculate hours since last seen
@@ -3550,7 +3591,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 if hours_since_seen > max_age_hours:
                     device_data = {
                         "name": device_entry.name,
-                        "device_type": DeviceType(device_entry.information.device_type).name,
+                        "device_type": device_entry.device_type,
                         "hours_since_seen": hours_since_seen,
                         "last_seen": last_seen
                     }
@@ -3838,23 +3879,28 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("📊 State update for %s: %s (0x%08X)", 
                          serial_number[-8:], [f'0x{b:02X}' for b in state_bytes], state_value)
             
-            # Get device info to determine type
-            device_info = self.device_registry.get_device(serial_number)
-            if not device_info:
-                _LOGGER.warning("⚠️ Device %s not found in registry for state update", serial_number[-8:])
+            # Get device info to determine type from device_manager
+            device = self.device_manager.get_device(serial_number)
+            if not device:
+                _LOGGER.warning("⚠️ Device %s not found in device_manager for state update", serial_number[-8:])
                 return
                 
-            device_type_code = device_info.get('device_type_code', 0)
-            device_type_name = device_info.get('device_type_name', 'unknown')
+            # Get device type from ManagedDevice
+            device_type_str = device.device_type if isinstance(device.device_type, str) else str(device.device_type)
+            device_type_code = device.extra_data.get('device_type_code', 0) if device.extra_data else 0
+            device_type_name = device_type_str
             
             # Process state based on device type
             parsed_state = self._parse_ewneo_state(device_type_code, state_bytes, device_type_name, serial_number)
             
             if parsed_state:
-                # Update device data with new state
-                device_info['last_state_update'] = time.time()
-                device_info['current_state'] = parsed_state
-                device_info['raw_state'] = state_bytes
+                # Update device state in extra_data
+                if device.extra_data is None:
+                    device.extra_data = {}
+                device.extra_data['last_state_update'] = time.time()
+                device.extra_data['current_state'] = parsed_state
+                device.extra_data['raw_state'] = list(state_bytes)  # Convert to list for JSON serialization
+                device.mark_available()  # Mark device as available on state update
                 
                 # Fire state update event for entities
                 self.hass.bus.async_fire(

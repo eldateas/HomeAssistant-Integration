@@ -25,6 +25,7 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     # Try to get specs from device class if available
     device_class_specs = _try_get_specs_from_device_class(serial_number, device_info)
     if device_class_specs:
+        _LOGGER.info("✅ Using device class specs for %s", serial_number[-6:])
         return device_class_specs
     
     # Check if this is an EWneo device based on device_type_code (EWB devices)
@@ -40,8 +41,14 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     # Legacy fallback based on type string
     device_type = device_info.get("type", "unknown")
     
+    _LOGGER.info("🔍 create_entity_specs_for_device: serial=%s, type=%s, receiver_kind=%s", 
+                serial_number[-6:], device_type, device_info.get("receiver_kind"))
+    
     if device_type == "ew_receiver":
-        return _create_ew_receiver_entities_legacy(serial_number, device_info)
+        result = _create_ew_receiver_entities_legacy(serial_number, device_info)
+        _LOGGER.info("📦 EW-Receiver entity specs: %d platforms, cover=%d", 
+                    len([p for p, e in result.items() if e]), len(result.get("cover", [])))
+        return result
     elif device_type == "ew_transmitter":
         return _create_ew_transmitter_entities_legacy(serial_number, device_info)
     elif device_type in ["ew_sensor", "ewneo_sensor"]:
@@ -51,24 +58,48 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     elif device_type in ("sec_receiver", "sec_transmitter"):
         return _create_sec_entities_legacy(serial_number, device_info)
     
+    _LOGGER.warning("⚠️ No entity specs found for device_type=%s", device_type)
     return _empty_entity_dict()
 
 
 def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, Any]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
     """Try to get entity specs from the device class using transceivers registry."""
     device_type = device_info.get("type") or device_info.get("device_type")
-    if device_type == "ew_transmitter":
-        # Use legacy specs for EW-Transmitter to respect operating_type/usage_type settings
-        return None
 
     try:
         from .transceivers.rx11.devices.registry import get_device_class_for_info
         
         device_class = get_device_class_for_info(device_info)
         if device_class and hasattr(device_class, 'get_entity_specs'):
+            # Prepare kwargs for device instantiation
+            init_kwargs = {"name": device_info.get("name")}
+            
+            # For EWneoSensor, pass sensor_types
+            if device_type in ["ewneo_sensor", "ew_sensor"]:
+                sensor_types = device_info.get("sensor_types", [])
+                if sensor_types:
+                    init_kwargs["sensor_types"] = sensor_types
+                    _LOGGER.warning("🔍 _try_get_specs_from_device_class: Creating EWneoSensor with sensor_types=%s", sensor_types)
+            
             # Instantiate device temporarily to get specs
-            device_instance = device_class(serial_number, name=device_info.get("name"))
+            device_instance = device_class(serial_number, **init_kwargs)
             specs = device_instance.get_entity_specs()
+            
+            _LOGGER.warning("🔍 Device class returned specs: %s", {k: len(v) for k, v in specs.items() if v})
+            
+            # For EW-Transmitter: merge with legacy specs for buttons, but keep battery_warning from device class
+            if device_type == "ew_transmitter":
+                legacy_specs = _create_ew_transmitter_entities_legacy(serial_number, device_info)
+                # Merge: Use legacy specs for buttons, but add battery_warning from device class
+                if "binary_sensor" in specs and specs["binary_sensor"]:
+                    # Only add battery_warning binary sensors from device class
+                    battery_warnings = [s for s in specs["binary_sensor"] if s.get("sensor_type") == "battery_warning"]
+                    if battery_warnings and "binary_sensor" not in legacy_specs:
+                        legacy_specs["binary_sensor"] = []
+                    legacy_specs["binary_sensor"].extend(battery_warnings)
+                _LOGGER.debug("✅ Using merged entity specs for EW-Transmitter %s (legacy + battery_warning)", serial_number[-6:])
+                return legacy_specs
+            
             _LOGGER.debug("✅ Using entity specs from device class for %s", serial_number[-6:])
             return specs
     except Exception as e:
@@ -91,17 +122,26 @@ def _empty_entity_dict() -> Dict[str, List[Dict[str, Any]]]:
 
 
 # ============================================================
-# Legacy entity creation functions
-# Diese werden schrittweise durch Device-Klassen ersetzt
+# Entity creation functions
 # ============================================================
 
 def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
-    """Create entities for EW-Receiver devices (LEGACY)."""
+    """Create entities for EW-Receiver devices.
+    
+    Supported receiver_kind values:
+    - impulse: 1 zustandsloser Toggle-Button
+    - switch_2button: 1 zustandslose Switch-Entität (Ein/Aus)
+    - cover_2button: 1 zustandslose Cover-Entität (Auf/Zu ohne Stopp)
+    - motor_3button: 1 zustandslose Cover-Entität (Auf/Stopp/Zu)
+    - heating_cooling: 1 Switch mit Zustand und 4h Wiederholung
+    - universal_4button: 4 einzelne zustandslose Buttons
+    """
     from .device_icons import get_entity_config_for_device
     
     entities = _empty_entity_dict()
-    receiver_kind = device_info.get("receiver_kind", "switch")
+    receiver_kind = device_info.get("receiver_kind", "impulse")
     operating_mode = device_info.get("operating_mode", 1)
+    base_name = device_info.get("name", f"EW-Empfänger {serial_number[-6:]}")
     
     # Get device configuration
     device_config = get_entity_config_for_device(
@@ -110,135 +150,138 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         operating_mode=operating_mode
     )
     
-    # Create appropriate entities based on receiver_kind
-    if receiver_kind == "motor":
-        # Motor devices get button entities based on operating mode
-        # operating_mode: 1 = Eintast (Toggle), 2 = Zweitast (Up/Down), 3 = Dreitast (Up/Stop/Down)
-        base_name = device_info.get("name", f"Motor {serial_number[-6:]}")
-        
-        if operating_mode == 1:
-            # Eintastbedienung: Toggle button
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} A - Toggle",
-                "unique_id": f"{serial_number}_toggle",
-                "button_code": 0,  # TM_BUTTON_A
-                "action": "toggle",
-                "icon": "mdi:gesture-tap-button",
-                "operating_mode": operating_mode,
-                "receiver_kind": "motor"
-            })
-        elif operating_mode == 2:
-            # Zweitastbedienung: Up + Down buttons
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} A - Auf",
-                "unique_id": f"{serial_number}_up",
-                "button_code": 0,  # TM_BUTTON_A
-                "action": "up",
-                "icon": "mdi:arrow-up-circle",
-                "operating_mode": operating_mode,
-                "receiver_kind": "motor"
-            })
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} B - Ab",
-                "unique_id": f"{serial_number}_down",
-                "button_code": 1,  # TM_BUTTON_B
-                "action": "down",
-                "icon": "mdi:arrow-down-circle",
-                "operating_mode": operating_mode,
-                "receiver_kind": "motor"
-            })
-        elif operating_mode == 3:
-            # Dreitastbedienung: A - Auf, B - Ab, C - Stopp
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} A - Auf",
-                "unique_id": f"{serial_number}_up",
-                "button_code": 0,  # TM_BUTTON_A
-                "action": "up",
-                "icon": "mdi:arrow-up-circle",
-                "operating_mode": operating_mode,
-                "receiver_kind": "motor"
-            })
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} B - Ab",
-                "unique_id": f"{serial_number}_down",
-                "button_code": 1,  # TM_BUTTON_B
-                "action": "down",
-                "icon": "mdi:arrow-down-circle",
-                "operating_mode": operating_mode,
-                "receiver_kind": "motor"
-            })
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} C - Stopp",
-                "unique_id": f"{serial_number}_stop",
-                "button_code": 2,  # TM_BUTTON_C
-                "action": "stop",
-                "icon": "mdi:stop-circle-outline",
-                "operating_mode": operating_mode,
-                "receiver_kind": "motor"
-            })
-    elif receiver_kind == "switch":
-        # Switch devices get button entities for stateless operation
-        # operating_mode: 1 = Eintast (Toggle), 2 = Zweitast (Ein/Aus)
-        base_name = device_info.get("name", f"Switch {serial_number[-6:]}")
-        
-        if operating_mode == 1:
-            # Eintastbedienung: Toggle button
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} A - Toggle",
-                "unique_id": f"{serial_number}_toggle",
-                "button_code": 0,  # TM_BUTTON_A
-                "action": "toggle",
-                "icon": "mdi:gesture-tap-button",
-                "operating_mode": operating_mode,
-                "receiver_kind": "switch"
-            })
-        else:
-            # Zweitastbedienung (default): Ein + Aus buttons
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} A - Ein",
-                "unique_id": f"{serial_number}_on",
-                "button_code": 0,  # TM_BUTTON_A
-                "action": "on",
-                "icon": "mdi:lightbulb-on",
-                "operating_mode": operating_mode,
-                "receiver_kind": "switch"
-            })
-            entities["button"].append({
-                "type": "button",
-                "name": f"{base_name} B - Aus",
-                "unique_id": f"{serial_number}_off",
-                "button_code": 1,  # TM_BUTTON_B
-                "action": "off",
-                "icon": "mdi:lightbulb-off",
-                "operating_mode": operating_mode,
-                "receiver_kind": "switch"
-            })
-    elif receiver_kind == "heating_cooling":
-        # Heating/cooling devices get switch entities with 4h repetition
+    # Create entities based on receiver_kind
+    if receiver_kind == "impulse":
+        # Impuls (1-Tast): Toggle button - stateless
+        entities["button"].append({
+            "type": "button",
+            "name": "",
+            "unique_id": f"{serial_number}_toggle",
+            "button_code": 0,  # TM_BUTTON_A
+            "action": "toggle",
+            "icon": "mdi:gesture-tap-button",
+            "operating_mode": 1,
+            "receiver_kind": "impulse"
+        })
+    
+    elif receiver_kind == "switch_2button":
+        # EIN/AUS (2-Tast): Zustandslose Switch-Entität
         entities["switch"].append({
             "type": "switch",
-            "name": device_info.get("name", f"Heizung {serial_number[-6:]}"),
+            "name": "",
+            "unique_id": f"{serial_number}_switch",
+            "device_class": "switch",
+            "icon": "mdi:light-switch",
+            "operating_mode": 2,
+            "receiver_kind": "switch_2button",
+            "button_config": {
+                "on": 0,   # TM_BUTTON_A for ON
+                "off": 1   # TM_BUTTON_B for OFF
+            },
+            "stateless": True,
+            "repeat_on_toggle": True,  # Resend command on each toggle
+            "entity_category": None,
+            "persistent_state": False  # State is not tracked
+        })
+    
+    elif receiver_kind == "cover_2button":
+        # AUF/ZU (2-Tast): Zustandslose Cover-Entität ohne Stop
+        entities["cover"].append({
+            "type": "cover",
+            "name": "",
+            "unique_id": f"{serial_number}_cover",
+            "device_class": "shade",
+            "icon": "mdi:window-shutter",
+            "operating_mode": 2,
+            "receiver_kind": "cover_2button",
+            "button_config": {
+                "open": 0,   # TM_BUTTON_A for UP
+                "close": 1   # TM_BUTTON_B for DOWN
+            },
+            "supports_stop": False,
+            "stateless": True,
+            "repeat_on_command": True,  # Resend command on each press
+            "entity_category": None,
+            "persistent_state": False
+        })
+    
+    elif receiver_kind == "motor_3button":
+        # AUF/STOPP/ZU (3-Tast): Zustandslose Cover-Entität mit Stop
+        entities["cover"].append({
+            "type": "cover",
+            "name": "",
+            "unique_id": f"{serial_number}_motor",
+            "device_class": "garage",
+            "icon": "mdi:window-shutter",
+            "operating_mode": 3,
+            "receiver_kind": "motor_3button",
+            "button_config": {
+                "open": 0,   # TM_BUTTON_A for UP
+                "close": 1,  # TM_BUTTON_B for DOWN
+                "stop": 2    # TM_BUTTON_C for STOP
+            },
+            "supports_stop": True,
+            "stateless": True,
+            "repeat_on_command": True,
+            "entity_category": None,
+            "persistent_state": False
+        })
+    
+    elif receiver_kind == "heating_cooling":
+        # EIN/AUS (Heizung): Switch with 4h auto-repeat
+        entities["switch"].append({
+            "type": "switch",
+            "name": "",
             "unique_id": f"{serial_number}_heating_cooling_switch",
             "device_class": "switch",
             "icon": "mdi:thermostat",
-            "operating_mode": operating_mode,
+            "operating_mode": 1,
             "receiver_kind": "heating_cooling",
             "button_config": {
-                "toggle": 0 if operating_mode == 1 else 0,
-                "on": 0 if operating_mode == 2 else 0,
-                "off": 1 if operating_mode == 2 else 0
+                "toggle": 0,  # TM_BUTTON_A for toggle
+                "on": 0,
+                "off": 1
             },
             "supports_4h_repetition": True,
             "entity_category": None,
             "persistent_state": True
+        })
+    
+    elif receiver_kind == "universal_4button":
+        # UNIVERSAL (4-Tast): 4 individual buttons
+        button_labels = ["Zustand A", "Zustand B", "Zustand C", "Zustand D"]
+        button_keys = ["a", "b", "c", "d"]
+        button_icons = [
+            "mdi:alpha-a-circle",
+            "mdi:alpha-b-circle",
+            "mdi:alpha-c-circle",
+            "mdi:alpha-d-circle"
+        ]
+        for i in range(4):
+            entities["button"].append({
+                "type": "button",
+                "name": button_labels[i],
+                "unique_id": f"{serial_number}_button_{button_keys[i]}",
+                "button_code": i,
+                "action": f"button_{button_keys[i]}",
+                "icon": button_icons[i],
+                "operating_mode": 4,
+                "receiver_kind": "universal_4button"
+            })
+    
+    else:
+        # Unknown receiver_kind - create fallback toggle button
+        _LOGGER.warning("Unknown receiver_kind '%s' for EW-Receiver %s, creating toggle button", 
+                       receiver_kind, serial_number[-6:])
+        entities["button"].append({
+            "type": "button",
+            "name": "",
+            "unique_id": f"{serial_number}_toggle",
+            "button_code": 0,
+            "action": "toggle",
+            "icon": "mdi:gesture-tap-button",
+            "operating_mode": 1,
+            "receiver_kind": "impulse"
         })
     
     return entities
@@ -308,14 +351,14 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
         # 2-Tast-Bedienung -> create state sensors (An/Aus) or switches (Auf/Zu)
         is_switch_mode = usage_type == "switch" or switch_mode == "switch"
         if is_switch_mode:
-            state_options = ["An", "Aus"]
+            state_options = ["Ein", "Aus"]
             icon = "mdi:light-switch"
             if button_count == 2 or grouping_mode == "single":
                 # 2 buttons → 1 state sensor (A→state[0], B→state[1])
                 entities["sensor"].append({
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "Schalter",
+                    "name": "Zustand",
                     "unique_id": f"{serial_number}_state_1",
                     "channel": 0,
                     "device_class": "enum",
@@ -333,7 +376,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["sensor"].append({
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "Schalter 1",
+                    "name": "Zustand 1",
                     "unique_id": f"{serial_number}_state_1",
                     "channel": 0,
                     "device_class": "enum",
@@ -349,7 +392,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["sensor"].append({
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "Schalter 2",
+                    "name": "Zustand 2",
                     "unique_id": f"{serial_number}_state_2",
                     "channel": 1,
                     "device_class": "enum",
@@ -370,7 +413,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["binary_sensor"].append({
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "Schalter",
+                    "name": "Zustand",
                     "unique_id": f"{serial_number}_state_1_binary",
                     "state_key": "transmitter_state_1",
                     "channel": 0,
@@ -390,7 +433,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["binary_sensor"].append({
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "Schalter 1",
+                    "name": "Zustand 1",
                     "unique_id": f"{serial_number}_state_1_binary",
                     "state_key": "transmitter_state_1",
                     "channel": 0,
@@ -409,7 +452,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["binary_sensor"].append({
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "Schalter 2",
+                    "name": "Zustand 2",
                     "unique_id": f"{serial_number}_state_2_binary",
                     "state_key": "transmitter_state_2",
                     "channel": 1,
@@ -433,7 +476,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "transmitter_state",
-            "name": "Schalter",
+            "name": "Zustand",
             "unique_id": f"{serial_number}_state",
             "device_class": "enum",
             "options": state_options,
@@ -480,6 +523,8 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     
     # Check if this is an EWneo-Sensoren (new format)
     device_type = device_info.get("type", "unknown")
+    _LOGGER.warning("🔍 _create_entity_specs_for_ewneo_sensor: device_type=%s", device_type)
+    
     if device_type == "ewneo_sensor":
         # Try to create entity specs using the new EWneoSensor class
         try:
@@ -487,6 +532,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
             
             # Determine sensor types from device_info
             sensor_types = device_info.get('sensor_types', [])
+            _LOGGER.warning("🔍 sensor_types from device_info: %s", sensor_types)
             
             # If no sensor_types, try to convert from neo_types
             if not sensor_types:
@@ -509,7 +555,9 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
             # Default to temperature if nothing found
             if not sensor_types:
                 sensor_types = ['temperature']
-                _LOGGER.debug("No sensor types found for %s, defaulting to temperature", serial_number[-6:])
+                _LOGGER.warning("⚠️ No sensor types found for %s, defaulting to temperature", serial_number[-6:])
+            
+            _LOGGER.warning("🔍 Creating EWneoSensor with sensor_types: %s", sensor_types)
             
             # Create temporary device instance to get entity specs
             device_instance = EWneoSensor(
@@ -520,8 +568,13 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
             
             # Get specs from device
             specs = device_instance.get_entity_specs()
-            _LOGGER.info("✅ Created entity specs for EWneo-Sensoren %s with types: %s", 
-                        serial_number[-6:], sensor_types)
+            _LOGGER.warning("✅ EWneoSensor.get_entity_specs() returned: %s", 
+                          {k: len(v) for k, v in specs.items() if v})
+            for platform, entities in specs.items():
+                if entities:
+                    for entity in entities:
+                        _LOGGER.warning("  📋 %s: sensor_type=%s, name=%s", 
+                                      platform, entity.get("sensor_type"), entity.get("name"))
             return specs
             
         except Exception as e:
@@ -634,7 +687,7 @@ def _create_ewneo_entities_legacy(serial_number: str, device_info: Dict[str, Any
                 "unique_id": unique_id,
                 "channel": ch,
                 "device_class": "blind",
-                "icon": "mdi:blinds"
+                "icon": "mdi:window-shutter"
             })
     
     return entities

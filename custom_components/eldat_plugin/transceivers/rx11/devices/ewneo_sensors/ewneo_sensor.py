@@ -141,6 +141,9 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             )
             self._sensor_types.add("temperature")
         
+        # Initialize battery warning status
+        self._battery_warning = False
+        
         _LOGGER.info(
             "EWneo Sensor %s initialized with sensor types: %s",
             self.serial_number[-6:], ", ".join(sorted(self._sensor_types))
@@ -181,8 +184,8 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             if config:
                 entity_types.add(config.entity_type)
         
-        # Always include sensor for battery
-        entity_types.add("sensor")
+        # Always include binary_sensor for battery warning
+        entity_types.add("binary_sensor")
         
         return list(entity_types)
     
@@ -236,18 +239,17 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             
             specs[config.entity_type].append(entity_spec)
         
-        # Always add battery sensor
-        battery_spec = self._create_base_entity_spec(
-            "sensor",
-            name=f"{self.name} Battery",
+        # Add battery status binary sensor (instead of percentage sensor)
+        battery_warning_spec = self._create_base_entity_spec(
+            "binary_sensor",
+            name="Batteriestand",
             device_class="battery",
-            icon="mdi:battery",
-            unit_of_measurement="%"
+            icon="mdi:battery"
         )
-        # Override unique_id for battery
-        battery_spec["unique_id"] = f"{self.serial_number}_battery"
-        battery_spec["sensor_type"] = "battery"
-        specs["sensor"].append(battery_spec)
+        # Override unique_id for battery warning
+        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning"
+        battery_warning_spec["sensor_type"] = "battery_warning"
+        specs["binary_sensor"].append(battery_warning_spec)
         
         return specs
     
@@ -321,6 +323,17 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             # Convert 0-7 scale to 0-100% (7=full, 0=weak)
             battery_pct = round((battery_level_raw / 7.0) * 100)
             self.battery_level = battery_pct
+            
+            # Set battery warning if level is 0 (empty)
+            if battery_level_raw == 0:
+                self._battery_warning = True
+                _LOGGER.warning(
+                    "🔋 Battery warning: EWneo sensor %s battery is empty (level=0)",
+                    self.serial_number[-6:]
+                )
+            else:
+                self._battery_warning = False
+            
             _LOGGER.debug("EWneo sensor %s: Battery level=%d/7 (%d%%)",
                         self.serial_number[-6:], battery_level_raw, battery_pct)
         
@@ -379,7 +392,7 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         """Get current sensor data for all configured sensor types.
         
         Returns:
-            Dictionary with sensor values and battery status
+            Dictionary with sensor values and battery warning status
         """
         data = {}
         
@@ -389,10 +402,12 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             if value is not None:
                 data[sensor_type] = value
         
-        # Add battery data
+        # Add battery warning status
+        data["battery_warning"] = self._battery_warning
+        
+        # Add battery level for legacy compatibility (if needed elsewhere)
         if self.battery_level is not None:
             data["battery_level"] = self.battery_level
-            data["battery_status"] = "good" if self.battery_level > 20 else "low"
         
         # Add timestamp
         if "timestamp" in self.properties:

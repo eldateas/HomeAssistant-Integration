@@ -40,10 +40,27 @@ async def async_setup_entry(
 
     # Restore switches from saved devices (both legacy and registered)
     for serial_number, device_info in coordinator.get_all_devices().items():
-        # Always check for heating_cooling devices and create switch entities
+        device_entities = device_info.get("entities", [])
+        
+        _LOGGER.info("🔍 Switch setup: checking device %s (type=%s, receiver_kind=%s, %d entities)", 
+                    serial_number[-6:], device_info.get("type"), 
+                    device_info.get("receiver_kind"), len(device_entities))
+        
+        # Create switches from entity specs
+        for entity_spec in device_entities:
+            if entity_spec.get("type") == "switch":
+                _LOGGER.info("✅ Creating switch from entity_spec for %s", serial_number[-6:])
+                switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
+                created_device_serials.add(serial_number)
+        
+        # Skip further processing if we created entities from specs
+        if serial_number in created_device_serials:
+            continue
+        
+        # Legacy fallback: check for heating_cooling devices
         receiver_kind = device_info.get("receiver_kind")
         if receiver_kind == "heating_cooling":
-            # Force creation of heating_cooling switches
+            # Force creation of heating_cooling switches if not already created
             from .entity_specs import create_entity_specs_for_device
             entity_specs = create_entity_specs_for_device(serial_number, device_info)
             switch_entities = entity_specs.get("switch", [])
@@ -52,12 +69,11 @@ async def async_setup_entry(
                 switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
             
             created_device_serials.add(serial_number)
-            _LOGGER.info("🌡️ Restored %d heating/cooling switch entities for device %s", 
-                       len([e for e in switches if e._serial_number == serial_number]), serial_number[-8:])
+            _LOGGER.info("🌡️ Created %d heating/cooling switch entities for device %s", 
+                       len(switch_entities), serial_number[-8:])
             continue
         
         # Skip devices that already have configured entities of any type (non-heating_cooling and non-EWneo)
-        device_entities = device_info.get("entities", [])
         is_neo_device = device_info.get("neo_device", False) or device_info.get("device_type_code") in [0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B]
         has_configured_entities = any(entity.get("type") in ["button", "light", "cover", "switch"] for entity in device_entities)
         
@@ -1370,7 +1386,7 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
         
         # Listen for button press events from this device
         # Multiple event types are fired for button presses, use the short_press event
-        EVENT_BUTTON_SHORT_PRESS = "eldat_button_short_press"
+        EVENT_BUTTON_SHORT_PRESS = "eldat_plugin_button_press"
         
         @callback
         def _handle_button_press(event):
@@ -1520,10 +1536,10 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
                     self.async_write_ha_state()
 
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_short_press", _handle_button_event)
+            self.hass.bus.async_listen("eldat_plugin_button_press", _handle_button_event)
         )
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press_start", _handle_button_event)
+            self.hass.bus.async_listen("eldat_button_press", _handle_button_event)
         )
 
     @property

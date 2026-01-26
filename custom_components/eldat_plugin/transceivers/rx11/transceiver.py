@@ -104,6 +104,11 @@ class RX11Transceiver(BaseTransceiver):
         self._continuous_sending_tasks: Dict[str, Dict] = {}  # serial -> {task, cancel_event, commands}
         self._rx11_indices: Dict[str, int] = {}  # serial -> rx11_index mapping
         self._serial_connection = None  # Fallback for simple serial communication
+        # Battery status: None=unknown, "low"=battery low, "pending_recovery"=first normal press seen, "normal"=battery OK
+        self._battery_status: Dict[str, Optional[str]] = {}
+        self._saw_battery_telegram: Dict[str, bool] = {}  # Track if 0x80 was seen in current press cycle
+        self._release_processed: Dict[str, bool] = {}  # Track if release was already processed for this cycle
+        self._last_pressed_button: Dict[str, int] = {}  # Track last pressed button per transmitter for release telegrams
         
         # Initialize RX11 wrapper if device path is provided
         if device_path:
@@ -193,7 +198,11 @@ class RX11Transceiver(BaseTransceiver):
             _LOGGER.debug("Set coordinator reference in RX11 wrapper for EWB tracking")
 
     async def connect(self) -> bool:
-        """Connect to the RX11 transceiver."""
+        """Connect to the RX11 transceiver.
+        
+        If the configured device path is not available, this method will
+        search for the device by VID/PID to handle USB port changes.
+        """
         if not self.device_path:
             _LOGGER.warning("No device path configured for RX11")
             return False
@@ -208,12 +217,63 @@ class RX11Transceiver(BaseTransceiver):
                     delay = 1.0 - time_since_disconnect
                     _LOGGER.debug("Waiting %.2fs for RX11 device to reset", delay)
                     await asyncio.sleep(delay)
-                    
-            # Always attempt connection, ignore cached connection status
-            _LOGGER.info("🔌 Force connecting to RX11 at %s...", self.device_path)
-                    
+            
+            # First, try the current device path
+            _LOGGER.info("🔌 Connecting to RX11 at %s...", self.device_path)
+            
+            success = await self._try_connect_to_path(self.device_path)
+            if success:
+                return True
+            
+            # If original path failed, search for device by VID/PID
+            _LOGGER.warning("⚠️ Connection to %s failed, searching for RX11 device by VID/PID...", 
+                          self.device_path)
+            
+            # Search for RX11 devices asynchronously
+            if self._hass:
+                rx11_devices = await self._hass.async_add_executor_job(find_rx11_devices)
+            else:
+                rx11_devices = find_rx11_devices()
+            
+            if not rx11_devices:
+                _LOGGER.debug("No RX11 USB device found (VID:0x%04X)", RX11_VID)
+                return False
+            
+            # Try each found device
+            for device_info in rx11_devices:
+                new_path = device_info['device']
+                if new_path == self.device_path:
+                    continue  # Already tried this path
+                
+                _LOGGER.info("🔄 USB port changed: %s → %s", self.device_path, new_path)
+                
+                # Update the device path in wrapper
+                old_path = self.device_path
+                self.device_path = new_path
+                
+                if self._rx11_wrapper:
+                    self._rx11_wrapper.set_device_path(new_path)
+                
+                success = await self._try_connect_to_path(new_path)
+                if success:
+                    _LOGGER.info("✅ RX11 connected on new port %s (was %s)", new_path, old_path)
+                    return True
+            
+            _LOGGER.debug("No RX11 device found on any port")
+            return False
+
+    async def _try_connect_to_path(self, device_path: str) -> bool:
+        """Try to connect to RX11 at a specific device path.
+        
+        Returns True if connection successful, False otherwise.
+        """
+        try:
             # Try to connect with C library wrapper first
             if self._rx11_wrapper:
+                # Ensure wrapper uses the correct path
+                if hasattr(self._rx11_wrapper, 'set_device_path'):
+                    self._rx11_wrapper.set_device_path(device_path)
+                
                 success = await self._rx11_wrapper.connect()
                 if success:
                     # Get version information (cached by wrapper to avoid multiple queries)
@@ -222,21 +282,29 @@ class RX11Transceiver(BaseTransceiver):
                     if not self._fw_version:
                         self._fw_version = await self._rx11_wrapper.get_fw_version()
                     
-                    _LOGGER.info("RX11 connected via C library: HW=%s, FW=%s", 
-                               self._hw_version, self._fw_version)
+                    _LOGGER.info("RX11 connected via C library at %s: HW=%s, FW=%s", 
+                               device_path, self._hw_version, self._fw_version)
                     return True
                 else:
-                    _LOGGER.warning("C library connection failed, trying fallback")
+                    _LOGGER.debug("C library connection to %s failed, trying fallback", device_path)
             
             # Fallback to simple serial connection
             try:
+                # Temporarily update device_path for fallback
+                old_path = self.device_path
+                self.device_path = device_path
                 success = await self._setup_simple_serial_connection()
                 if success:
-                    _LOGGER.info("RX11 connected via serial fallback")
+                    _LOGGER.info("RX11 connected via serial fallback at %s", device_path)
                     return True
+                self.device_path = old_path  # Restore on failure
             except Exception as e:
-                _LOGGER.error("Serial fallback connection failed: %s", e)
+                _LOGGER.debug("Serial fallback connection to %s failed: %s", device_path, e)
             
+            return False
+            
+        except Exception as e:
+            _LOGGER.debug("Connection attempt to %s failed: %s", device_path, e)
             return False
 
     async def disconnect(self) -> None:
@@ -341,11 +409,13 @@ class RX11Transceiver(BaseTransceiver):
             _LOGGER.error("❌ Error sending command to device %s: %s", serial_number, e)
             return False
 
-    async def send_command_to_receiver(self, serial_number: str, command: str) -> bool:
+    async def send_command_to_receiver(self, serial_number: str, command) -> bool:
         """Send command to EW receiver using cached serial mapping - no repeated EW_GET_FD_SERIAL calls."""
         try:
-            # Convert string command to bytes if needed
-            if isinstance(command, str):
+            # Convert command to bytes if needed
+            if isinstance(command, bytes):
+                command_bytes = command
+            elif isinstance(command, str):
                 # Check if it's a valid hex string with even length
                 clean_command = command.replace(' ', '')
                 if len(clean_command) % 2 == 0 and all(c in '0123456789ABCDEFabcdef' for c in clean_command):
@@ -355,7 +425,7 @@ class RX11Transceiver(BaseTransceiver):
                     button_map = {'10': b'\x10', '11': b'\x11', '12': b'\x12', '13': b'\x13', 'A': b'\x10', 'B': b'\x11', 'C': b'\x12', 'D': b'\x13'}
                     command_bytes = button_map.get(command.upper(), b'\x10')  # Default to button A
             else:
-                command_bytes = bytes(command)
+                command_bytes = bytes([command]) if isinstance(command, int) else b'\x00'
                 
             # Delegate to wrapper's optimized rx11_ew_receiver_send_command method
             # This method now uses central cache and avoids repeated EwGetFdSerialRequest calls
@@ -640,7 +710,8 @@ class RX11Transceiver(BaseTransceiver):
                     telegram_data = self._parse_telegram_data(info_type, receiver_transmitter, info_data)
                     
                     if not telegram_data:
-                        _LOGGER.error("❌ Failed to parse telegram data!")
+                        # None means telegram should be ignored (e.g., battery status telegram)
+                        _LOGGER.debug("Telegram ignored (internal processing only)")
                         return
                     
                     _LOGGER.warning("📨 Parsed telegram: Serial=%s (full), Type=%s", 
@@ -730,120 +801,162 @@ class RX11Transceiver(BaseTransceiver):
                 "timestamp": time.time()
             }
             
-            # Für EW-Transmitter: Parse Button-Info aus den 8 Bytes info_data
-            if info_type == 1 and len(info_data) >= 1:
-                # EWB_RCV Telegramm-Format für EW-Transmitter:
-                # info_data ist 8 Bytes lang
-                # info_type bestimmt Press (1) oder Release (0) 
-                # Byte 0 in info_data: Button-ID (0=A, 1=B, 2=C, 3=D)
-                
-                try:
-                    # Extract button from first byte of info_data
-                    button_id = info_data[0] if info_data else 0
-                    
-                    # info_type: 1 = press, 0 = release
-                    is_push = (info_type == 1)
-                    is_release = (info_type == 0)
-                    
-                    # Battery detection for EW-Transmitter
-                    # Check bit 7-2 of info_data[0] for 0x20 (low battery indicator)
-                    is_low_battery = False
-                    battery_level = 100  # Default to full
-                    if len(info_data) >= 1:
-                        # Bits 7-2 (mask 0xFC) should be 0x20 for low battery
-                        battery_bits = info_data[0] & 0xFC  # Extract bits 7-2
-                        _LOGGER.debug("🔋 EW-Transmitter %s: Battery check - info_data[0]=0x%02X, bits 7-2=0x%02X", 
-                                    serial_number[-6:], info_data[0], battery_bits)
-                        if battery_bits == 0x20:
-                            is_low_battery = True
-                            battery_level = 10  # Low battery (10%)
-                            _LOGGER.warning("🔋 Low battery detected for EW-Transmitter %s", serial_number[-6:])
-                        else:
-                            battery_level = 100  # Full battery
-                            _LOGGER.debug("🔋 EW-Transmitter %s: Battery full (bits 7-2 = 0x%02X, not 0x20)", 
-                                        serial_number[-6:], battery_bits)
-                    
-                    # Determine function
-                    if is_push:
-                        function = "push"
-                    else:
-                        function = "release"
-                    
-                    # Button names mapping
-                    button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
-                    button_name = button_names.get(button_id, "Unknown")
-                    
-                    telegram_data.update({
-                        "button": button_id,
-                        "button_name": button_name,
-                        "function": function,
-                        "is_push": is_push,
-                        "is_release": is_release,
-                        "is_low_battery": is_low_battery,
-                        "battery_level": battery_level,
-                        "battery_status": "low" if is_low_battery else "good",
-                        "additional_info": info_data[1] if len(info_data) > 1 else 0,
-                    })
-                    
-                    battery_info = f" (Battery: {battery_level}%)"
-                    _LOGGER.info("🎛️ EW-Transmitter %s: Button %s (%d) %s%s", 
-                               serial_number[-6:], button_name, button_id, function, battery_info)
-                    
-                except Exception as e:
-                    _LOGGER.warning("Error parsing EW-Transmitter button data: %s", e)
-                    # Fallback to basic parsing
-                    button_data = info_data[0] if info_data else 0
-                    telegram_data["button"] = button_data
-                    telegram_data["function"] = "push" if info_type == 1 else "release"
-                    telegram_data["battery_level"] = 100  # Default to full
-                    
+            _LOGGER.warning("🔍 About to check info_type: info_type=%d, type(info_type)=%s", info_type, type(info_type))
+            
             # Handle info_type 0 as release for existing devices
-            elif info_type == 0:
+            if info_type == 0:
+                _LOGGER.warning("🔍 RELEASE detected: info_type=0, info_data_len=%d", len(info_data))
                 # This is a release telegram - find the device type and handle accordingly
                 # For EW-Transmitter releases, we need to determine which button was released
                 # The button info should be in the first byte of info_data (similar to press)
                 
                 # Check if this could be an EW-Transmitter by pattern matching
                 if len(info_data) == 8:
-                    # For release, try to extract button from first byte, but default to 0 if all zeros
-                    button_id = info_data[0] if info_data and info_data[0] != 0 else 0
-                    
-                    # Battery detection for EW-Transmitter releases
-                    # Check bit 7-2 of info_data[0] for 0x20 (low battery indicator)
-                    is_low_battery = False
-                    battery_level = 100  # Default to full
-                    if len(info_data) >= 1:
-                        # Bits 7-2 (mask 0xFC) should be 0x20 for low battery
-                        battery_bits = info_data[0] & 0xFC  # Extract bits 7-2
-                        if battery_bits == 0x20:
-                            is_low_battery = True
-                            battery_level = 10  # Low battery (10%)
-                            _LOGGER.warning("🔋 Low battery detected for EW-Transmitter %s on release", serial_number[-6:])
-                        else:
-                            battery_level = 100  # Full battery
-                    
+                    # Release telegrams always contain button=0 in the data, but we need the actual button
+                    # Use the last pressed button ID from the previous push event
+                    button_id = self._last_pressed_button.get(serial_number, 0)
                     button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
-                    button_name = button_names.get(button_id, "A")  # Default to A
+                    button_name = button_names.get(button_id, "A")
+
+                    current_status = self._battery_status.get(serial_number)
+                    _LOGGER.warning("🔍 RELEASE processing: serial=%s, button=%d (%s), battery_status=%s, saw_battery_telegram=%s", 
+                               serial_number[-6:], 
+                               button_id,
+                               button_name,
+                               current_status,
+                               self._saw_battery_telegram.get(serial_number, False))
+
+                    # Process all releases the same way (status changes happen at PUSH)
+                    # The second release after battery_low will be processed but has no effect
+                    # (button already OFF from first release - Binary Sensor handles this)
                     
+                    # Normal release event
                     telegram_data.update({
                         "device_type": "transmitter", 
                         "type": "ew_transmitter",
                         "button": button_id,
                         "button_name": button_name,
                         "function": "release",
-                        "is_push": False,
+                        "is_press": False,
                         "is_release": True,
-                        "is_low_battery": is_low_battery,
-                        "battery_level": battery_level,
-                        "battery_status": "low" if is_low_battery else "good",
                     })
                     
-                    battery_info = f" (Battery: {battery_level}%)"
-                    _LOGGER.info("🎛️ EW-Transmitter %s: Button %s (%d) release%s", 
-                               serial_number[-6:], button_name, button_id, battery_info)
+                    _LOGGER.warning("🎛️ EW-Transmitter %s: Button %s (%d) release [status=%s]", 
+                               serial_number[-6:], button_name, button_id, current_status or "normal")
             
+            elif info_type == 1:
+
+                # Für EW-Transmitter: Parse Button-Info aus den Bytes info_data
+                if len(info_data) >= 1:
+                    # EWB_RCV Telegramm-Format für EW-Transmitter:
+                    # info_data ist 1 Byte lang (bei Press/Battery Low) oder 8 Bytes (bei Release)
+                    # info_type bestimmt Press (1) oder Release (0) 
+                    # Byte 0 in info_data: Button-ID (0=A, 1=B, 2=C, 3=D)
+                    
+                    try:
+                        # Extract button from first byte of info_data
+                        # Bits 1-0 contain button ID, bit 7 is battery low flag
+                        raw_button_byte = info_data[0] if info_data else 0
+                        
+                        # Battery detection for EW-Transmitter
+                        # Sequence: Push (button) -> [Push (battery low 0x80)] -> Release
+                        # Battery status is ONLY evaluated on Release
+                        
+                        _LOGGER.info("🔍 PRESS processing: serial=%s, raw_byte=0x%02X, is_0x80=%s",
+                                   serial_number[-6:], raw_button_byte, bool(raw_button_byte & 0x80))
+                        
+                        if raw_button_byte & 0x80:
+                            # Battery low telegram - 0x80 enthält KEINE gültige Button-ID!
+                            # Verwende die Button-ID vom vorherigen normalen Press
+                            self._battery_status[serial_number] = "low"
+                            self._saw_battery_telegram[serial_number] = True
+                            self._release_processed[serial_number] = False
+                            
+                            # WICHTIG: Hole die Button-ID vom vorherigen Press (nicht aus 0x80 extrahieren!)
+                            button_id = self._last_pressed_button.get(serial_number, 0)
+                            
+                            # Button names mapping
+                            button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
+                            button_name = button_names.get(button_id, "Unknown")
+                            
+                            _LOGGER.warning("🔋 Battery LOW telegram → status set to 'low' for %s, using previous button=%s (%d)", 
+                                          serial_number[-6:], button_name, button_id)
+                            
+                            # Create a battery-only event with button info from previous press
+                            telegram_data.update({
+                                "device_type": "transmitter",
+                                "type": "ew_transmitter", 
+                                "button": button_id,  # Use button from previous press
+                                "button_name": button_name,
+                                "function": "battery_low",
+                                "is_press": False,
+                                "is_release": False,
+                                "is_low_battery": True,
+                                "battery_status": "low",
+                            })
+                            _LOGGER.warning("🔋 Battery LOW event created for previous button %s (%d)", button_name, button_id)
+                            
+                        else:
+                            # Normal button press - extract button ID from telegram
+                            button_id = raw_button_byte & 0x03  # Mask to get bits 1-0 only
+                            current_status = self._battery_status.get(serial_number)
+                            battery_recovered = False  # Initialize first
+                            
+                            # Save the pressed button ID for the upcoming release telegram
+                            self._last_pressed_button[serial_number] = button_id
+                            
+                            # Battery recovery state machine - transitions happen at PUSH
+                            if current_status == "low":
+                                # First normal press after battery low → transition to pending_recovery
+                                self._battery_status[serial_number] = "pending_recovery"
+                                _LOGGER.warning("🔄 First normal press after battery low for %s → pending_recovery", serial_number[-6:])
+                                
+                            elif current_status == "pending_recovery":
+                                # Second normal press after battery low → transition to normal (battery replaced!)
+                                self._battery_status[serial_number] = "normal"
+                                _LOGGER.warning("✅ Battery REPLACED for %s (second normal press) → normal", serial_number[-6:])
+                                
+                                # Flag this push to also fire battery_reset event
+                                battery_recovered = True
+                            
+                            # Mark start of new press cycle
+                            self._saw_battery_telegram[serial_number] = False
+                            self._release_processed[serial_number] = False  # Reset - allow release processing
+                            
+                            # Button names mapping
+                            button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
+                            button_name = button_names.get(button_id, "Unknown")
+                            
+                            # Normal press telegram
+                            telegram_data.update({
+                                "button": button_id,
+                                "button_name": button_name,
+                                "function": "press",
+                                "is_press": True,
+                                "is_release": False,
+                                "battery_recovered": battery_recovered,  # Flag for coordinator
+                            })
+                            
+                            _LOGGER.warning("🎛️ EW-Transmitter %s: Button %s (%d) press [status=%s]", 
+                                    serial_number[-6:], button_name, button_id, self._battery_status.get(serial_number, "normal"))
+                        
+                    except Exception as e:
+                        _LOGGER.warning("Error parsing EW-Transmitter button data: %s", e, exc_info=True)
+                        # Fallback to basic parsing
+                        button_data = info_data[0] if info_data else 0
+                        button_id = button_data & 0x03  # Extract button ID
+                        button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
+                        button_name = button_names.get(button_id, "Unknown")
+                        telegram_data["button"] = button_id
+                        telegram_data["button_name"] = button_name
+                        telegram_data["function"] = "press" if info_type == 1 else "release"
+                """TODO: Add more detailed logging for out of boundary contents"""
+                            
             # Für EWneo-Sensor: Prüfe ob Learn-Telegramm oder Messwert-Telegramm
-            if info_type == 2:
+            elif info_type == 2:
+                _LOGGER.warning("🌡️ SENSOR TELEGRAM: Serial=%s, info_data_len=%d, type=%s, data=%s", 
+                              serial_number[-6:], len(info_data), type(info_data).__name__, info_data.hex() if info_data else "None")
+                
                 # Default: Kein Lerntelegramm (wird später aus Flags gesetzt)
                 telegram_data["is_learn_telegram"] = False
                 # Default Sensoren (falls Parsing fehlschlägt)
@@ -864,6 +977,7 @@ class RX11Transceiver(BaseTransceiver):
                     #   - Bit 6: 1=Hat Batterie, 0=Keine Batterie
                     #   - Bits 5-3: Batterie-Level (0=schwach, 7=voll)
                     
+                    _LOGGER.warning("🔬 Starting sensor data parsing for %s, data=%s", serial_number[-6:], info_data.hex())
                     try:
                         # Parse Byte 1 flags
                         flags = info_data[1] 
@@ -872,6 +986,9 @@ class RX11Transceiver(BaseTransceiver):
                         telegram_data["is_learn_telegram"] = is_learn_telegram
                         has_battery = bool(flags & 0x40)        # Bit 6
                         battery_level_raw = (flags >> 3) & 0x07  # Bits 5-3
+                        
+                        _LOGGER.warning("🔋 Parsed flags: byte1=0x%02X, is_learn=%s, has_battery=%s, battery_raw=%d", 
+                                      flags, is_learn_telegram, has_battery, battery_level_raw)
                         
                         # Convert battery level: 0=weak (0%), 7=full (100%)
                         if has_battery:
@@ -883,6 +1000,9 @@ class RX11Transceiver(BaseTransceiver):
                                 telegram_data["battery_status"] = "medium" 
                             else:  # 5, 6, 7 = good to full
                                 telegram_data["battery_status"] = "good"
+                            
+                            _LOGGER.warning("🔋 Battery parsed: raw=%d → level=%d%%, status=%s", 
+                                          battery_level_raw, battery_level, telegram_data["battery_status"])
                         
                         if is_learn_telegram:
                             # Learn-Telegramm: Bytes 2-7 enthalten Fähigkeiten (6 bytes big-endian)
@@ -972,12 +1092,12 @@ class RX11Transceiver(BaseTransceiver):
                                    telegram_type, serial_number[-6:], temp_str, hum_str, batt_str, info_data.hex())
                         
                     except Exception as e:
-                        _LOGGER.warning("Error parsing EWneo-Sensor telegram data: %s", e)
+                        _LOGGER.warning("Error parsing EWneo-Sensor telegram data: %s", e, exc_info=True)
                 else:
-                    _LOGGER.debug("EW-Sensor telegram too short for measurement data: %d bytes", len(info_data))
+                    _LOGGER.warning("⚠️ EW-Sensor telegram too short for measurement data: %d bytes (need >= 7)", len(info_data))
             
             # Handle EWB telegrams (info_type == 3) for EWneo devices
-            if info_type == 3:
+            elif info_type == 3:
                 _LOGGER.info("📡 EWB telegram received: Serial=%s, Data=%s", 
                            serial_number, info_data.hex() if info_data else "")
                 

@@ -7,6 +7,8 @@ from typing import Any, Optional
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import async_get_platforms
+import homeassistant.helpers.config_validation as cv
+import voluptuous as vol
 
 from .const import DOMAIN
 from .coordinator import EldatCoordinator
@@ -285,10 +287,50 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         schema=None,
     )
     
-    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s, %s", 
+    async def handle_refresh_entity_specs(call: ServiceCall) -> None:
+        """Refresh entity specs for a device (updates icons, features, etc)."""
+        coordinator = _get_coordinator(hass)
+        if not coordinator:
+            _LOGGER.error("❌ No coordinator found")
+            return
+            
+        serial_number = call.data.get("serial_number")
+        if not serial_number:
+            _LOGGER.error("❌ No serial_number provided")
+            return
+            
+        device_info = coordinator.devices.get(serial_number)
+        if not device_info:
+            _LOGGER.error("❌ Device %s not found", serial_number[-8:])
+            return
+            
+        from .entity_specs import create_entity_specs_for_device
+        
+        # Regenerate entity specs
+        new_entity_specs = create_entity_specs_for_device(serial_number, device_info)
+        
+        # Update device info with new specs
+        device_info["entities"] = new_entity_specs
+        
+        # Save to registry
+        await coordinator.register_device_permanently(serial_number, device_info)
+        
+        _LOGGER.info("✅ Refreshed entity specs for device %s - please reload the integration to apply changes", 
+                    serial_number[-8:])
+    
+    hass.services.async_register(
+        DOMAIN,
+        "refresh_entity_specs",
+        handle_refresh_entity_specs,
+        schema=vol.Schema({
+            vol.Required("serial_number"): cv.string,
+        }),
+    )
+    
+    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s, %s, %s", 
                 SERVICE_RESET_ENTITY_REGISTRY, SERVICE_RELOAD_SENSORS, SERVICE_FIX_TRANSCEIVER, 
                 SERVICE_CLEANUP_GHOST_DEVICES, SERVICE_CLEANUP_ORPHANED_ENTITIES, SERVICE_REPAIR_ORPHANED_DEVICES,
-                SERVICE_SAVE_DEVICES_TO_REGISTRY)
+                SERVICE_SAVE_DEVICES_TO_REGISTRY, "refresh_entity_specs")
 
 
 async def async_unload_services(hass: HomeAssistant) -> None:
@@ -298,6 +340,7 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_FIX_TRANSCEIVER)
     hass.services.async_remove(DOMAIN, SERVICE_CLEANUP_GHOST_DEVICES)
     hass.services.async_remove(DOMAIN, SERVICE_CLEANUP_ORPHANED_ENTITIES)
+    hass.services.async_remove(DOMAIN, "refresh_entity_specs")
     hass.services.async_remove(DOMAIN, SERVICE_REPAIR_ORPHANED_DEVICES)
     hass.services.async_remove(DOMAIN, SERVICE_SAVE_DEVICES_TO_REGISTRY)
     _LOGGER.info("🗑️ Unloaded ELDAT services")

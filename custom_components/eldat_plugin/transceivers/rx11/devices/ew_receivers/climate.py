@@ -4,7 +4,13 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import logging
 
-from ....base import BaseReceiver, DeviceType, DeviceSubtype, OperatingMode
+from ....base import (
+    BaseReceiver, 
+    DeviceType, 
+    DeviceSubtype, 
+    OperatingMode,
+    EntitySpecsMixin,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -12,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 TELEGRAM_EWB_STATE_CHANGE = [0x03, 0xF1]
 
 
-class RX11ClimateReceiver(BaseReceiver):
+class RX11ClimateReceiver(EntitySpecsMixin, BaseReceiver):
     """Climate receiver implementation for RX11 transceiver.
     
     Handles EW and EWB climate devices for heating and cooling control.
@@ -42,6 +48,40 @@ class RX11ClimateReceiver(BaseReceiver):
     def supported_entity_types(self) -> List[str]:
         """Return supported entity types."""
         return ["button", "climate", "sensor"]
+    
+    def get_entity_specs(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Generate entity specifications for this climate device.
+        
+        Creates button entities for stateless operation:
+        - Mode 1 (Eintastbedienung): 1 Toggle button (Ein/Aus)
+        """
+        specs = {
+            "switch": [],
+            "light": [],
+            "cover": [],
+            "sensor": [],
+            "binary_sensor": [],
+            "button": []
+        }
+        
+        # Create button entities for each channel
+        for channel in range(self.channel_count):
+            channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
+            
+            # Eintastbedienung: 1 Toggle button (A) für Heizung/Kühlung
+            specs["button"].append({
+                "type": "button",
+                "name": f"{self.name}{channel_suffix} A - Ein/Aus",
+                "unique_id": f"{self.serial_number}_toggle_ch{channel}",
+                "channel": channel,
+                "button_code": 0,  # TM_BUTTON_A
+                "action": "toggle",
+                "icon": "mdi:thermostat",
+                "operating_mode": 1,
+                "receiver_kind": "heating_cooling"
+            })
+        
+        return specs
     
     def process_telegram(self, telegram_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming telegram for climate receiver."""

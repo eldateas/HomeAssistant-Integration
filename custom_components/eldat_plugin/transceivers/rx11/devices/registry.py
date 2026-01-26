@@ -570,3 +570,62 @@ class RX11DeviceHandlerRegistry:
 
 
 rx11_device_registry = RX11DeviceHandlerRegistry()
+
+
+rx11_device_registry = RX11DeviceHandlerRegistry()
+
+
+def get_device_class_for_info(device_info: Dict[str, Any]) -> Optional[type]:
+    """Get the device class for a given device_info dictionary.
+    
+    This function returns the CLASS (not an instance) for use in entity_specs.
+    
+    NOTE: EW-Receivers (type="ew_receiver") are NOT handled here!
+    They are exclusively handled by _create_ew_receiver_entities_legacy()
+    in entity_specs.py.
+    
+    Args:
+        device_info: Device information dictionary
+        
+    Returns:
+        The device class or None if not found
+    """
+    try:
+        device_type = rx11_device_factory._determine_device_type(device_info)
+        
+        # For sensors
+        if device_type == DeviceType.EWNEO_SENSOR:
+            from .ewneo_sensors.ewneo_sensor import EWneoSensor
+            return EWneoSensor
+        
+        # For transmitters
+        if device_type == DeviceType.EW_TRANSMITTER:
+            from .ew_transmitters.button_transmitter import RX11ButtonTransmitter
+            return RX11ButtonTransmitter
+        
+        # EW-Receivers are NOT handled here - see entity_specs.py
+        # RX11 device classes are ONLY for EWneo/EWB devices
+        if device_type == DeviceType.EW_RECEIVER:
+            return None  # Force use of _create_ew_receiver_entities_legacy()
+        
+        # For EWneo transceivers
+        if device_type in [DeviceType.EWNEO_TRANSCEIVER, DeviceType.EWNEO_SWITCH, 
+                          DeviceType.EWNEO_DUAL_SWITCH, DeviceType.EWNEO_QUAD_SWITCH]:
+            from .ewneo_transceivers.unified_switch import EWneoSwitch
+            return EWneoSwitch
+        
+        if device_type in [DeviceType.EWNEO_DIMMER]:
+            from .ewneo_transceivers.dimmer import EWneoDimmer
+            return EWneoDimmer
+        
+        if device_type in [DeviceType.EWNEO_MOTOR, DeviceType.EWNEO_DUAL_MOTOR, 
+                          DeviceType.EWNEO_QUAD_MOTOR]:
+            from .ewneo_transceivers.unified_motor import EWneoMotor
+            return EWneoMotor
+        
+        return None
+        
+    except Exception as e:
+        _LOGGER.debug("Could not determine device class: %s", e)
+        return None
+

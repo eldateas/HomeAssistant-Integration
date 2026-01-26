@@ -11,8 +11,9 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, AbortFlow
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import selector
 import homeassistant.helpers.config_validation as cv
 
 from .const import (
@@ -148,7 +149,6 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Setup RX11 transceiver."""
         errors: dict[str, str] = {}
         
-        # Devices already discovered in auto_detection step
         # Refresh devices if requested
         if user_input and user_input.get(CONF_DEVICE_PATH) == "refresh":
             _LOGGER.info("Aktualisiere RX11 Geräteliste...")
@@ -158,19 +158,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception as e:
                 _LOGGER.warning("Fehler bei der RX11-Gerätesuche: %s", e)
                 self._discovered_devices = []
+            # Show form again after refresh
+            user_input = None
 
         if user_input is not None:
             device_path = user_input.get(CONF_DEVICE_PATH)
-            device_name = user_input.get(CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME)
+            device_name = user_input.get(CONF_DEVICE_NAME, "ELDAT RX11 USB-Transceiver")
 
-            if device_path == "manual":
-                return await self.async_step_manual()
-            if device_path == "refresh":
-                self._discovered_devices = []
-                return await self.async_step_rx11_setup()
-            if device_path:
+            if device_path and device_path != "refresh":
                 # Skip connection test - let the actual setup validate the connection
-                # This avoids unnecessary connect/disconnect cycles
                 await self.async_set_unique_id(device_path)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
@@ -183,20 +179,21 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
+        # Build device options - only detected devices and refresh
         device_options = {}
         for device in self._discovered_devices:
             name = f"{device['name']} ({device['device']})"
             device_options[device["device"]] = name
 
-        device_options["manual"] = "🔧 Manual"
-        device_options["refresh"] = "🔄 Refresh"
+        device_options["refresh"] = "🔄 Erneut suchen"
 
+        # Show error if no devices found
         if not self._discovered_devices:
-            errors["base"] = "no_devices_found"
+            errors["base"] = "no_rx11_found"
 
         data_schema = vol.Schema({
             vol.Required(CONF_DEVICE_PATH): vol.In(device_options),
-            vol.Optional(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
+            vol.Optional(CONF_DEVICE_NAME, default="ELDAT RX11 USB-Transceiver"): str,
         })
 
         description_placeholders = {
@@ -279,18 +276,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Show a menu with device type options
         return self.async_show_menu(
             step_id="device_type_select",
-            menu_options={
-                "device_transmitter_config": "🎛️ EW-Sender (Fernbedienung)",
-                "device_sensor": "🌡️ EWneo-Sensor (Temperatur/Feuchte)",
-                "device_receiver": "📥 EW-Empfänger (Schalter/Motor/Heizung)",
-                "device_ewneo_receiver": "📥 EWneo-Schalter/Motor (Bidirektional)",
-                "device_cancel": "❌ Abbrechen",
-            },
+            menu_options=["device_transmitter_config", "device_receiver", "device_sensor", "device_ewneo_receiver"],
         )
     
     async def async_step_device_cancel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Cancel the device adding flow."""
-        return self.async_abort(reason="user_cancelled_silent")
+        """Cancel the device adding flow - return to main menu instead of aborting."""
+        # Reset device config
+        self._device_config = {}
+        # Go back to device type selection
+        return await self.async_step_device_type_select()
 
     async def async_step_device_transmitter_config(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure transmitter operating mode - Step 1: Select button operation type via menu."""
@@ -302,12 +296,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Show menu with operating type options
         return self.async_show_menu(
             step_id="device_transmitter_config",
-            menu_options={
-                "device_transmitter_1button": "🔘 1-Tast-Bedienung",
-                "device_transmitter_2button": "🔘🔘 2-Tast-Bedienung",
-                "device_transmitter_3button": "🔘🔘🔘 3-Tast-Bedienung (Auf/Zu/Stopp)",
-                "device_type_select": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_1button", "device_transmitter_2button", "device_transmitter_3button", "device_type_select"],
         )
 
     async def async_step_device_transmitter_1button(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -334,11 +323,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Configure transmitter grouping mode for 1-button operation via menu."""
         return self.async_show_menu(
             step_id="device_transmitter_grouping",
-            menu_options={
-                "device_transmitter_grouping_single": "🔘 Einzeln schalten",
-                "device_transmitter_grouping_group": "🔗 Als Gruppe schalten",
-                "device_transmitter_config": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_grouping_single", "device_transmitter_grouping_group", "device_transmitter_config"],
         )
 
     async def async_step_device_transmitter_grouping_single(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -355,11 +340,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Configure transmitter switch mode via menu - Impulse or Permanent."""
         return self.async_show_menu(
             step_id="device_transmitter_switch_mode",
-            menu_options={
-                "device_transmitter_switch_impulse": "⚡ Impuls (Zustand wird zurückgesetzt)",
-                "device_transmitter_switch_permanent": "🔒 Dauer (Zustand bleibt erhalten)",
-                "device_transmitter_grouping": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_switch_impulse", "device_transmitter_switch_permanent", "device_transmitter_grouping"],
         )
 
     async def async_step_device_transmitter_switch_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -376,13 +357,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Configure transmitter button count via menu."""
         return self.async_show_menu(
             step_id="device_transmitter_button_count",
-            menu_options={
-                "device_transmitter_buttons_1": "🔘 1 Taste",
-                "device_transmitter_buttons_2": "🔘🔘 2 Tasten",
-                "device_transmitter_buttons_3": "🔘🔘🔘 3 Tasten",
-                "device_transmitter_buttons_4": "🔘🔘🔘🔘 4 Tasten",
-                "device_transmitter_switch_mode": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_buttons_1", "device_transmitter_buttons_2", "device_transmitter_buttons_3", "device_transmitter_buttons_4", "device_transmitter_switch_mode"],
         )
 
     async def async_step_device_transmitter_buttons_1(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -413,11 +388,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Configure 2-button transmitter usage via menu - EIN/AUS or AUF/ZU."""
         return self.async_show_menu(
             step_id="device_transmitter_2button_usage",
-            menu_options={
-                "device_transmitter_2button_switch": "🔌 EIN/AUS (Schalter)",
-                "device_transmitter_2button_cover": "🏠 AUF/ZU (Rollladen/Jalousie)",
-                "device_transmitter_config": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_2button_switch", "device_transmitter_2button_cover", "device_transmitter_config"],
         )
 
     async def async_step_device_transmitter_2button_switch(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -434,20 +405,12 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Configure 2-button transmitter button count via menu - 2 or 4 buttons."""
         usage_type = self._device_config.get("usage_type", "switch")
         
-        if usage_type == "switch":
-            two_btn_desc = "🔘🔘 2 Tasten → 1 Schalter (A→AN, B→AUS)"
-            four_btn_desc = "🔘🔘🔘🔘 4 Tasten → 2 Schalter"
-        else:
-            two_btn_desc = "🔘🔘 2 Tasten → 1 Rollladen (A→AUF, B→ZU)"
-            four_btn_desc = "🔘🔘🔘🔘 4 Tasten → 2 Rollladen"
-        
         return self.async_show_menu(
             step_id="device_transmitter_2button_button_count",
-            menu_options={
-                "device_transmitter_2button_2": two_btn_desc,
-                "device_transmitter_2button_4": four_btn_desc,
-                "device_transmitter_2button_usage": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_2button_2", "device_transmitter_2button_4", "device_transmitter_2button_usage", "device_cancel"],
+            description_placeholders={
+                "usage_type": usage_type,
+            }
         )
 
     async def async_step_device_transmitter_2button_2(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -473,6 +436,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show learning menu for EW-Sender with start/cancel options."""
         button_count = self._device_config.get("button_count", 4)
         operating_type = self._device_config.get("operating_type", "1")
+        grouping_mode = self._device_config.get("grouping_mode", "single")
+        switch_mode = self._device_config.get("switch_mode", "impulse")
+        usage_type = self._device_config.get("usage_type", "switch")
         
         # Get coordinator to retrieve next sender index
         entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
@@ -482,18 +448,55 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if coordinator:
             sender_index = str(coordinator.get_next_ew_sender_index())
         
+        # Build readable settings descriptions
+        # Betriebsart
+        if operating_type == "1":
+            operating_mode = "1-Tast-Bedienung"
+        elif operating_type == "2":
+            # Bei 2-Tast den Usage-Typ mit anzeigen
+            if usage_type == "cover":
+                operating_mode = "2-Tast-Bedienung (AUF/ZU)"
+            else:
+                operating_mode = "2-Tast-Bedienung (EIN/AUS)"
+        else:  # operating_type == "3"
+            operating_mode = "3-Tast-Bedienung (AUF/STOPP/ZU)"
+        
+        # Bedienung (nur bei 1-Tast) - als komplette Zeile
+        grouping_mode_line = ""
+        if operating_type == "1":
+            if grouping_mode == "single":
+                grouping_text = "Einzeln schalten"
+            else:
+                grouping_text = "Als Gruppe schalten"
+            grouping_mode_line = f"\n• **Bedienung:** {grouping_text}"
+        
+        # Verhalten (nur bei 1-Tast) - als komplette Zeile
+        behavior_line = ""
+        if operating_type == "1":
+            if switch_mode == "impulse":
+                behavior_text = "Impuls"
+            else:
+                behavior_text = "Dauer"
+            behavior_line = f"\n• **Verhalten:** {behavior_text}"
+        
+        # Tastenanzahl
+        button_count_text = f"{button_count} {'Taste' if button_count == 1 else 'Tasten'}"
+        
         # Store description placeholders for use in strings.json
+        placeholders = {
+            "button_count": str(button_count),
+            "operating_type": operating_type,
+            "sender_index": sender_index,
+            "operating_mode": operating_mode,
+            "grouping_mode_line": grouping_mode_line,
+            "behavior_line": behavior_line,
+            "button_count_text": button_count_text,
+        }
+        
         return self.async_show_menu(
             step_id="device_transmitter_description",
-            menu_options={
-                "device_transmitter_learn_start": "▶️ Lernen starten",
-                "device_transmitter_config": "⬅️ Zurück",
-            },
-            description_placeholders={
-                "button_count": str(button_count),
-                "operating_type": operating_type,
-                "sender_index": sender_index,
-            }
+            menu_options=["device_transmitter_learn_start", "device_transmitter_config"],
+            description_placeholders=placeholders
         )
 
     async def async_step_device_transmitter_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -528,7 +531,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._transmitter_learn_task = None
 
             if result == "success":
-                return self.async_show_progress_done(next_step_id="device_confirm")
+                return self.async_show_progress_done(next_step_id="device_transmitter_verify")
             if result == "timeout":
                 return self.async_show_progress_done(next_step_id="device_transmitter_learn_timeout")
             if result == "already_exists":
@@ -542,6 +545,65 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             progress_action="waiting_for_transmitter_telegram",
             progress_task=self._transmitter_learn_task,
         )
+
+    async def async_step_device_transmitter_verify(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Verify and configure the learned transmitter with name and optional area."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+        
+        if user_input is not None:
+            # Save device name and optional area
+            device_name = user_input.get("device_name")
+            if device_name:
+                self._learned_device["name"] = device_name
+            
+            # Store area_id if provided (will be used during device creation)
+            area_id = user_input.get("area_id")
+            if area_id:
+                self._learned_device["area_id"] = area_id
+            
+            # Proceed to device creation
+            return await self.async_step_device_transmitter_complete()
+        
+        # Get coordinator to retrieve next sender index
+        entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
+        coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+        
+        sender_index = "?"
+        if coordinator:
+            sender_index = str(coordinator.get_next_ew_sender_index())
+        
+        suggested_name = f"EW-Sender #{sender_index}"
+        
+        # Get available areas for selection
+        from homeassistant.helpers import area_registry as ar
+        area_reg = ar.async_get(self.hass)
+        areas = {area.id: area.name for area in area_reg.async_list_areas()}
+        
+        # Build data schema with name and optional area
+        data_schema = vol.Schema({
+            vol.Required("device_name", default=suggested_name): str,
+        })
+        
+        # Add area selector if areas are available
+        if areas:
+            from homeassistant.helpers.selector import AreaSelector
+            data_schema = data_schema.extend({
+                vol.Optional("area_id"): AreaSelector(),
+            })
+        
+        return self.async_show_form(
+            step_id="device_transmitter_verify",
+            data_schema=data_schema,
+        )
+
+    async def async_step_device_transmitter_complete(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Complete transmitter setup and create device."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+        
+        _LOGGER.info("✅ Transmitter confirmed: %s", self._learned_device.get("name"))
+        return await self.async_step_device_save()
 
     async def _do_transmitter_learning_with_timeout(self, coordinator) -> str:
         """Run transmitter learning with an enforced timeout for progress UI."""
@@ -583,8 +645,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 sender_index = coordinator.get_next_ew_sender_index()
 
                 if received_serial in coordinator.devices:
+                    existing_device = coordinator.devices[received_serial]
+                    existing_device_name = existing_device.get("name", f"EW-Sender {received_serial[-6:]}")
                     self._learned_device = {
-                        "name": f"EW-Sender #{sender_index}",
+                        "name": existing_device_name,
                         "serial_number": received_serial,
                         "type": "ew_transmitter",
                         "device_type": "ew_transmitter",
@@ -639,26 +703,22 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show timeout menu with retry/cancel options."""
         return self.async_show_menu(
             step_id="device_transmitter_learn_timeout",
-            menu_options={
-                "device_transmitter_learn_start": "🔄 Erneut versuchen",
-                "device_transmitter_description": "⬅️ Zurück zur Konfiguration",
-            },
+            menu_options=["device_transmitter_learn_start", "device_transmitter_description"],
         )
 
     async def async_step_device_transmitter_already_exists(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show info that device already exists."""
         serial_number = "?"
+        device_name = "Unbekannt"
         if self._learned_device:
             serial_number = self._learned_device.get("serial_number", "?")
+            device_name = self._learned_device.get("name", "Unbekannt")
 
         return self.async_show_menu(
             step_id="device_transmitter_already_exists",
-            menu_options={
-                "device_transmitter_learn_start": "🔄 Anderen Sender einlernen",
-                "device_transmitter_description": "⬅️ Zurück",
-            },
+            menu_options=["device_transmitter_learn_start", "device_transmitter_description"],
             description_placeholders={
-                "serial": serial_number[-8:] if len(serial_number) > 8 else serial_number,
+                "device_name": device_name,
             },
         )
 
@@ -670,10 +730,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show learning menu for EWneo-Sensor with start/cancel options."""
         return self.async_show_menu(
             step_id="device_sensor_description",
-            menu_options={
-                "device_sensor_learn_start": "▶️ Lernen starten",
-                "device_type_select": "⬅️ Zurück",
-            },
+            menu_options=["device_sensor_learn_start", "device_type_select"],
         )
 
     async def async_step_device_sensor_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -714,7 +771,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._sensor_learn_task = None
             
             if result == "success":
-                return self.async_show_progress_done(next_step_id="device_confirm")
+                return self.async_show_progress_done(next_step_id="device_sensor_verify")
+            elif result == "already_exists":
+                return self.async_show_progress_done(next_step_id="device_sensor_already_exists")
             elif result == "timeout":
                 return self.async_show_progress_done(next_step_id="device_sensor_learn_timeout")
             elif result == "cancelled":
@@ -779,6 +838,19 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 next_index = getattr(coordinator, "_next_ewneo_sensor_index", 1)
                 display_name = f"EWneo-Sensor #{next_index}"
 
+                # Check if sensor already exists (similar to transmitter)
+                if received_serial in coordinator.devices:
+                    existing_device = coordinator.devices[received_serial]
+                    existing_device_name = existing_device.get("name", f"EWneo-Sensor {received_serial[-6:]}")
+                    self._learned_device = {
+                        "name": existing_device_name,
+                        "serial_number": received_serial,
+                        "type": "ewneo_sensor",
+                        "device_type": "ewneo_sensor",
+                    }
+                    coordinator.stop_setup_mode()
+                    return "already_exists"
+
                 self._learned_device = {
                     "name": display_name,
                     "serial_number": received_serial,
@@ -816,11 +888,114 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show timeout menu with retry/cancel options for sensor learning."""
         return self.async_show_menu(
             step_id="device_sensor_learn_timeout",
-            menu_options={
-                "device_sensor_learn_start": "🔄 Erneut versuchen",
-                "device_sensor_description": "⬅️ Zurück",
-            },
+            menu_options=["device_sensor_learn_start", "device_sensor_description"],
         )
+
+    async def async_step_device_sensor_already_exists(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show already exists menu for sensor - similar to transmitter."""
+        if not self._learned_device:
+            return await self.async_step_device_sensor_description()
+        
+        device_name = self._learned_device.get("name", "Unknown Device")
+        
+        return self.async_show_menu(
+            step_id="device_sensor_already_exists",
+            menu_options=["device_sensor_learn_start"],
+            description_placeholders={
+                "device_name": device_name,
+            }
+        )
+
+    async def async_step_device_sensor_verify(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Verify and configure the learned sensor with name and optional area."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+        
+        if user_input is not None:
+            # Save device name and optional area
+            device_name = user_input.get("device_name")
+            if device_name:
+                self._learned_device["name"] = device_name
+            
+            # Store area_id if provided (will be used during device creation)
+            area_id = user_input.get("area_id")
+            if area_id:
+                self._learned_device["area_id"] = area_id
+            
+            # Proceed to device creation
+            return await self.async_step_device_sensor_complete()
+        
+        # Get coordinator to retrieve next sensor index
+        entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
+        coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+        
+        sensor_index = "?"
+        if coordinator:
+            sensor_index = str(getattr(coordinator, "_next_ewneo_sensor_index", 1))
+        
+        suggested_name = f"EWneo-Sensor #{sensor_index}"
+        
+        # Get sensor information from learned device
+        sensor_types = self._learned_device.get("sensor_types", [])
+        available_sensors = self._learned_device.get("available_sensors", [])
+        serial_number = self._learned_device.get("serial_number", "?")
+        
+        # German translations for sensor types
+        SENSOR_TRANSLATIONS_DE = {
+            "temperature": "Temperatur",
+            "humidity": "Luftfeuchtigkeit",
+            "air_pressure": "Luftdruck",
+            "brightness": "Helligkeit",
+            "wind_speed": "Windgeschwindigkeit",
+            "rain": "Regen",
+            "battery": "Batterie",
+        }
+        
+        # Build sensor list for description with German translations
+        sensors_to_show = sensor_types or available_sensors
+        translated_sensors = []
+        for s in sensors_to_show:
+            if s in SENSOR_TRANSLATIONS_DE:
+                translated_sensors.append(f"  • {SENSOR_TRANSLATIONS_DE[s]}")
+            else:
+                translated_sensors.append(f"  • {s.replace('_', ' ').title()}")
+        
+        sensor_list = "\n".join(translated_sensors) if translated_sensors else "  • Auto-Erkennung bei Empfang"
+        
+        # Get available areas for selection
+        from homeassistant.helpers import area_registry as ar
+        area_reg = ar.async_get(self.hass)
+        areas = {area.id: area.name for area in area_reg.async_list_areas()}
+        
+        # Build data schema with name and optional area
+        data_schema = vol.Schema({
+            vol.Required("device_name", default=suggested_name): str,
+        })
+        
+        # Add area selector if areas are available
+        if areas:
+            from homeassistant.helpers.selector import AreaSelector
+            data_schema = data_schema.extend({
+                vol.Optional("area_id"): AreaSelector(),
+            })
+        
+        return self.async_show_form(
+            step_id="device_sensor_verify",
+            data_schema=data_schema,
+            description_placeholders={
+                "sensor_list": sensor_list,
+                "suggested_name": suggested_name,
+                "serial_short": serial_number[-8:] if serial_number != "?" else "?",
+            }
+        )
+
+    async def async_step_device_sensor_complete(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Complete sensor setup and create device."""
+        if not self._learned_device:
+            return self.async_abort(reason="no_learned_device")
+        
+        _LOGGER.info("✅ Sensor confirmed: %s", self._learned_device.get("name"))
+        return await self.async_step_device_save()
 
     async def async_step_device_receiver(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure EW receiver device - Load next available receiver from RX11."""
@@ -838,21 +1013,23 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 except ValueError:
                     return self.async_abort(reason="no_available_receivers")
                 
-                # Get serial for this index from RX11
+                # Get serial for this index from RX11 via EW_GET_FD_SERIAL
+                # The RX11 has pre-configured gateway serials for each index
                 serial = await coordinator.transceiver.rx11_ew_receiver_get_serial_by_index(index)
                 
-                if serial:
-                    self._device_config = {
-                        "device_type": "ew_receiver",
-                        "type": "ew_receiver",
-                        "serial_number": serial,
-                        "rx11_index": index,
-                        "name": f"EW-Receiver (Index {index})"  # Temporär, wird mit receiver_kind aktualisiert
-                    }
-                    _LOGGER.info("✅ Using EW-Receiver: Index %d, Serial %s", index, serial[-8:])
-                    return await self.async_step_device_receiver_type()
-                else:
+                if not serial:
+                    _LOGGER.error("❌ Failed to get serial for EW-Receiver index %d from RX11", index)
                     return self.async_abort(reason="no_receiver_serial")
+                
+                self._device_config = {
+                    "device_type": "ew_receiver",
+                    "type": "ew_receiver",
+                    "serial_number": serial,
+                    "rx11_index": index,
+                    "name": f"EW-Empfänger #{index + 1}"
+                }
+                _LOGGER.info("✅ Using EW-Receiver: Index %d, Serial %s", index, serial[-8:])
+                return await self.async_step_device_receiver_type()
             else:
                 return self.async_abort(reason="no_coordinator")
         except Exception as e:
@@ -860,99 +1037,172 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="receiver_load_failed")
 
     async def async_step_device_receiver_type(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EW receiver device - Step 1: Select device type via menu."""
+        """Configure EW receiver device - Step 1: Select operating mode via menu."""
         serial = self._device_config.get("serial_number", "Unknown")
-        name = self._device_config.get("name", "EW-Receiver")
+        rx11_index = self._device_config.get("rx11_index", 0)
         
         return self.async_show_menu(
             step_id="device_receiver_type",
-            menu_options={
-                "device_receiver_type_switch": "🔌 Switch",
-                "device_receiver_type_motor": "🏠 Motor/Cover",
-                "device_receiver_type_heating": "🌡️ Heating/Cooling",
-                "device_type_select": "⬅️ Zurück",
-            },
+            menu_options=["device_receiver_mode_impulse", "device_receiver_mode_on_off", "device_receiver_mode_up_down", "device_receiver_mode_up_stop_down", "device_receiver_mode_heating", "device_receiver_mode_universal", "device_type_select"],
             description_placeholders={
-                "device_name": name,
+                "device_name": f"EW-Empfänger #{rx11_index + 1}",
                 "serial": serial[-12:] if serial else "Unknown",
             }
         )
 
-    async def async_step_device_receiver_type_switch(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle switch receiver type selection."""
+    async def async_step_device_receiver_mode_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle Impuls (1-Tast) mode selection - creates toggle button."""
         rx11_index = self._device_config.get("rx11_index", 0)
-        self._device_config["receiver_kind"] = "switch"
-        self._device_config["name"] = f"EW-Schalter #{rx11_index + 1}"
-        return await self.async_step_device_receiver_operating_mode()
+        self._device_config["receiver_kind"] = "impulse"
+        self._device_config["operating_mode"] = 1
+        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        return await self.async_step_device_receiver_description()
 
-    async def async_step_device_receiver_type_motor(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle motor receiver type selection."""
+    async def async_step_device_receiver_mode_on_off(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle EIN/AUS (2-Tast) mode selection - creates stateless switch entity."""
         rx11_index = self._device_config.get("rx11_index", 0)
-        self._device_config["receiver_kind"] = "motor"
-        self._device_config["name"] = f"EW-Motor #{rx11_index + 1}"
-        return await self.async_step_device_receiver_operating_mode()
+        self._device_config["receiver_kind"] = "switch_2button"
+        self._device_config["operating_mode"] = 2
+        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        return await self.async_step_device_receiver_description()
 
-    async def async_step_device_receiver_type_heating(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle heating/cooling receiver type selection."""
+    async def async_step_device_receiver_mode_up_down(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle AUF/ZU (2-Tast) mode selection - creates stateless cover entity (no stop)."""
+        rx11_index = self._device_config.get("rx11_index", 0)
+        self._device_config["receiver_kind"] = "cover_2button"
+        self._device_config["operating_mode"] = 2
+        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        return await self.async_step_device_receiver_description()
+
+    async def async_step_device_receiver_mode_up_stop_down(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle AUF/STOPP/ZU (3-Tast) mode selection - creates stateless motor entity."""
+        rx11_index = self._device_config.get("rx11_index", 0)
+        self._device_config["receiver_kind"] = "motor_3button"
+        self._device_config["operating_mode"] = 3
+        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        return await self.async_step_device_receiver_description()
+
+    async def async_step_device_receiver_mode_heating(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle EIN/AUS (Heizung) mode selection - creates heating switch with 4h repeat."""
         rx11_index = self._device_config.get("rx11_index", 0)
         self._device_config["receiver_kind"] = "heating_cooling"
-        self._device_config["name"] = f"EW-Heizung #{rx11_index + 1}"
-        self._device_config["operating_mode"] = 1  # Force toggle mode for heating/cooling
-        return await self.async_step_device_receiver_confirm()
-        
-    async def async_step_device_receiver_operating_mode(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EW receiver device - Step 2: Select operating mode via menu."""
-        receiver_kind = self._device_config.get("receiver_kind", "switch")
-        description_placeholders = self._get_receiver_operating_mode_placeholders()
-        
-        # Different menu options based on device type
-        if receiver_kind == "switch":
-            return self.async_show_menu(
-                step_id="device_receiver_operating_mode",
-                menu_options={
-                    "device_receiver_mode_1": "🔘 1-Tast (Toggle)",
-                    "device_receiver_mode_2": "🔘🔘 2-Tast (An + Aus)",
-                    "device_receiver_type": "⬅️ Zurück",
-                },
-                description_placeholders=description_placeholders,
-            )
-        elif receiver_kind == "motor":
-            return self.async_show_menu(
-                step_id="device_receiver_operating_mode",
-                menu_options={
-                    "device_receiver_mode_1": "🔘 1-Tast (Toggle)",
-                    "device_receiver_mode_2": "🔘🔘 2-Tast (Auf + Zu)",
-                    "device_receiver_mode_3": "🔘🔘🔘 3-Tast (Auf + Zu + Stopp)",
-                    "device_receiver_type": "⬅️ Zurück",
-                },
-                description_placeholders=description_placeholders,
-            )
-        else:
-            # Fallback
-            return self.async_show_menu(
-                step_id="device_receiver_operating_mode",
-                menu_options={
-                    "device_receiver_mode_1": "🔘 1-Tast",
-                    "device_receiver_mode_2": "🔘🔘 2-Tast",
-                    "device_receiver_type": "⬅️ Zurück",
-                },
-                description_placeholders=description_placeholders,
-            )
-
-    async def async_step_device_receiver_mode_1(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle 1-button operating mode selection."""
         self._device_config["operating_mode"] = 1
-        return await self.async_step_device_receiver_confirm()
+        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        return await self.async_step_device_receiver_description()
 
-    async def async_step_device_receiver_mode_2(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle 2-button operating mode selection."""
-        self._device_config["operating_mode"] = 2
-        return await self.async_step_device_receiver_confirm()
-
-    async def async_step_device_receiver_mode_3(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle 3-button operating mode selection."""
-        self._device_config["operating_mode"] = 3
-        return await self.async_step_device_receiver_confirm()
+    async def async_step_device_receiver_mode_universal(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Handle UNIVERSAL (4-Tast) mode selection - creates 4 individual buttons."""
+        rx11_index = self._device_config.get("rx11_index", 0)
+        self._device_config["receiver_kind"] = "universal_4button"
+        self._device_config["operating_mode"] = 4
+        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        return await self.async_step_device_receiver_description()
+    
+    async def async_step_device_receiver_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show receiver learning overview with start/back options."""
+        receiver_kind = self._device_config.get("receiver_kind", "switch")
+        
+        # Map receiver_kind to readable operating mode description
+        mode_descriptions = {
+            "impulse": "Impuls (1-Tast)",
+            "switch_2button": "EIN / AUS (2-Tast)",
+            "cover_2button": "AUF / ZU (2-Tast)",
+            "motor_3button": "AUF / STOPP / ZU (3-Tast)",
+            "heating_cooling": "EIN / AUS (Heizung)",
+            "universal_4button": "UNIVERSAL (4-Tast)",
+        }
+        
+        operating_mode = mode_descriptions.get(receiver_kind, receiver_kind)
+        
+        placeholders = {
+            "operating_mode": operating_mode,
+        }
+        
+        return self.async_show_menu(
+            step_id="device_receiver_description",
+            menu_options=["device_receiver_learn_start", "device_receiver_type"],
+            description_placeholders=placeholders
+        )
+    
+    async def async_step_device_receiver_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Send Code A to receiver and proceed to confirmation."""
+        try:
+            entries = self.hass.config_entries.async_entries(DOMAIN)
+            coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+            serial = self._device_config.get("serial_number")
+            rx11_index = self._device_config.get("rx11_index")
+            
+            if coordinator and coordinator.transceiver and serial and rx11_index is not None:
+                # Send Code A to receiver
+                try:
+                    success = await coordinator.transceiver.send_command_to_receiver(serial, bytes([0]))
+                    if success:
+                        _LOGGER.info("✅ Code A sent successfully to receiver %s", serial[-8:])
+                    else:
+                        _LOGGER.warning("⚠️ Code A sending failed")
+                        return self.async_abort(reason="code_send_failed")
+                except Exception as e:
+                    _LOGGER.error("❌ Code A sending error: %s", e)
+                    return self.async_abort(reason="code_send_error")
+            
+            # Proceed to learning confirmation
+            return await self.async_step_device_receiver_confirm_learning()
+                
+        except Exception as e:
+            _LOGGER.error("Error in receiver learn start: %s", e)
+            return self.async_abort(reason="learning_error")
+    
+    async def async_step_device_receiver_confirm_learning(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Ask user to confirm that LED acknowledged learning."""
+        return self.async_show_menu(
+            step_id="device_receiver_confirm_learning",
+            menu_options=["device_receiver_verify", "device_receiver_description"],
+        )
+    
+    async def async_step_device_receiver_verify(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Final step: Enter device name and area."""
+        if user_input is not None:
+            # User provided name and area
+            device_name = user_input.get("device_name", self._device_config.get("name"))
+            area_id = user_input.get("area_id")
+            
+            self._device_config["name"] = device_name
+            if area_id:
+                self._device_config["area_id"] = area_id
+            
+            # Mark receiver as used and create device
+            entries = self.hass.config_entries.async_entries(DOMAIN)
+            coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
+            serial = self._device_config.get("serial_number")
+            rx11_index = self._device_config.get("rx11_index")
+            
+            if coordinator and serial and rx11_index is not None:
+                coordinator.mark_ew_receiver_index_used(rx11_index, serial, serial, device_name)
+                _LOGGER.info("🔒 Marked receiver as used: Index %d", rx11_index)
+            
+            # Create the device
+            self._device_config.update({
+                "device_type": "ew_receiver",
+                "type": "ew_receiver",
+                "entity_type": "button"
+            })
+            _LOGGER.info("✅ Creating EW-Receiver device: %s", device_name)
+            return await self.async_step_device_save()
+        
+        # Show form to enter name and area
+        rx11_index = self._device_config.get("rx11_index", 0)
+        default_name = f"EW-Empfänger #{rx11_index + 1}"
+        
+        return self.async_show_form(
+            step_id="device_receiver_verify",
+            data_schema=vol.Schema({
+                vol.Required("device_name", default=default_name): str,
+                vol.Optional("area_id"): selector.AreaSelector(),
+            }),
+        )
+        
+    # Note: Operating mode selection is now combined into async_step_device_receiver_type
+    # Each mode directly sets receiver_kind and operating_mode
         
     async def async_step_device_receiver_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure EW receiver device - Step 3: Confirmation menu."""
@@ -960,10 +1210,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return self.async_show_menu(
             step_id="device_receiver_confirm",
-            menu_options={
-                "device_receiver_create": "✅ Bestätigen & Code A senden",
-                "device_receiver_operating_mode": "⬅️ Zurück zum Modus",
-            },
+            menu_options=["device_receiver_create", "device_receiver_type"],
             description_placeholders=confirm_data["description_placeholders"],
         )
 
@@ -1036,43 +1283,46 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         name = self._device_config.get("name", "EW-Receiver")
         rx11_index = self._device_config.get("rx11_index", "Unknown")
         
-        # Generate operating mode description
-        if receiver_kind == "heating_cooling":
+        # Generate operating mode description based on new receiver_kind values
+        if receiver_kind == "impulse":
+            mode_desc = "Impuls (1-Tast)"
+            button_summary = "• Toggle-Button (zustandslos)"
+            learn_instructions = "Empfänger in 1-Tast Lernmodus versetzen."
+        elif receiver_kind == "switch_2button":
+            mode_desc = "EIN / AUS (2-Tast)"
+            button_summary = "• Zustandsloser Schalter (A→Ein, B→Aus)"
+            learn_instructions = "Empfänger in 2-Tast Lernmodus versetzen (Ein + Aus)."
+        elif receiver_kind == "cover_2button":
+            mode_desc = "AUF / ZU (2-Tast)"
+            button_summary = "• Zustandslose Abdeckung (A→Auf, B→Zu)"
+            learn_instructions = "Empfänger in 2-Tast Lernmodus versetzen (Auf + Zu)."
+        elif receiver_kind == "motor_3button":
+            mode_desc = "AUF / STOPP / ZU (3-Tast)"
+            button_summary = "• Zustandsloser Motor (A→Auf, B→Zu, C→Stopp)"
+            learn_instructions = "Empfänger in 3-Tast Lernmodus versetzen (Auf + Zu + Stopp)."
+        elif receiver_kind == "heating_cooling":
+            mode_desc = "EIN / AUS (Heizung)"
+            button_summary = "• Heizungsschalter (Toggle mit 4h Wiederholung)"
+            learn_instructions = "Empfänger in Toggle-Lernmodus versetzen."
+        elif receiver_kind == "universal_4button":
+            mode_desc = "UNIVERSAL (4-Tast)"
+            button_summary = "• Button A\n• Button B\n• Button C\n• Button D"
+            learn_instructions = "Empfänger in 4-Tast Lernmodus versetzen."
+        else:
+            # Legacy fallback for old configurations
             if operating_mode == 1:
-                mode_desc = "Toggle (On/Off, 4h repeat)"
-                button_summary = "• On/Off Toggle Switch\n• Auto status repeat every 4 hours"
-            else:
-                mode_desc = "Toggle (On/Off, 4h repeat)"
-                button_summary = "• On/Off Toggle Switch\n• Auto status repeat every 4 hours"
-        elif operating_mode == 1:
-            mode_desc = "1-Button (Toggle)"
-            button_summary = "• Toggle Button"
-        elif operating_mode == 2:
-            if receiver_kind == "switch":
-                mode_desc = "2-Button (On + Off)"
-                button_summary = "• On Button\n• Off Button"
-            elif receiver_kind == "motor":
-                mode_desc = "2-Button (Up + Down)"
-                button_summary = "• Up Button\n• Down Button"
-        elif operating_mode == 3:
-            mode_desc = "3-Button (Up + Down + Stop)"
-            button_summary = "• Up Button\n• Down Button\n• Stop Button"
-        else:
-            mode_desc = f"Mode {operating_mode}"
-            button_summary = "• Standard configuration"
-            
-        # Learning mode instructions
-        if receiver_kind == "heating_cooling":
-            learn_instructions = "Put receiver in learning mode for toggle operation (On/Off)."
-        elif receiver_kind == "motor":
-            if operating_mode == 2:
-                learn_instructions = "Put receiver in 2-button learning mode (Up + Down)."
+                mode_desc = "1-Tast (Toggle)"
+                button_summary = "• Toggle Button"
+            elif operating_mode == 2:
+                mode_desc = "2-Tast"
+                button_summary = "• Button A\n• Button B"
             elif operating_mode == 3:
-                learn_instructions = "Put receiver in 3-button learning mode (Up + Down + Stop)."
+                mode_desc = "3-Tast"
+                button_summary = "• Button A\n• Button B\n• Button C"
             else:
-                learn_instructions = f"Put receiver in {operating_mode}-button learning mode."
-        else:
-            learn_instructions = f"Put receiver in {operating_mode}-button learning mode."
+                mode_desc = f"Modus {operating_mode}"
+                button_summary = "• Standardkonfiguration"
+            learn_instructions = f"Empfänger in {operating_mode}-Tast Lernmodus versetzen."
         
         return {
             "data_schema": vol.Schema({}),
@@ -1202,10 +1452,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "ewneo_index": str(ewneo_index) if ewneo_index is not None else "-",
                 "gateway_serial": gateway_serial or "-",
             },
-            menu_options={
-                "device_ewneo_receiver_learn_start": "▶️ EWneo-Empfänger lernen",
-                "device_ewneo_receiver_back": "⬅️ Zurück",
-            },
+            menu_options=["device_ewneo_receiver_learn_start", "device_ewneo_receiver_back"],
         )
 
     async def async_step_device_ewneo_receiver_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1346,10 +1593,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_menu(
             step_id="device_ewneo_receiver_learn_wait",
-            menu_options={
-                "device_ewneo_receiver_learn_wait": "🔄 Weiter warten",
-                "device_ewneo_receiver_learn_cancel": "⬅️ Zurück",
-            },
+            menu_options=["device_ewneo_receiver_learn_wait", "device_ewneo_receiver_learn_cancel"],
         )
 
     async def async_step_device_ewneo_receiver_learn_cancel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1374,10 +1618,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return self.async_show_menu(
             step_id="device_ewneo_receiver_learn_timeout",
-            menu_options={
-                "device_ewneo_receiver_learn_start": "🔄 Erneut versuchen",
-                "device_ewneo_receiver_back": "⬅️ Zurück",
-            },
+            menu_options=["device_ewneo_receiver_learn_start", "device_ewneo_receiver_back"],
         )
 
     async def _do_ewneo_receiver_learning(self, coordinator, ewneo_index: int, gateway_serial: str) -> str:
@@ -1533,19 +1774,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not sensor_list:
                 sensor_list = "• Auto-detection on reception"
             
-            description = (
-                f"✅ **EWneo-Sensor successfully detected!**\n\n"
-                f"**🔍 Detected device info:**\n"
-                f"• Serial: `{serial_number[-8:]}`\n"
-                f"• Name: {suggested_name}\n"
-                f"• Detected sensors:\n{sensor_list}\n\n"
-                f"**⚡ What will be created:**\n"
-                f"• 1 EWneo-Sensor device\n"
-                f"• Sensor entities for all detected measurements\n"
-                f"• Battery status sensor\n\n"
-                f"**⚙️ Gerät anlegen:**\n"
-                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
-            )
+            # Use translation placeholders for EWneo-Sensor description
+            description_placeholders = {
+                "serial_short": serial_number[-8:],
+                "suggested_name": suggested_name,
+                "sensor_list": sensor_list,
+            }
+            
+            # Description will be fetched from strings.json via device_confirm_ewneo_sensor step
+            description = ""
         elif device_type == "ewneo_receiver":
             device_type_code = self._learned_device.get("device_type_code", 0)
             device_type_name = self._learned_device.get("device_type_name", "unknown")
@@ -1602,16 +1839,23 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         self._learned_device["name"] = suggested_name
 
+        # Prepare description_placeholders based on device type
+        if device_type in ["ew_sensor", "ewneo_sensor"]:
+            final_description_placeholders = description_placeholders
+        else:
+            final_description_placeholders = {"description": description}
+
+        # Use specialized step for EWneo-Sensor to enable translations
+        step_id = "device_confirm_ewneo_sensor" if device_type in ["ew_sensor", "ewneo_sensor"] else "device_confirm"
+
         return self.async_show_menu(
-            step_id="device_confirm",
+            step_id=step_id,
             menu_options={
                 "device_confirm_create": "✅ Anlegen",
                 "device_confirm_rename": "✏️ Namen ändern",
                 "device_confirm_back": "⬅️ Zurück",
             },
-            description_placeholders={
-                "description": description
-            }
+            description_placeholders=final_description_placeholders
         )
 
     async def async_step_device_confirm_create(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1665,6 +1909,12 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_device_ewneo_receiver()
         return await self.async_step_device_type_select()
 
+    async def async_step_device_confirm_ewneo_sensor(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """EWneo Sensor specific confirmation step - redirects to device_confirm for menu handling."""
+        # This step is only used for displaying the translated description
+        # The menu options point to the shared handlers
+        return await self.async_step_device_confirm(user_input)
+
     async def async_step_device_confirm_rename(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Rename the learned device before creation."""
         if not self._learned_device:
@@ -1674,6 +1924,31 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             device_name = user_input.get("device_name")
             if device_name:
                 self._learned_device["name"] = device_name
+            # Return to appropriate confirmation step
+            device_type = self._learned_device.get("device_type", self._learned_device.get("type", "unknown"))
+            if device_type in ["ew_sensor", "ewneo_sensor"]:
+                # Generate placeholders again for EWneo sensor
+                sensor_types = self._learned_device.get("sensor_types", [])
+                available_sensors = self._learned_device.get("available_sensors", [])
+                sensor_list = "\\n".join([f"• {s.replace('_', ' ').title()}" for s in (sensor_types or available_sensors)])
+                if not sensor_list:
+                    sensor_list = "• Auto-detection on reception"
+                
+                serial_number = self._learned_device.get("serial_number", "?")
+                
+                return self.async_show_menu(
+                    step_id="device_confirm_ewneo_sensor",
+                    menu_options={
+                        "device_confirm_create": "✅ Anlegen",
+                        "device_confirm_rename": "✏️ Namen ändern",
+                        "device_confirm_back": "⬅️ Zurück",
+                    },
+                    description_placeholders={
+                        "serial_short": serial_number[-8:],
+                        "suggested_name": device_name,
+                        "sensor_list": sensor_list,
+                    }
+                )
             return await self.async_step_device_confirm()
 
         current_name = self._learned_device.get("name", "")
@@ -1842,6 +2117,13 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Determine specific device properties and entities to create
                 entity_info = self._determine_device_entities()
                 
+                _LOGGER.warning("🔍 _determine_device_entities returned: %d entities, platforms: %s", 
+                              len(entity_info.get("entities", [])), entity_info.get("platforms", []))
+                for entity in entity_info.get("entities", []):
+                    _LOGGER.warning("  📋 Entity: type=%s, sensor_type=%s, name=%s, unique_id=%s", 
+                                  entity.get("type"), entity.get("sensor_type"), 
+                                  entity.get("name"), entity.get("unique_id", "")[-16:])
+                
                 # Update device info with entity specifications
                 device_data.update(entity_info)
                 
@@ -1873,6 +2155,12 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     sw_version=device_data.get("firmware_version"),
                 )
                 _LOGGER.info("✅ Device registered in HA Device Registry: %s (ID: %s)", device_name, device_entry.id)
+                
+                # Assign device to area if specified
+                area_id = device_data.get("area_id")
+                if area_id and device_entry:
+                    device_registry.async_update_device(device_entry.id, area_id=area_id)
+                    _LOGGER.info("📍 Device assigned to area: %s", area_id)
                 
                 # Ensure the device data is saved before firing events
                 await coordinator._save_device_configuration()
@@ -2000,26 +2288,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if unique_id and entity_reg.async_get_entity_id(entity_spec.get("type", "sensor"), DOMAIN, unique_id):
                     created_count += 1
         
-        # Build success message
-        if created_count == 0 and entity_count > 0:
-            description = (
-                f"✅ **Gerät gespeichert:** {device_name} ({serial})\n\n"
-                f"⚠️ **Entities werden nach Neustart angezeigt**\n\n"
-                f"🔄 Bitte starten Sie Home Assistant neu, damit die {entity_count} Entities erscheinen."
-            )
-        else:
-            description = (
-                f"✅ **Gerät hinzugefügt:** {device_name} ({serial})\n\n"
-                f"📊 **{created_count} Entities erstellt**"
-            )
-        
         # Abort with success message
         return self.async_abort(
             reason="device_added",
             description_placeholders={
-                "device_name": device_name,
-                "serial_number": serial,
-                "description": description
+                "device_name": device_name
             }
         )
 
@@ -2036,10 +2309,17 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         device_type = device_data.get("device_type", device_data.get("type", "unknown"))
         serial_number = device_data.get("serial_number", "unknown")
         
-        _LOGGER.info("🔍 _determine_device_entities: device_type='%s', delegating to entity_specs", device_type)
+        _LOGGER.warning("🔍 _determine_device_entities called:")
+        _LOGGER.warning("  📋 device_type: %s", device_type)
+        _LOGGER.warning("  📋 serial_number: %s", serial_number[-16:])
+        _LOGGER.warning("  📋 sensor_types: %s", device_data.get("sensor_types"))
+        _LOGGER.warning("  📋 available_sensors: %s", device_data.get("available_sensors"))
         
         # Get entity specs from centralized function
         entity_specs = create_entity_specs_for_device(serial_number, device_data)
+        
+        _LOGGER.warning("🔍 create_entity_specs_for_device returned: %s", 
+                      {k: len(v) for k, v in entity_specs.items() if v})
         
         # Convert entity_specs format (dict of lists) to old format (single list + platforms)
         all_entities = []
@@ -2062,9 +2342,21 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             category = "sensor"
         elif device_type == "ew_receiver" or device_type == "EW-Receiver":
             receiver_kind = device_data.get("receiver_kind", "switch")
-            if receiver_kind == "motor" or receiver_kind == "cover":
+            if receiver_kind in ["cover_2button", "motor_3button"]:
                 device_class = "garage"
                 category = "cover"
+            elif receiver_kind == "heating_cooling":
+                device_class = "switch"
+                category = "switch"
+            elif receiver_kind == "switch_2button":
+                device_class = "switch"
+                category = "switch"
+            elif receiver_kind == "impulse":
+                device_class = "button"
+                category = "button"
+            elif receiver_kind == "universal_4button":
+                device_class = "button"
+                category = "button"
             else:
                 device_class = "switch"
                 category = "switch"

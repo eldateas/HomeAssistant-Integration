@@ -22,7 +22,8 @@ TELEGRAM_EWB_STATE_CHANGE = [0x03, 0xF1]
 class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
     """Motor receiver implementation for RX11 transceiver.
     
-    Handles EW and EWB motor devices for covers, blinds, and shutters.
+    Handles EWB/EWneo motor devices for covers, blinds, and shutters.
+    NOT used for classic EW-Receivers - those use entity_specs.py.
     Inherits Cover behavior from CoverBehaviorMixin.
     """
     
@@ -32,8 +33,6 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
                         subtype=DeviceSubtype.MOTOR, **kwargs)
         self._channel_states = {}
         self._positions = {}
-        # Store operating mode before setup
-        self._operating_mode = kwargs.get('operating_mode', 2)  # Default to 2-Tast
         self._setup_operating_mode(**kwargs)
     
     def _setup_operating_mode(self, **kwargs) -> None:
@@ -48,16 +47,14 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
     
     @property
     def supported_entity_types(self) -> List[str]:
-        """Return supported entity types. Motors support button entities."""
-        return ["button"]
+        """Return supported entity types for EWneo motor devices."""
+        return ["cover"]
     
     def get_entity_specs(self) -> Dict[str, List[Dict[str, Any]]]:
-        """Generate entity specifications for this motor device based on operating mode.
+        """Generate entity specifications for EWneo/EWB motor devices.
         
-        Operating modes:
-        - Mode 1 (Eintastbedienung): 1 Toggle button
-        - Mode 2 (Zweitastbedienung): 2 buttons (Up, Down)
-        - Mode 3 (Dreitastbedienung): 3 buttons (Up, Stop, Down)
+        EWneo motors create cover entities with all features (open/close/stop/position).
+        This is NOT used for classic EW-Receivers.
         """
         specs = {
             "switch": [],
@@ -68,85 +65,21 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             "button": []
         }
         
-        # Determine operating mode from device info or kwargs
-        operating_mode = getattr(self, '_operating_mode', 2)  # Default to 2-Tast
-        
-        # Create button entities for each channel based on operating mode
+        # Create cover entities for each channel
         for channel in range(self.channel_count):
             channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
             
-            if operating_mode == 1:
-                # Eintastbedienung: 1 Toggle button (A)
-                specs["button"].append({
-                    "type": "button",
-                    "name": f"{self.name}{channel_suffix} A - Toggle",
-                    "unique_id": f"{self.serial_number}_toggle_ch{channel}",
-                    "channel": channel,
-                    "button_code": 0,  # TM_BUTTON_A
-                    "action": "toggle",
-                    "icon": "mdi:gesture-tap-button",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": "motor"
-                })
-            elif operating_mode == 2:
-                # Zweitastbedienung: A - Auf, B - Ab
-                specs["button"].append({
-                    "type": "button",
-                    "name": f"{self.name}{channel_suffix} A - Auf",
-                    "unique_id": f"{self.serial_number}_up_ch{channel}",
-                    "channel": channel,
-                    "button_code": 0,  # TM_BUTTON_A
-                    "action": "up",
-                    "icon": "mdi:arrow-up-circle",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": "motor"
-                })
-                specs["button"].append({
-                    "type": "button",
-                    "name": f"{self.name}{channel_suffix} B - Ab",
-                    "unique_id": f"{self.serial_number}_down_ch{channel}",
-                    "channel": channel,
-                    "button_code": 1,  # TM_BUTTON_B
-                    "action": "down",
-                    "icon": "mdi:arrow-down-circle",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": "motor"
-                })
-            elif operating_mode == 3:
-                # Dreitastbedienung: A - Auf, B - Ab, C - Stopp
-                specs["button"].append({
-                    "type": "button",
-                    "name": f"{self.name}{channel_suffix} A - Auf",
-                    "unique_id": f"{self.serial_number}_up_ch{channel}",
-                    "channel": channel,
-                    "button_code": 0,  # TM_BUTTON_A
-                    "action": "up",
-                    "icon": "mdi:arrow-up-circle",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": "motor"
-                })
-                specs["button"].append({
-                    "type": "button",
-                    "name": f"{self.name}{channel_suffix} B - Ab",
-                    "unique_id": f"{self.serial_number}_down_ch{channel}",
-                    "channel": channel,
-                    "button_code": 1,  # TM_BUTTON_B
-                    "action": "down",
-                    "icon": "mdi:arrow-down-circle",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": "motor"
-                })
-                specs["button"].append({
-                    "type": "button",
-                    "name": f"{self.name}{channel_suffix} C - Stopp",
-                    "unique_id": f"{self.serial_number}_stop_ch{channel}",
-                    "channel": channel,
-                    "button_code": 2,  # TM_BUTTON_C
-                    "action": "stop",
-                    "icon": "mdi:stop-circle-outline",
-                    "operating_mode": operating_mode,
-                    "receiver_kind": "motor"
-                })
+            specs["cover"].append({
+                "type": "cover",
+                "name": f"{self.name}{channel_suffix}",
+                "unique_id": f"{self.serial_number}_cover_ch{channel}",
+                "device_class": "shade",
+                "icon": "mdi:window-shutter",
+                "channel": channel,
+                "supports_stop": True,
+                "supports_position": True,
+                "entity_category": None
+            })
         
         return specs
     
@@ -287,7 +220,10 @@ def create_rx11_motor_receiver(
     device_info: Dict[str, Any],
     **kwargs
 ) -> RX11MotorReceiver:
-    """Factory function to create motor receiver."""
+    """Factory function to create EWneo/EWB motor receiver.
+    
+    NOT used for classic EW-Receivers.
+    """
     return RX11MotorReceiver(
         serial_number, 
         name=device_info.get('name'),
