@@ -1754,13 +1754,6 @@ class EldatCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug("✅ Versions cached: HW=%s, FW=%s", self._cached_hw_version, self._cached_fw_version)
                 except Exception as e:
                     _LOGGER.debug("Could not get transceiver versions: %s", e)
-                    
-            # Run ghost device cleanup every 120 updates (approximately every 2 hours)
-            if self._update_count % 120 == 0:
-                try:
-                    await self.async_cleanup_devices(mode='ghost')
-                except Exception as e:
-                    _LOGGER.error("❌ Error during periodic ghost device cleanup: %s", e)
             
             return {
                 "hw_version": self._cached_hw_version,
@@ -3507,65 +3500,14 @@ class EldatCoordinator(DataUpdateCoordinator):
             return super().async_add_listener(update_callback)
 
     async def async_cleanup_ghost_devices(self) -> None:
-        """Detect and remove ghost devices that are no longer needed.
+        """Ghost device cleanup is disabled.
         
-        DEPRECATED: This method is deprecated. Use async_cleanup_devices(mode='ghost') instead.
-        This implementation now delegates to the new unified cleanup system.
+        DEPRECATED: This method is deprecated and no longer performs any cleanup.
+        Registered devices are never automatically removed, as EW-Transmitters
+        (battery-powered remotes) may not send signals for extended periods.
         """
-        _LOGGER.warning("async_cleanup_ghost_devices is deprecated, use async_cleanup_devices(mode='ghost')")
-        try:
-            _LOGGER.info("🧹 Starting ghost device cleanup...")
-            
-            # Use device_manager instead of the non-existent device_registry
-            current_devices = self.device_manager.get_all_devices()
-            
-            # Get Home Assistant device and entity registries  
-            ha_device_registry = dr.async_get(self.hass)
-            ha_entity_registry = er.async_get(self.hass)
-            
-            ghost_devices = []
-            current_time = time.time()
-            
-            for serial_number, device_entry in current_devices.items():
-                device_data = {
-                    "name": device_entry.name,
-                    "device_type": device_entry.device_type,
-                    "last_seen": device_entry.last_seen,
-                    "created_at": device_entry.created_at,
-                }
-                
-                # Skip if device has been seen recently (within 24 hours)
-                last_seen = device_entry.last_seen
-                hours_since_seen = self._calculate_hours_since_seen(last_seen, current_time)
-                
-                if hours_since_seen < 24:
-                    continue
-                
-                # Check if device type suggests it might be temporary (EW_TRANSMITTER)
-                device_type_str = device_entry.device_type.upper() if isinstance(device_entry.device_type, str) else str(device_entry.device_type)
-                if "TRANSMITTER" in device_type_str or device_type_str == "EW_SENDER":
-                    # EW-Transmitters are often used temporarily and become ghost devices
-                    ghost_devices.append((serial_number, device_data, "Transmitter device not seen recently"))
-                elif device_entry.created_at:
-                    # Auto-discovered devices that haven't been seen in a while
-                    if last_seen is None or hours_since_seen > 168:  # 1 week
-                        ghost_devices.append((serial_number, device_data, "Auto-discovered device inactive for >1 week"))
-            
-            # Report found ghost devices
-            if ghost_devices:
-                _LOGGER.warning("👻 Found %d potential ghost devices:", len(ghost_devices))
-                for serial, data, reason in ghost_devices:
-                    device_name = data.get("name", "Unknown")
-                    _LOGGER.warning("  - %s (%s): %s", device_name, serial[-8:], reason)
-                
-                # For now, just log them. Auto-removal could be added as a configuration option
-                _LOGGER.info("💡 To manually remove these devices, use the remove button in Home Assistant")
-                
-            else:
-                _LOGGER.info("✅ No ghost devices detected")
-                
-        except Exception as e:
-            _LOGGER.error("❌ Error during ghost device cleanup: %s", e)
+        _LOGGER.info("ℹ️ async_cleanup_ghost_devices called but is disabled - registered devices are protected")
+        # No action taken - registered devices should never be automatically removed
 
     async def async_prevent_ghost_device_creation(self, serial_number: str, device_data: Dict[str, Any]) -> bool:
         """Prevent creation of devices that are likely to become ghost devices."""
@@ -3724,61 +3666,31 @@ class EldatCoordinator(DataUpdateCoordinator):
             return {"error": str(e), "mode": "orphaned"}
     
     async def _cleanup_ghost_mode(self, dry_run: bool = False, max_age_hours: int = 168) -> Dict[str, Any]:
-        """Clean up ghost devices (devices not seen for a long time)."""
+        """Ghost cleanup is disabled - registered devices are never automatically removed.
+        
+        All devices in the DeviceManager are intentionally registered by the user
+        and should not be removed based on last_seen timestamps. EW-Transmitters
+        (battery-powered remotes) may not send signals for extended periods.
+        
+        This method now only returns info about registered devices without removing any.
+        """
         try:
-            _LOGGER.info("🔍 Checking for ghost devices (max_age=%d hours)...", max_age_hours)
+            _LOGGER.info("ℹ️ Ghost cleanup called but disabled - registered devices are protected")
             
-            # Use device_manager instead of the non-existent device_registry
+            # Just count registered devices for info
             current_devices = self.device_manager.get_all_devices()
-            ghost_devices = []
-            current_time = time.time()
-            
-            for serial_number, device_entry in current_devices.items():
-                last_seen = device_entry.last_seen
-                
-                # Calculate hours since last seen
-                hours_since_seen = self._calculate_hours_since_seen(last_seen, current_time)
-                
-                if hours_since_seen > max_age_hours:
-                    device_data = {
-                        "name": device_entry.name,
-                        "device_type": device_entry.device_type,
-                        "hours_since_seen": hours_since_seen,
-                        "last_seen": last_seen
-                    }
-                    ghost_devices.append((serial_number, device_data))
-            
-            # Remove ghost devices if not dry run
-            removed_count = 0
-            if not dry_run:
-                for serial_number, device_data in ghost_devices:
-                    try:
-                        await self.async_remove_device(serial_number)
-                        removed_count += 1
-                    except Exception as e:
-                        _LOGGER.warning("Failed to remove ghost device %s: %s", 
-                                      serial_number, e)
             
             result = {
                 "mode": "ghost",
-                "dry_run": dry_run,
+                "dry_run": True,  # Always dry_run - never remove registered devices
                 "max_age_hours": max_age_hours,
-                "ghost_devices_found": len(ghost_devices),
-                "ghost_devices_removed": removed_count,
-                "devices": [
-                    {
-                        "serial": serial[-8:],
-                        "name": data["name"],
-                        "type": data["device_type"],
-                        "hours_inactive": data["hours_since_seen"]
-                    }
-                    for serial, data in ghost_devices
-                ]
+                "ghost_devices_found": 0,
+                "ghost_devices_removed": 0,
+                "message": "Ghost cleanup is disabled. Registered devices are never automatically removed.",
+                "registered_device_count": len(current_devices)
             }
             
-            _LOGGER.info("✅ Ghost cleanup: %d devices %s", 
-                        len(ghost_devices),
-                        "would be removed" if dry_run else "removed")
+            _LOGGER.info("ℹ️ Ghost cleanup skipped: %d registered devices protected", len(current_devices))
             
             return result
             
@@ -3860,19 +3772,6 @@ class EldatCoordinator(DataUpdateCoordinator):
                 return part.upper()
         
         return None
-    
-    def _calculate_hours_since_seen(self, last_seen: Optional[str], current_time: float) -> float:
-        """Calculate hours since device was last seen."""
-        if not last_seen:
-            return 999.0  # Very old if no data
-        
-        try:
-            from datetime import datetime
-            last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-            last_seen_timestamp = last_seen_dt.timestamp()
-            return (current_time - last_seen_timestamp) / 3600
-        except (ValueError, AttributeError):
-            return 999.0
     
     # =============================================================================
     # LEGACY CLEANUP METHODS (Deprecated - use async_cleanup_devices instead)
