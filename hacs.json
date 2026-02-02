@@ -1,7 +1,7 @@
 {
-  "name": "Eldat Plugin",
+  "name": "Easywave",
   "content_in_root": false,
-  "filename": "eldat_plugin",
+  "filename": "easywave",
   "render_readme": true,
   "homeassistant": "2024.1.0"
 }
