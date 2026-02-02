@@ -1,0 +1,502 @@
+# Services for ELDAT integration
+
+add_device:
+  name: Add Device
+  description: Manually add a device to the ELDAT integration
+  fields:
+    serial_number:
+      name: Serial Number
+      description: 16-byte serial number of the device (hex string)
+      required: true
+      example: "1234567890ABCDEF"
+      selector:
+        text:
+    device_type:
+      name: Device Type
+      description: Type of the device
+      required: true
+      selector:
+        select:
+          options:
+            - ew_transmitter
+            - ew_receiver
+            - ew_sensor
+            - ewneo_transceiver
+            - ewbidi_transceiver
+    device_name:
+      name: Device Name
+      description: Friendly name for the device
+      required: false
+      example: "Living Room Switch"
+      selector:
+        text:
+
+remove_device:
+  name: Remove Device
+  description: Remove a manually added device from the integration
+  fields:
+    serial_number:
+      name: Serial Number
+      description: Serial number of the device to remove
+      required: true
+      example: "1234567890ABCDEF"
+      selector:
+        text:
+    force:
+      name: Force Removal
+      description: Force removal even if device was auto-discovered
+      required: false
+      default: false
+      selector:
+
+refresh_entity_specs:
+  name: Refresh Entity Specs
+  description: Regenerate entity specifications for a device (updates icons, features, etc). Reload integration after running.
+  fields:
+    serial_number:
+      name: Serial Number
+      description: Serial number of the device to refresh
+      required: true
+      example: "1234567890ABCDEF"
+      selector:
+        text:
+        boolean:
+
+remove_device_by_id:
+  name: Remove Device (by ID)
+  description: Remove a device from the device menu using Device ID
+  target:
+    device:
+      integration: eldat_plugin
+  fields:
+    device_id:
+      name: Device ID
+      description: Home Assistant Device ID of the device to remove
+      required: true
+      selector:
+        text:
+    force:
+      name: Force Removal
+      description: Force removal even if device was not added manually
+      required: false
+      default: false
+      selector:
+        boolean:
+
+list_removable_devices:
+  name: List Removable Devices
+  description: Get a list of all devices that can be removed
+  fields: {}
+
+bulk_remove_devices:
+  name: Bulk Remove Devices  
+  description: Remove multiple devices at once
+  fields:
+    serial_numbers:
+      name: Serial Numbers
+      description: List of device serial numbers to remove
+      required: true
+      selector:
+        object:
+    force:
+      name: Force Removal
+      description: Force removal even if devices were auto-discovered
+      required: false
+      default: false
+      selector:
+        boolean:
+
+learn_device:
+  name: Learn Device
+  description: Learn a new device by listening for its telegram
+  fields:
+    device_type:
+      name: Device Type
+      description: Expected type of device to learn
+      required: true
+      selector:
+        select:
+          options:
+            - ew_transmitter
+            - ew_receiver
+            - ew_sensor
+            - ewneo_transceiver
+    timeout:
+      name: Timeout
+      description: How long to wait for device telegram (seconds)
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          unit_of_measurement: seconds
+
+enable_learning_mode:
+  name: Enable Learning Mode
+  description: Enable continuous learning mode to automatically add new devices
+  fields:
+    duration:
+      name: Duration
+      description: How long to keep learning mode enabled (seconds)
+      required: false
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 300
+          unit_of_measurement: seconds
+
+disable_learning_mode:
+  name: Disable Learning Mode
+  description: Disable continuous learning mode
+
+scan_devices:
+  name: Scan for Devices
+  description: Scan for new devices on the USB interface
+
+send_command:
+  name: Send Command
+  description: Send a command to a specific device
+  fields:
+    serial_number:
+      name: Serial Number
+      description: Serial number of the target device
+      required: true
+      example: "1234567890ABCDEF"
+      selector:
+        text:
+    command:
+      name: Command
+      description: Command to send (hex string)
+      required: true
+      example: "01"
+      selector:
+        text:
+    button:
+      name: Button
+      description: Button number (0-3 for A-D)
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 3
+
+export_devices:
+  name: Export Devices
+  description: Export device configuration to a file
+  fields:
+    export_path:
+      name: Export Path
+      description: Path where to save the export file
+      required: true
+      example: "/config/eldat_devices_export.json"
+      selector:
+        text:
+    include_backup:
+      name: Include Backup
+      description: Create a backup before exporting
+      required: false
+      default: true
+      selector:
+        boolean:
+
+import_devices:
+  name: Import Devices
+  description: Import device configuration from a file
+  fields:
+    import_path:
+      name: Import Path
+      description: Path to the import file
+      required: true
+      example: "/config/eldat_devices_import.json"
+      selector:
+        text:
+    merge:
+      name: Merge
+      description: Merge with existing devices (true) or replace all (false)
+      required: false
+      default: true
+      selector:
+        boolean:
+    backup_before_import:
+      name: Backup Before Import
+      description: Create a backup before importing
+      required: false
+      default: true
+      selector:
+        boolean:
+
+backup_devices:
+  name: Backup Devices
+  description: Create a manual backup of device configuration
+  fields:
+    backup_name:
+      name: Backup Name
+      description: Optional name for the backup
+      required: false
+      example: "manual_backup"
+      selector:
+        text:
+
+# Custom EW-Receiver button services with German labels (corrected for stateless buttons)
+ew_receiver_toggle:
+  name: Toggle (Ein/Aus)
+  description: Führt Toggle-Funktion eines EW-Receivers aus (Eintastbedienung mit LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Toggle-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_ein:
+  name: Ein
+  description: Schaltet EW-Receiver ein (Zweitastbedienung mit LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Ein-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_aus:
+  name: Aus
+  description: Schaltet EW-Receiver aus (Zweitastbedienung mit LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Aus-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_motor_auf:
+  name: Motor Auf
+  description: Fährt Motor/Rollo auf (LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Auf-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_motor_zu:
+  name: Motor Zu
+  description: Fährt Motor/Rollo zu (LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Zu-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_motor_stopp:
+  name: Motor Stopp
+  description: Stoppt Motor/Rollo (LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Stopp-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_dimmer_heller:
+  name: Dimmer heller
+  description: Macht Dimmer heller (LongPress für kontinuierliche Dimm-Funktion)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Heller-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_dimmer_dunkler:
+  name: Dimmer dunkler
+  description: Macht Dimmer dunkler (LongPress für kontinuierliche Dimm-Funktion)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Dunkler-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_hvac_heizen_kuehlen:
+  name: HVAC Heizen/Kühlen
+  description: Aktiviert Heiz-/Kühlmodus (ohne LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für Heizen/Kühlen-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+ew_receiver_hvac_aus:
+  name: HVAC Aus
+  description: Schaltet Heizung/Kühlung aus (ohne LongPress)
+  target:
+    entity:
+      domain: button
+      integration: eldat_plugin
+  fields:
+    entity_id:
+      name: Button Entity
+      description: Die EW-Receiver Button-Entity für HVAC-Aus-Funktion
+      required: true
+      selector:
+        entity:
+          filter:
+            - integration: eldat_plugin
+            - domain: button
+
+# Native Device Actions (einfach zu verwenden)
+device_remove:
+  name: "🗑️ Gerät entfernen"
+  description: Entfernt ein ELDAT-Gerät vollständig aus Home Assistant
+  target:
+    device:
+      integration: eldat_plugin
+  fields:
+    device_id:
+      name: Device ID
+      description: Die Home Assistant Device ID des zu entfernenden Geräts
+      required: true
+      selector:
+        device:
+          integration: eldat_plugin
+    force:
+      name: Erzwungene Entfernung
+      description: Gerät auch entfernen, wenn es nicht manuell hinzugefügt wurde
+      default: false
+      selector:
+        boolean:
+    blacklist:
+      name: Auf Blacklist setzen
+      description: Gerät nach Entfernung auf Blacklist setzen
+      default: true
+      selector:
+        boolean:
+
+device_recreate:
+  name: "🔄 Gerät neu erstellen"
+  description: Entfernt und erstellt das Gerät neu (bei Problemen)
+  target:
+    device:
+      integration: eldat_plugin
+  fields:
+    device_id:
+      name: Device ID
+      description: Die Home Assistant Device ID des neu zu erstellenden Geräts
+      required: true
+      selector:
+        device:
+          integration: eldat_plugin
+
+device_disable:
+  name: "⏸️ Gerät deaktivieren"
+  description: Deaktiviert alle Entitäten dieses Geräts
+  target:
+    device:
+      integration: eldat_plugin
+  fields:
+    device_id:
+      name: Device ID
+      description: Die Home Assistant Device ID des zu deaktivierenden Geräts
+      required: true
+      selector:
+        device:
+          integration: eldat_plugin
+
+device_enable:
+  name: "▶️ Gerät aktivieren"
+  description: Aktiviert alle deaktivierten Entitäten dieses Geräts
+  target:
+    device:
+      integration: eldat_plugin
+  fields:
+    device_id:
+      name: Device ID
+      description: Die Home Assistant Device ID des zu aktivierenden Geräts
+      required: true
+      selector:
+        device:
+          integration: eldat_plugin
+
+cleanup_ghost_devices:
+  name: "🧹 Geistergeräte bereinigen"
+  description: Sucht und meldet nicht mehr verwendete oder inaktive Geräte (Geistergeräte)
+
+cleanup_orphaned_entities:
+  name: "🗑️ Verwaiste Entitäten entfernen"
+  description: Entfernt alle verwaisten Entitäten von bereits gelöschten Geräten aus Home Assistant

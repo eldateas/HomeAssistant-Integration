@@ -1,0 +1,41 @@
+{
+  "domain": "easywave",
+  "name": "Easywave",
+  "version": "0.5.0",
+  "documentation": "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs",
+  "dependencies": [],
+  "codeowners": [
+    "eldateas"
+  ],
+  "config_flow": true,
+  "dhcp": [],
+  "homekit": {},
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/eldateas/HomeAssistant-Integration/issues",
+  "quality_scale": "silver",
+  "requirements": [
+    "aiofiles>=23.1.0",
+    "pyserial>=3.5",
+    "pyusb>=1.2.1"
+  ],
+  "ssdp": [],
+  "platforms": [
+    "binary_sensor",
+    "button",
+    "cover",
+    "light",
+    "select",
+    "sensor",
+    "switch"
+  ],
+  "device_automation": true,
+  "usb": [
+    {
+      "vid": "155A",
+      "pid": "1014",
+      "description": "*eldat*"
+    }
+  ],
+  "zeroconf": [],
+  "panel_custom": []
+}

@@ -1,9 +1,0 @@
-{
-  "eldat_plugin": {
-    "domain": "eldat_plugin",
-    "name": "ELDAT",
-    "integrations": {
-      "eldat_plugin": {}
-    }
-  }
-}
