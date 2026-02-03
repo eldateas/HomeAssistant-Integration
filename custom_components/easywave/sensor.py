@@ -904,7 +904,7 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_last_button")
         self._attr_has_entity_name = True
-        self._attr_name = "Taste"  # Short name, device name is added automatically
+        self._attr_name = entity_spec.get("name", "Zustand")  # Use name from entity spec
         self._attr_icon = entity_spec.get("icon", "mdi:radiobox-marked")
         self._attr_device_class = SensorDeviceClass.ENUM
         self._attr_options = self._options
@@ -929,9 +929,17 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
     @property
     def icon(self) -> str:
         """Return icon based on current state."""
-        if self._current_button in (None, "Aus", "Unknown", "unknown"):
-            return "mdi:radiobox-blank"
-        return "mdi:radiobox-marked"
+        # Map button letters to alpha icons
+        button_icons = {
+            "A": "mdi:alpha-a-circle-outline",
+            "B": "mdi:alpha-b-circle-outline",
+            "C": "mdi:alpha-c-circle-outline",
+            "D": "mdi:alpha-d-circle-outline",
+        }
+        if self._current_button in button_icons:
+            return button_icons[self._current_button]
+        # Aus or unknown state
+        return "mdi:radiobox-blank"
 
     async def async_added_to_hass(self) -> None:
         """Register for button press events when entity is added to hass."""

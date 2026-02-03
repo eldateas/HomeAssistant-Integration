@@ -3,14 +3,14 @@
     "binary_sensor": {
       "transmitter_state_cover": {
         "state": {
-          "on": "AUF",
-          "off": "ZU"
+          "on": "Auf",
+          "off": "Zu"
         }
       },
       "transmitter_state_switch": {
         "state": {
-          "on": "EIN",
-          "off": "AUS"
+          "on": "Ein",
+          "off": "Aus"
         }
       }
     }
@@ -122,6 +122,14 @@
         "menu_options": {
           "device_transmitter_learn_start": "🔄 Sender einlernen",
           "device_transmitter_description": "⬅️ Zurück"
+        }
+      },
+      "device_transmitter_confirm_telegram": {
+        "title": "Telegramm empfangen",
+        "description": "Es wurde ein Easywave-Telegramm empfangen. Haben Sie soeben eine Taste des gewünschten Senders betätigt?",
+        "menu_options": {
+          "device_transmitter_verify": "✅ JA, Gerät anlegen",
+          "device_transmitter_learn_start": "🔄 NEIN, anderen Sender lernen"
         }
       },
       "device_transmitter_already_exists": {

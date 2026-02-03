@@ -339,7 +339,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 options = options + ["Aus"]
             entities["sensor"].append({
                 "type": "sensor",
-                "name": f"{base_name} Last Button",
+                "name": "Zustand",
                 "unique_id": f"{serial_number}_last_button",
                 "switch_mode": switch_mode,  # "impulse" oder "permanent"
                 "icon": "mdi:radiobox-marked",
@@ -354,11 +354,11 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
             state_options = ["Ein", "Aus"]
             icon = "mdi:light-switch"
             if button_count == 2 or grouping_mode == "single":
-                # 2 buttons → 1 state sensor (A→state[0], B→state[1]) - ohne "Zustand" (Gerätename wird verwendet)
+                # 2 buttons → 1 state sensor (A→state[0], B→state[1])
                 entities["sensor"].append({
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "",  # Kein "Zustand" - Gerätename wird verwendet
+                    "name": "Zustand",
                     "unique_id": f"{serial_number}_state_1",
                     "state_key": "transmitter_state_1",
                     "channel": 0,
@@ -419,11 +419,11 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
             state_options = ["Auf", "Zu"]
             icon = "mdi:window-shutter"
             if button_count == 2 or grouping_mode == "single":
-                # 2 Tasten - ohne "Zustand" (Gerätename wird verwendet)
+                # 2 Tasten
                 entities["binary_sensor"].append({
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
-                    "name": "",  # Kein "Zustand" - Gerätename wird verwendet
+                    "name": "Zustand",
                     "unique_id": f"{serial_number}_state_1_binary",
                     "state_key": "transmitter_state_1",
                     "channel": 0,
@@ -487,14 +487,14 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 })
     
     elif operating_type == "3":
-        # 3-Tast-Bedienung: state sensor with Auf/Zu/Stopp - ohne "Zustand" (Gerätename wird verwendet)
+        # 3-Tast-Bedienung: state sensor with Auf/Zu/Stopp
         # A=Auf, B=Zu, C/D=Stopp (beide Tasten triggern denselben Zustand)
         state_options = ["Auf", "Zu", "Stopp"]
         _LOGGER.warning("🔧 Creating 3-button sensor for %s with options: %s", serial_number[-8:], state_options)
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "transmitter_state",
-            "name": "",  # Kein "Zustand" - Gerätename wird verwendet
+            "name": "Zustand",
             "unique_id": f"{serial_number}_state",
             "channel": 0,
             "device_class": "enum",

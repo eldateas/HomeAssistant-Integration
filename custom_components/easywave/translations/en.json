@@ -229,6 +229,14 @@
           "device_transmitter_description": "⬅️ Back to Configuration"
         }
       },
+      "device_transmitter_confirm_telegram": {
+        "title": "Telegram Received",
+        "description": "An Easywave telegram was received. Did you just press a button on the desired transmitter?",
+        "menu_options": {
+          "device_transmitter_verify": "✅ YES, Create Device",
+          "device_transmitter_learn_start": "🔄 NO, Learn Another Transmitter"
+        }
+      },
       "device_transmitter_already_exists": {
         "title": "Device already exists",
         "description": "**This Easywave transmitter is already learned!**\n\nThe transmitter code is already used as **{device_name}** in Home Assistant.\nPlease repeat the process and use a transmitter that has not yet been learned.",

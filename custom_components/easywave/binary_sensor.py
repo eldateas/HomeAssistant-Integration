@@ -383,6 +383,10 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         self._auto_reset_ms = 300     # Auto reset after 300ms for press events
         self._max_press_duration = 30000  # Maximum press duration before auto-release (30 seconds)
         
+        # Minimum display duration for 1-button impulse mode (1 second)
+        self._min_display_duration_ms = 1000  # Minimum 1 second display time
+        self._delayed_release_timer = None  # Timer for delayed release
+        
         # Initialize parent classes
         super().__init__(coordinator, serial_number, device_info)
         
@@ -676,10 +680,40 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                     elif is_release:
                         # Button released
                         if self._switch_mode == "impulse":
-                            # Impulse mode: reset to OFF on release
-                            self._handle_button_release()
-                            _LOGGER.info("✅ Button %s released on %s - state OFF (impulse mode)", 
-                                       self._button_name, self._serial_number)
+                            # Check if this is 1-button mode (operating_type == "1")
+                            operating_type = self._device_info.get("operating_type")
+                            if operating_type == "1" and self._last_press_time:
+                                # 1-Tast-Bedienung + Impuls: Mindestens 1 Sekunde anzeigen
+                                elapsed_ms = (datetime.now() - self._last_press_time).total_seconds() * 1000
+                                remaining_ms = self._min_display_duration_ms - elapsed_ms
+                                
+                                if remaining_ms > 0:
+                                    # Weniger als 1 Sekunde vergangen - verzögere Release
+                                    _LOGGER.info("⏱️ Button %s auf %s: Verzögere Release um %.0fms (Mindest-Anzeigedauer)",
+                                               self._button_name, self._serial_number, remaining_ms)
+                                    
+                                    # Cancel existing delayed release timer if any
+                                    if self._delayed_release_timer:
+                                        self._delayed_release_timer.cancel()
+                                    
+                                    async def _delayed_release():
+                                        await asyncio.sleep(remaining_ms / 1000.0)
+                                        if self._is_on:  # Only release if still on
+                                            self._handle_button_release()
+                                            _LOGGER.info("✅ Button %s released on %s nach verzögerter Anzeigedauer (impulse mode)",
+                                                       self._button_name, self._serial_number)
+                                    
+                                    self._delayed_release_timer = asyncio.create_task(_delayed_release())
+                                else:
+                                    # Mehr als 1 Sekunde vergangen - sofort Release
+                                    self._handle_button_release()
+                                    _LOGGER.info("✅ Button %s released on %s - state OFF (impulse mode)",
+                                               self._button_name, self._serial_number)
+                            else:
+                                # Andere Modi: sofort Release
+                                self._handle_button_release()
+                                _LOGGER.info("✅ Button %s released on %s - state OFF (impulse mode)",
+                                           self._button_name, self._serial_number)
                         else:
                             # Permanent mode: state stays as-is, just log release
                             _LOGGER.info("✅ Button %s released on %s - state remains %s (permanent mode)", 
@@ -751,6 +785,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         if self._auto_release_timer:
             self._auto_release_timer.cancel()
             self._auto_release_timer = None
+        if self._delayed_release_timer:
+            self._delayed_release_timer.cancel()
+            self._delayed_release_timer = None
 
     def _handle_button_release(self, force_release: bool = False) -> None:
         """Handle button release with proper state management."""
@@ -797,6 +834,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         if self._auto_release_timer:
             self._auto_release_timer.cancel()
             self._auto_release_timer = None
+        if self._delayed_release_timer:
+            self._delayed_release_timer.cancel()
+            self._delayed_release_timer = None
 
     def _unregister_event_listeners(self) -> None:
         """Unregister event listeners."""

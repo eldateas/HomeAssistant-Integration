@@ -351,9 +351,18 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_device_transmitter_button_count(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure transmitter button count via menu."""
+        grouping_mode = self._device_config.get("grouping_mode", "single")
+        switch_mode = self._device_config.get("switch_mode", "impulse")
+        
+        # Bei Gruppe + Dauer sind mindestens 2 Tasten erforderlich (1 Taste kann nie losgelassen werden)
+        if grouping_mode == "group" and switch_mode == "permanent":
+            menu_options = ["device_transmitter_buttons_2", "device_transmitter_buttons_3", "device_transmitter_buttons_4", "device_transmitter_switch_mode"]
+        else:
+            menu_options = ["device_transmitter_buttons_1", "device_transmitter_buttons_2", "device_transmitter_buttons_3", "device_transmitter_buttons_4", "device_transmitter_switch_mode"]
+        
         return self.async_show_menu(
             step_id="device_transmitter_button_count",
-            menu_options=["device_transmitter_buttons_1", "device_transmitter_buttons_2", "device_transmitter_buttons_3", "device_transmitter_buttons_4", "device_transmitter_switch_mode"],
+            menu_options=menu_options,
         )
 
     async def async_step_device_transmitter_buttons_1(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -527,7 +536,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._transmitter_learn_task = None
 
             if result == "success":
-                return self.async_show_progress_done(next_step_id="device_transmitter_verify")
+                return self.async_show_progress_done(next_step_id="device_transmitter_confirm_telegram")
             if result == "timeout":
                 return self.async_show_progress_done(next_step_id="device_transmitter_learn_timeout")
             if result == "already_exists":
@@ -540,6 +549,13 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="device_transmitter_learn_progress",
             progress_action="waiting_for_transmitter_telegram",
             progress_task=self._transmitter_learn_task,
+        )
+
+    async def async_step_device_transmitter_confirm_telegram(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Confirm that the user pressed the button on the transmitter."""
+        return self.async_show_menu(
+            step_id="device_transmitter_confirm_telegram",
+            menu_options=["device_transmitter_verify", "device_transmitter_learn_start"],
         )
 
     async def async_step_device_transmitter_verify(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -2376,11 +2392,14 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 _LOGGER.info("✅ Device registered in HA Device Registry: %s (ID: %s)", device_name, device_entry.id)
                 
-                # Assign device to area if specified
+                # Always update area_id - either to specified value or None (to clear old area)
                 area_id = device_data.get("area_id")
-                if area_id and device_entry:
+                if device_entry:
                     device_registry.async_update_device(device_entry.id, area_id=area_id)
-                    _LOGGER.info("📍 Device assigned to area: %s", area_id)
+                    if area_id:
+                        _LOGGER.info("📍 Device assigned to area: %s", area_id)
+                    else:
+                        _LOGGER.debug("📍 Device area cleared (no area specified)")
                 
                 # Ensure the device data is saved before firing events
                 await coordinator._save_device_configuration()
