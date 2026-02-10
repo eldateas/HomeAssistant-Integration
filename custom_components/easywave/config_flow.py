@@ -2461,7 +2461,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 # Register device in Home Assistant's Device Registry
                 from homeassistant.helpers import device_registry as dr
+                import homeassistant.helpers.entity_registry as er
                 device_registry = dr.async_get(self.hass)
+                entity_registry = er.async_get(self.hass)
                 
                 device_name = device_data.get("name", f"{device_type} {serial_number}")
                 
@@ -2470,6 +2472,27 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 from .translations import get_language
                 lang = get_language(self.hass)
                 model = build_model_description(device_type, device_data, lang)
+                
+                # IMPORTANT: Check if a device with this identifier already exists
+                # and clear any user-customized name to prevent old names from persisting
+                existing_device = device_registry.async_get_device(
+                    identifiers={(DOMAIN, serial_number)}
+                )
+                if existing_device:
+                    _LOGGER.info("🔄 Found existing device entry, clearing user customizations...")
+                    # Clear name_by_user to use the new name
+                    device_registry.async_update_device(
+                        existing_device.id,
+                        name_by_user=None,  # Clear user-customized name
+                    )
+                    # Also clear any entity customizations for this device
+                    for entity in er.async_entries_for_device(entity_registry, existing_device.id):
+                        if entity.name_by_user is not None:
+                            _LOGGER.debug("  Clearing entity name_by_user for %s", entity.entity_id)
+                            entity_registry.async_update_entity(
+                                entity.entity_id,
+                                name=None,  # Reset to default name
+                            )
                 
                 device_entry = device_registry.async_get_or_create(
                     config_entry_id=entries[0].entry_id,
