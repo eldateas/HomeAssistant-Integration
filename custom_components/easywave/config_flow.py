@@ -2481,18 +2481,26 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if existing_device:
                     _LOGGER.info("🔄 Found existing device entry, clearing user customizations...")
                     # Clear name_by_user to use the new name
-                    device_registry.async_update_device(
-                        existing_device.id,
-                        name_by_user=None,  # Clear user-customized name
-                    )
+                    try:
+                        device_registry.async_update_device(
+                            existing_device.id,
+                            name_by_user=None,  # Clear user-customized name
+                        )
+                    except Exception as e:
+                        _LOGGER.debug("Could not clear device name_by_user: %s", e)
+                    
                     # Also clear any entity customizations for this device
-                    for entity in er.async_entries_for_device(entity_registry, existing_device.id):
-                        if entity.name_by_user is not None:
-                            _LOGGER.debug("  Clearing entity name_by_user for %s", entity.entity_id)
-                            entity_registry.async_update_entity(
-                                entity.entity_id,
-                                name=None,  # Reset to default name
-                            )
+                    try:
+                        for entity in er.async_entries_for_device(entity_registry, existing_device.id):
+                            # Check if entity has a user-customized name
+                            if hasattr(entity, 'name_by_user') and entity.name_by_user is not None:
+                                _LOGGER.debug("  Clearing entity name_by_user for %s", entity.entity_id)
+                                entity_registry.async_update_entity(
+                                    entity.entity_id,
+                                    name=None,  # Reset to default name
+                                )
+                    except Exception as e:
+                        _LOGGER.debug("Could not clear entity customizations: %s", e)
                 
                 device_entry = device_registry.async_get_or_create(
                     config_entry_id=entries[0].entry_id,
