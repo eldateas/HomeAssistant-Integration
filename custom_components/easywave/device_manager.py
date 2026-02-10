@@ -25,8 +25,8 @@ _LOGGER = logging.getLogger(__name__)
 class DeviceType(IntEnum):
     """Device types for ELDAT devices."""
     UNKNOWN = 0x00
-    EW_TRANSMITTER = 0x01      # EW-Transmitter (Transmitter)
-    EW_RECEIVER = 0x02         # EW-Receiver (Receiver)
+    EW_TRANSMITTER = 0x01      # Easywave Transmitter (Transmitter)
+    EW_RECEIVER = 0x02         # Easywave Receiver (Receiver)
     EWNEO_SENSOR = 0x03        # EWneo-Sensoren
     EWNEO_AKTOR = 0x04         # EWneo-Aktor
     EW_SENSOR = 0x05           # EWneo-Sensoren (Battery-powered sensors)

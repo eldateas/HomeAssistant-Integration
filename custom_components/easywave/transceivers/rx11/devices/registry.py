@@ -580,7 +580,7 @@ def get_device_class_for_info(device_info: Dict[str, Any]) -> Optional[type]:
     
     This function returns the CLASS (not an instance) for use in entity_specs.
     
-    NOTE: EW-Receivers (type="ew_receiver") are NOT handled here!
+    NOTE: Easywave Receivers (type="ew_receiver") are NOT handled here!
     They are exclusively handled by _create_ew_receiver_entities_legacy()
     in entity_specs.py.
     
@@ -603,7 +603,7 @@ def get_device_class_for_info(device_info: Dict[str, Any]) -> Optional[type]:
             from .ew_transmitters.button_transmitter import RX11ButtonTransmitter
             return RX11ButtonTransmitter
         
-        # EW-Receivers are NOT handled here - see entity_specs.py
+        # Easywave Receivers are NOT handled here - see entity_specs.py
         # RX11 device classes are ONLY for EWneo/EWB devices
         if device_type == DeviceType.EW_RECEIVER:
             return None  # Force use of _create_ew_receiver_entities_legacy()

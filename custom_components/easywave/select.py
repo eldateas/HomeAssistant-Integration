@@ -86,12 +86,12 @@ class EldatSelect(SelectEntity):
         self._attr_icon = entity_spec.get("icon", "mdi:form-select")
         
         # Device info for device registry
-        device_name = device_info.get("name", f"EW-Transmitter {serial_number}")
+        device_name = device_info.get("name", f"Easywave Transmitter {serial_number}")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, serial_number)},
             name=device_name,
             manufacturer="ELDAT",
-            model="EW-Transmitter",
+            model="Easywave Transmitter",
         )
         
         _LOGGER.debug(

@@ -16,6 +16,18 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, EVENT_DEVICE_ADDED, BUTTON_LABELS
 from .entity_registry import get_entity_registry
+from .translations import (
+    get_language,
+    get_button_label,
+    t_state,
+    translate,
+    DEFAULT_LANGUAGE,
+    is_up_state,
+    is_down_state,
+    is_stop_state,
+    is_on_state,
+    is_off_state,
+)
 
 from .coordinator import EldatCoordinator
 from .entity import EldatEntity
@@ -40,9 +52,9 @@ async def async_setup_entry(
     all_devices = coordinator.get_all_devices()
     _LOGGER.info("📊 Coordinator has %d total devices", len(all_devices))
     
-    # Count EW-Transmitters that need binary sensors
+    # Count Easywave Transmitters that need binary sensors
     ew_transmitter_count = len([d for d in all_devices.values() if d.get("type") == "ew_transmitter"])
-    _LOGGER.info("🎛️ Found %d EW-Transmitter devices that need binary sensors", ew_transmitter_count)
+    _LOGGER.info("🎛️ Found %d Easywave Transmitter devices that need binary sensors", ew_transmitter_count)
     
     # Create binary sensors for all existing devices (including restored ones)
     _LOGGER.info("🔍 Setting up binary sensors for %d existing devices", len(coordinator.get_all_devices()))
@@ -57,7 +69,7 @@ async def async_setup_entry(
         _LOGGER.info("🔍 Processing device %s: type=%s, button_count=%s", 
                     serial_number, device_type, device_info.get("button_count", "unknown"))
         
-        # EW-Transmitters: Use entity_specs to determine if binary sensors are needed
+        # Easywave Transmitters: Use entity_specs to determine if binary sensors are needed
         if device_type == "ew_transmitter":
             # Get entity specs for this device - this respects operating_type, switch_mode, etc.
             entity_specs = create_entity_specs_for_device(serial_number, device_info)
@@ -67,14 +79,14 @@ async def async_setup_entry(
             
             if not binary_sensor_specs:
                 # No binary sensors needed for this device (e.g., switch_mode == "permanent")
-                _LOGGER.info("📝 No binary sensors needed for EW-Transmitter %s (switch_mode=%s, grouping_mode=%s)", 
+                _LOGGER.info("📝 No binary sensors needed for Easywave Transmitter %s (switch_mode=%s, grouping_mode=%s)", 
                            serial_number, 
                            device_info.get("switch_mode", "unknown"),
                            device_info.get("grouping_mode", "unknown"))
                 return []
             
-            device_name = device_info.get("name", f"EW-Transmitter {serial_number}")
-            _LOGGER.info("🎛️ Creating %d binary sensors for EW-Transmitter %s", len(binary_sensor_specs), device_name)
+            device_name = device_info.get("name", f"Easywave Transmitter {serial_number}")
+            _LOGGER.info("🎛️ Creating %d binary sensors for Easywave Transmitter %s", len(binary_sensor_specs), device_name)
             
             # Create binary sensor for each spec
             for spec in binary_sensor_specs:
@@ -89,7 +101,7 @@ async def async_setup_entry(
                         entity_spec=spec,
                     )
                     binary_sensors.append(entity)
-                    _LOGGER.info("✅ Created battery warning sensor: %s", entity.name)
+                    _LOGGER.info("✅ Created battery warning sensor: %s", entity.unique_id)
                     continue
                 
                 # Transmitter state sensor
@@ -101,7 +113,7 @@ async def async_setup_entry(
                         entity_spec=spec,
                     )
                     binary_sensors.append(entity)
-                    _LOGGER.info("✅ Created transmitter state binary sensor: %s", entity.name)
+                    _LOGGER.info("✅ Created transmitter state binary sensor: %s", entity.unique_id)
                     continue
 
                 # Button sensors
@@ -134,7 +146,7 @@ async def async_setup_entry(
                     if entry and entry.disabled_by == "integration":
                         ha_entity_registry.async_update_entity(existing_entity_id, disabled_by=None)
                 binary_sensors.append(entity)
-                _LOGGER.info("✅ Created binary sensor: %s (switch_mode=%s)", entity.name, spec.get("switch_mode", "impulse"))
+                _LOGGER.info("✅ Created binary sensor: %s (switch_mode=%s)", entity.unique_id, spec.get("switch_mode", "impulse"))
             
             _LOGGER.info("✅ Successfully created %d binary sensors for device %s", len(binary_sensors), serial_number)
             return binary_sensors
@@ -151,7 +163,7 @@ async def async_setup_entry(
                 device_info=device_info,
             )
             binary_sensors.append(entity)
-            _LOGGER.info("✅ Created battery binary sensor for EWneo-Sensor: %s", entity.name)
+            _LOGGER.info("✅ Created battery binary sensor for EWneo-Sensor: %s", entity.unique_id)
             
             return binary_sensors
         
@@ -195,27 +207,27 @@ async def async_setup_entry(
             # Note: Event listeners are registered in async_added_to_hass, not here
             # because at this point entities don't have a hass instance yet
             
-            _LOGGER.info("✅ Successfully added %d binary sensor entities for %d EW-Transmitter devices", 
+            _LOGGER.info("✅ Successfully added %d binary sensor entities for %d Easywave Transmitter devices", 
                         len(binary_sensors), len([d for d in coordinator.get_all_devices().values() if d.get("type") == "ew_transmitter"]))
         except Exception as e:
             _LOGGER.error("❌ Failed to add binary sensor entities: %s", e)
     else:
-        # Check if there are EW-Transmitter devices that should have binary sensors
+        # Check if there are Easywave Transmitter devices that should have binary sensors
         # Note: Transmitters in "group" mode don't get binary sensors, they get a sensor entity instead
         ew_transmitters = [d for d in coordinator.get_all_devices().values() if d.get("type") == "ew_transmitter"]
         single_mode_transmitters = [d for d in ew_transmitters if d.get("grouping_mode", "single") == "single"]
         if single_mode_transmitters:
-            _LOGGER.warning("⚠️ Found %d EW-Transmitters in single mode but no binary sensors created", len(single_mode_transmitters))
+            _LOGGER.warning("⚠️ Found %d Easywave Transmitters in single mode but no binary sensors created", len(single_mode_transmitters))
             for serial, device in [(s, d) for s, d in coordinator.get_all_devices().items() 
                                    if d.get("type") == "ew_transmitter" and d.get("grouping_mode", "single") == "single"]:
-                _LOGGER.warning("   EW-Transmitter: %s (%s) - grouping=%s, switch_mode=%s", 
+                _LOGGER.warning("   Easywave Transmitter: %s (%s) - grouping=%s, switch_mode=%s", 
                               device.get("name", "Unknown"), serial, 
                               device.get("grouping_mode", "single"), device.get("switch_mode", "impulse"))
         elif ew_transmitters:
             # Transmitters in group mode - this is expected, they get sensor entities instead
-            _LOGGER.info("📊 Found %d EW-Transmitters in group mode - no binary sensors needed (using sensor entities)", len(ew_transmitters))
+            _LOGGER.info("📊 Found %d Easywave Transmitters in group mode - no binary sensors needed (using sensor entities)", len(ew_transmitters))
         else:
-            _LOGGER.debug("No binary sensor entities created (no EW-Transmitter devices found)")
+            _LOGGER.debug("No binary sensor entities created (no Easywave Transmitter devices found)")
     
     # Listen for new devices and create entities dynamically
     async def _handle_device_added(event):
@@ -244,27 +256,50 @@ async def async_setup_entry(
                             serial_number, device_type)
                 return
             
+            # Check if entities already exist for this device to avoid duplicates
+            existing_entity_id = ha_entity_registry.async_get_entity_id(
+                "binary_sensor", DOMAIN, f"{serial_number}_button_0"
+            )
+            if existing_entity_id and not force_create:
+                _LOGGER.debug("Binary sensors already exist for device %s, skipping creation", serial_number)
+                return
+            
             new_binary_sensors = _create_binary_sensors_for_device(serial_number, device_info)
             _LOGGER.info("🔍 _create_binary_sensors_for_device returned %d sensors", len(new_binary_sensors) if new_binary_sensors else 0)
             
             if new_binary_sensors:
+                # Filter out entities that already exist
+                filtered_sensors = []
+                for sensor in new_binary_sensors:
+                    existing = ha_entity_registry.async_get_entity_id(
+                        "binary_sensor", DOMAIN, sensor.unique_id
+                    )
+                    if not existing:
+                        filtered_sensors.append(sensor)
+                    else:
+                        _LOGGER.debug("Entity %s already exists, skipping", sensor.unique_id)
+                
+                if not filtered_sensors:
+                    _LOGGER.debug("All binary sensors for device %s already exist", serial_number)
+                    return
+                    
                 # Add entities without update_before_add to avoid state issues
-                async_add_entities(new_binary_sensors, update_before_add=False)
+                async_add_entities(filtered_sensors, update_before_add=False)
                 
                 _LOGGER.info("✅ Added %d binary sensor entities for new device %s (%s)", 
-                           len(new_binary_sensors), serial_number, device_type)
+                           len(filtered_sensors), serial_number, device_type)
                 
                 # Wichtig: Warte einen Moment und stelle dann sicher, dass Event Listeners registriert sind
                 async def ensure_listeners_after_delay():
                     await asyncio.sleep(1.0)  # Warte bis Entitäten vollständig registriert sind
-                    for sensor in new_binary_sensors:
+                    for sensor in filtered_sensors:
                         try:
                             if not getattr(sensor, '_listeners_registered', False) and sensor.hass:
                                 await sensor._register_event_listeners_async()
                                 sensor._listeners_registered = True
-                                _LOGGER.info("🎯 Ensured delayed event listeners for %s", sensor.name)
+                                _LOGGER.info("🎯 Ensured delayed event listeners for %s", sensor.unique_id)
                         except Exception as e:
-                            _LOGGER.error("Error ensuring delayed listeners for %s: %s", sensor.name, e)
+                            _LOGGER.error("Error ensuring delayed listeners for %s: %s", sensor.unique_id, e)
                 
                 hass.async_create_task(ensure_listeners_after_delay())
             # No need to warn about devices that don't need binary sensors
@@ -292,21 +327,36 @@ async def async_setup_entry(
                 new_binary_sensors = _create_binary_sensors_for_device(serial_number, device_info)
                 
                 if new_binary_sensors:
+                    # Filter out entities that already exist
+                    filtered_sensors = []
+                    for sensor in new_binary_sensors:
+                        existing = ha_entity_registry.async_get_entity_id(
+                            "binary_sensor", DOMAIN, sensor.unique_id
+                        )
+                        if not existing:
+                            filtered_sensors.append(sensor)
+                        else:
+                            _LOGGER.debug("Entity %s already exists, skipping", sensor.unique_id)
+                    
+                    if not filtered_sensors:
+                        _LOGGER.debug("All binary sensors for device %s already exist", serial_number)
+                        return
+                    
                     # Add entities without update_before_add to avoid state issues
-                    async_add_entities(new_binary_sensors, update_before_add=False)
+                    async_add_entities(filtered_sensors, update_before_add=False)
                     
                     # Give Home Assistant time to register the entities properly  
                     await asyncio.sleep(0.3)
                     
                     # Ensure event listeners are active for all new sensors
-                    for sensor in new_binary_sensors:
+                    for sensor in filtered_sensors:
                         try:
                             # Force listener registration if not done yet
                             if not getattr(sensor, '_listeners_registered', False):
                                 if sensor.hass:
                                     sensor._register_event_listeners() 
                                     sensor._listeners_registered = True
-                                    _LOGGER.info("🎯 Force-registered event listeners for %s", sensor.name)
+                                    _LOGGER.info("🎯 Force-registered event listeners for %s", sensor.unique_id)
                                 else:
                                     # Schedule retry if entity not ready
                                     async def retry_later():
@@ -314,13 +364,13 @@ async def async_setup_entry(
                                         if sensor.hass and not getattr(sensor, '_listeners_registered', False):
                                             sensor._register_event_listeners()
                                             sensor._listeners_registered = True
-                                            _LOGGER.info("🎯 Retry: Registered event listeners for %s", sensor.name)
+                                            _LOGGER.info("🎯 Retry: Registered event listeners for %s", sensor.unique_id)
                                     hass.async_create_task(retry_later())
                         except Exception as e:
-                            _LOGGER.error("Error ensuring listeners for %s: %s", sensor.name, e)
+                            _LOGGER.error("Error ensuring listeners for %s: %s", sensor.unique_id, e)
                     
                     _LOGGER.info("✅ Force-created %d binary sensor entities for %s", 
-                               len(new_binary_sensors), serial_number if serial_number else "unknown")
+                               len(filtered_sensors), serial_number if serial_number else "unknown")
                     
         except Exception as e:
             _LOGGER.error("Error in force binary sensor creation: %s", e)
@@ -344,7 +394,7 @@ async def async_setup_entry(
 
 
 class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntity):
-    """Binary sensor for EW-Transmitter button state with press/hold detection.
+    """Binary sensor for Easywave Transmitter button state with press/hold detection.
     
     Supports two switch modes:
     - "impulse": Status is ON while button is pressed, OFF when released
@@ -368,7 +418,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         self._button_id = button_id
         self._entity_spec = entity_spec or {}
         spec_label = self._entity_spec.get("button_label") or self._entity_spec.get("button")
-        self._button_name = spec_label or BUTTON_LABELS.get(button_id, f"Taste {button_id + 1}")
+        self._button_name = spec_label  # Store for fallback
         self._switch_mode = self._entity_spec.get("switch_mode", "impulse")  # "impulse" or "permanent"
         self._last_press_time = None
         self._is_on = False
@@ -391,7 +441,12 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         super().__init__(coordinator, serial_number, device_info)
         
         self._attr_unique_id = self._entity_spec.get("unique_id", f"{serial_number}_btn{button_id}")
-        self._attr_name = self._entity_spec.get("name", self._button_name)
+        
+        # Store translation_key for HA automatic state translation
+        # This allows HA to translate entity names via translations/*.json
+        self._translation_key = self._entity_spec.get("translation_key")
+        self._attr_translation_key = self._translation_key  # Required for HA translation
+        self._static_name = self._entity_spec.get("name")  # Fallback static name
         
         # Ensure entity is enabled by default
         self._attr_entity_registry_enabled_default = True
@@ -415,12 +470,12 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
             self._attr_device_class = None  # No specific device class for remote buttons
         
         _LOGGER.warning("🔍 Binary sensor initialized: %s (unique_id: %s, switch_mode: %s)", 
-                       self._attr_name, self._attr_unique_id, self._switch_mode)
+                       self._translation_key or self._static_name or f"Button {button_id}", self._attr_unique_id, self._switch_mode)
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to Home Assistant."""
         await super().async_added_to_hass()
-        _LOGGER.info("🔍 Binary sensor added to hass: %s", self._attr_name)
+        _LOGGER.info("🔍 Binary sensor added to hass: %s", self.name)
 
         # Restore persistent state after restart (permanent mode only)
         if self._switch_mode == "permanent":
@@ -439,7 +494,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         @callback
         def devices_loaded_callback(event):
             """Update availability when devices are loaded."""
-            _LOGGER.info("📡 Devices loaded event received for %s - updating availability", self._attr_name)
+            _LOGGER.info("📡 Devices loaded event received for %s - updating availability", self.name)
             self.async_write_ha_state()
             
         self._devices_loaded_listener = self.hass.bus.async_listen(
@@ -455,22 +510,22 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
             if not getattr(self, '_listeners_registered', False):
                 await self._register_event_listeners_async()
                 self._listeners_registered = True
-                _LOGGER.info("🎯 Event listeners successfully registered for: %s", self._attr_name)
+                _LOGGER.info("🎯 Event listeners successfully registered for: %s", self.name)
             else:
-                _LOGGER.debug("Event listeners already registered for: %s", self._attr_name)
+                _LOGGER.debug("Event listeners already registered for: %s", self.name)
             
             # Schedule availability check after coordinator is fully loaded
             async def check_availability_after_startup():
                 """Check availability after coordinator has loaded devices."""
                 await asyncio.sleep(2.0)  # Wait for coordinator to load
                 if hasattr(self.coordinator, 'devices') and self.coordinator.devices:
-                    _LOGGER.info("📡 Updating availability for %s after startup", self._attr_name)
+                    _LOGGER.info("📡 Updating availability for %s after startup", self.name)
                     self.async_write_ha_state()  # Trigger availability update
                     
             self.hass.async_create_task(check_availability_after_startup())
             
         except Exception as e:
-            _LOGGER.error("Error in async_added_to_hass for %s: %s", self._attr_name, e)
+            _LOGGER.error("Error in async_added_to_hass for %s: %s", self.name, e)
             # Retry mit längerem Delay
             async def retry_listeners():
                 await asyncio.sleep(2.0)  # Längerer Retry-Delay
@@ -478,11 +533,11 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                     if not getattr(self, '_listeners_registered', False):
                         await self._register_event_listeners_async()
                         self._listeners_registered = True
-                        _LOGGER.info("🔄 Retry successful: Event listeners registered for: %s", self._attr_name)
+                        _LOGGER.info("🔄 Retry successful: Event listeners registered for: %s", self.name)
                     else:
-                        _LOGGER.info("🔄 Retry check: Event listeners already registered for: %s", self._attr_name)
+                        _LOGGER.info("🔄 Retry check: Event listeners already registered for: %s", self.name)
                 except Exception as retry_e:
-                    _LOGGER.error("Retry failed for %s: %s", self._attr_name, retry_e)
+                    _LOGGER.error("Retry failed for %s: %s", self.name, retry_e)
                     # Finaler Retry nach noch längerem Delay
                     async def final_retry():
                         await asyncio.sleep(5.0)
@@ -490,9 +545,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                             if not getattr(self, '_listeners_registered', False):
                                 self._register_event_listeners()  # Synchrone Version als letzter Versuch
                                 self._listeners_registered = True
-                                _LOGGER.info("⚙️ Final retry successful: Event listeners registered for: %s", self._attr_name)
+                                _LOGGER.info("⚙️ Final retry successful: Event listeners registered for: %s", self.name)
                         except Exception as final_e:
-                            _LOGGER.error("Final retry failed for %s: %s", self._attr_name, final_e)
+                            _LOGGER.error("Final retry failed for %s: %s", self.name, final_e)
                     
                     self.hass.async_create_task(final_retry())
             
@@ -501,7 +556,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
     async def async_will_remove_from_hass(self) -> None:
         """When entity will be removed from hass."""
         await super().async_will_remove_from_hass()
-        _LOGGER.info("🔍 Binary sensor being removed: %s", self._attr_name)
+        _LOGGER.info("🔍 Binary sensor being removed: %s", self.name)
         
         # Unregister devices loaded listener
         if hasattr(self, '_devices_loaded_listener') and self._devices_loaded_listener:
@@ -519,12 +574,12 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         
         # Validate that hass is available
         if not self.hass:
-            _LOGGER.error("Cannot register event listeners - hass not available for %s", self._attr_name)
+            _LOGGER.error("Cannot register event listeners - hass not available for %s", self.name)
             return
             
         # Check if already registered
         if getattr(self, '_listeners_registered', False):
-            _LOGGER.debug("Event listeners already registered for %s", self._attr_name)
+            _LOGGER.debug("Event listeners already registered for %s", self.name)
             return
         
         @callback
@@ -544,7 +599,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                 if event_button is None:
                     button_name = event.data.get("button_name") or event.data.get("subtype") or ""
                     normalized_name = button_name.strip()
-                    if normalized_name.lower().startswith("taste "):
+                    # Support both German and English button labels
+                    name_lower = normalized_name.lower()
+                    if name_lower.startswith("taste ") or name_lower.startswith("button "):
                         normalized_name = normalized_name.split()[-1]
                     name_map = {"A": 0, "B": 1, "C": 2, "D": 3}
                     if normalized_name in name_map:
@@ -564,7 +621,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                     if is_low_battery:
                         self._battery_low = True
                         _LOGGER.warning("🪫 Battery low detected for %s button %s (level: %s%%)", 
-                                      self._attr_name, self._button_name, battery_level)
+                                      self.name, self._button_name, battery_level)
                     else:
                         # Update battery status from normal events too
                         if battery_level <= 20:  # Consider <20% as low
@@ -606,7 +663,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                 
                 if matches_device and event_button == self._button_id:
                     _LOGGER.info("🎯 Binary sensor %s received matching button event: button=%s, press=%s, release=%s", 
-                                self._attr_name, event_button, is_press, is_release)
+                                self.name, event_button, is_press, is_release)
                     
                     if is_press:
                         # Button pressed
@@ -738,19 +795,19 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         self._listeners_registered = True
         
         _LOGGER.info("📡 Event listeners registered for binary sensor %s: listening for eldat_button_press/release", 
-                    self._attr_name)
+                    self.name)
         _LOGGER.debug("🎯 Event matching: serial=%s, button=%s", self._serial_number, self._button_id)
 
     async def _register_event_listeners_async(self) -> None:
         """Async version of event listener registration for better timing control."""
         if not self.hass:
-            _LOGGER.error("Cannot register listeners - no hass instance for %s", self._attr_name)
+            _LOGGER.error("Cannot register listeners - no hass instance for %s", self.name)
             return
             
         try:
             # Ensure we're not double-registering
             if getattr(self, '_listeners_registered', False):
-                _LOGGER.debug("Event listeners already registered for %s", self._attr_name)
+                _LOGGER.debug("Event listeners already registered for %s", self.name)
                 return
             
             # Additional delay to ensure Home Assistant is ready
@@ -759,9 +816,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
             # Call the synchronous version which has the full implementation
             self._register_event_listeners()
             
-            _LOGGER.info("✅ Async event listeners registered for %s", self._attr_name)
+            _LOGGER.info("✅ Async event listeners registered for %s", self.name)
         except Exception as e:
-            _LOGGER.error("Error in async listener registration for %s: %s", self._attr_name, e)
+            _LOGGER.error("Error in async listener registration for %s: %s", self.name, e)
             raise  # Re-raise so retry mechanism works
 
     def _unregister_event_listeners(self) -> None:
@@ -848,7 +905,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
             self._release_listener()
             self._release_listener = None
             
-        _LOGGER.debug("🧹 Event listeners unregistered for %s", self._attr_name)
+        _LOGGER.debug("🧹 Event listeners unregistered for %s", self.name)
 
     @property
     def is_on(self) -> bool | None:
@@ -871,12 +928,13 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        # EW Transmitter buttons require transceiver connection
-        if not self.coordinator.last_update_success:
-            return False
+        """Return if entity is available.
         
-        if not self.coordinator.transceiver or not self.coordinator.transceiver.is_connected:
+        EW Transmitter buttons inherit the RX11 transceiver connection status 
+        via via_device linkage. Additionally, they check if the device exists.
+        """
+        # Base: RX11 must be connected
+        if not self._is_rx11_connected():
             return False
         
         # Additionally check if device exists in coordinator
@@ -911,7 +969,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
 
 
 class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensorEntity):
-    """Binary sensor for EW-Transmitter Auf/Zu state with persistence."""
+    """Binary sensor for Easywave Transmitter Auf/Zu state with persistence."""
 
     def __init__(
         self,
@@ -923,19 +981,26 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
         super().__init__(coordinator, serial_number, device_info)
         self._entity_spec = entity_spec
         self._button_map = entity_spec.get("button_map", {})
-        self._options = entity_spec.get("options", ["Auf", "Zu"])
+        
+        # Use untranslated state keys - HA translates these via translations/*.json
+        # Default options for cover: ["up", "down"] (not translated values like "Auf", "Zu")
+        self._options = entity_spec.get("options", ["up", "down"])
         self._state_key = entity_spec.get("state_key", "transmitter_state")
-        self._on_label = entity_spec.get("on_label", self._options[0])
-        self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "Aus")
+        # on_label/off_label are the untranslated keys, not translated display values
+        self._on_label = entity_spec.get("on_label", self._options[0] if self._options else "up")
+        self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "down")
 
-        self._attr_name = entity_spec.get("name", f"Transmitter {serial_number} State")
+        # Handle entity naming consistently with device name prefix
+        self._attr_has_entity_name = True  # Always prepend device name
+        
+        # Store translation_key for HA automatic state translation
+        # This allows HA to translate entity names via translations/*.json
+        self._translation_key = entity_spec.get("translation_key")
+        self._attr_translation_key = self._translation_key  # Required for HA translation
+        self._static_name = entity_spec.get("name")  # Fallback static name
+        
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state_binary")
         self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
-        
-        # Translation key for state labels (AUF/ZU vs. EIN/AUS)
-        translation_key = entity_spec.get("translation_key")
-        if translation_key:
-            self._attr_translation_key = translation_key
 
         device_class_str = entity_spec.get("device_class")
         if device_class_str:
@@ -948,6 +1013,9 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
 
         self._current_state: str | None = None
         self._listeners_registered = False
+
+    # NOTE: No custom name property - HA uses _attr_translation_key automatically
+    # This ensures proper translation based on user's language setting
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -970,13 +1038,19 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
     @property
     def icon(self) -> str:
         """Return dynamic icon based on current state."""
-        # Map state to icon
-        if self._current_state == "Auf":
+        # Use language-independent state checking
+        # Cover states: check for up/down using state helper functions
+        if is_up_state(self._current_state):
             return "mdi:window-shutter-open"
-        elif self._current_state == "Zu":
+        elif is_down_state(self._current_state):
             return "mdi:window-shutter"
-        elif self._current_state == "Stopp":
+        elif is_stop_state(self._current_state):
             return "mdi:stop-circle"
+        # Switch states: check for on/off
+        elif is_on_state(self._current_state):
+            return "mdi:toggle-switch"
+        elif is_off_state(self._current_state):
+            return "mdi:toggle-switch-off"
         # Fallback to configured icon or default
         return self._attr_icon
 
@@ -995,7 +1069,9 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
             if event_button is None:
                 button_name = event.data.get("button_name") or event.data.get("subtype") or ""
                 normalized_name = button_name.strip()
-                if normalized_name.lower().startswith("taste "):
+                # Support both German and English button labels
+                name_lower = normalized_name.lower()
+                if name_lower.startswith("taste ") or name_lower.startswith("button "):
                     normalized_name = normalized_name.split()[-1]
                 name_map = {"A": 0, "B": 1, "C": 2, "D": 3}
                 if normalized_name in name_map:
@@ -1037,7 +1113,7 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
                     )
                     self.async_write_ha_state()
                     _LOGGER.debug("🔄 Transmitter binary sensor %s: %s -> %s (button %s)", 
-                               self._attr_name or self._attr_unique_id, old_state, new_state, event_button)
+                               self.name or self._attr_unique_id, old_state, new_state, event_button)
 
         self.async_on_remove(
             self.hass.bus.async_listen("eldat_button_press", _handle_button_event)
@@ -1053,9 +1129,9 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
             "operating_type": self._entity_spec.get("operating_type"),
         }
         
-        # Add the human-readable state label (AUF/ZU instead of Ein/Aus)
+        # Add the human-readable state label (state label in current language)
         if self._current_state:
-            attrs["zustand"] = self._current_state
+            attrs["state_label"] = self._current_state
         
         return attrs
 
@@ -1079,17 +1155,24 @@ class EWneoBatterySensor(EldatEntity, BinarySensorEntity):
         coordinator: EldatCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
+        entity_spec: Dict[str, Any] = None,
     ) -> None:
         """Initialize EWneo battery sensor."""
         super().__init__(coordinator, serial_number, device_info)
         
+        self._entity_spec = entity_spec or {}
         self._attr_device_class = BinarySensorDeviceClass.BATTERY
-        self._attr_name = "Batteriestand"
-        self._attr_unique_id = f"{serial_number}_battery_warning"
+        self._attr_unique_id = self._entity_spec.get("unique_id", f"{serial_number}_battery_warning")
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_has_entity_name = True
         
-        _LOGGER.info("🔋 EWneo battery sensor initialized: %s (serial: %s)", 
-                    self._attr_name, serial_number[-8:])
+        # Use translation_key for proper HA translation
+        translation_key = self._entity_spec.get("translation_key", "battery_warning")
+        self._attr_translation_key = translation_key
+        # Do NOT set _attr_name when using translation_key
+        
+        _LOGGER.info("🔋 EWneo battery sensor initialized: translation_key=%s (serial: %s)", 
+                    translation_key, serial_number[-8:])
 
     @property
     def is_on(self) -> bool:
@@ -1108,12 +1191,13 @@ class EWneoBatterySensor(EldatEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        # EWneo battery sensors require transceiver connection
-        if not self.coordinator.last_update_success:
-            return False
+        """Return if entity is available.
         
-        if not self.coordinator.transceiver or not self.coordinator.transceiver.is_connected:
+        EWneo battery sensors inherit the RX11 transceiver connection status 
+        via via_device linkage. Additionally, they check if the device exists.
+        """
+        # Base: RX11 must be connected
+        if not self._is_rx11_connected():
             return False
         
         # Additionally check if device exists
@@ -1148,7 +1232,7 @@ class EWneoBatterySensor(EldatEntity, BinarySensorEntity):
 class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
     """Binary sensor for battery warning.
     
-    This sensor is ON when battery is low (for EW-Transmitters).
+    This sensor is ON when battery is low (for Easywave Transmitters).
     """
 
     def __init__(
@@ -1163,14 +1247,22 @@ class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
         
         self._entity_spec = entity_spec or {}
         self._attr_device_class = BinarySensorDeviceClass.BATTERY
-        self._attr_name = self._entity_spec.get("name", f"{device_info.get('name', 'Device')} Batteriestand")
         self._attr_unique_id = self._entity_spec.get("unique_id", f"{serial_number}_battery_warning")
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_has_entity_name = True
+        
+        # Store translation_key for dynamic name resolution
+        self._translation_key = self._entity_spec.get("translation_key", "battery_warning")
+        # Set _attr_translation_key so HA handles translation automatically
+        self._attr_translation_key = self._translation_key
         
         self._battery_warning = False
         self._listeners_registered = False
         
-        _LOGGER.info("🔋 Battery warning sensor initialized: %s", self._attr_name)
+        _LOGGER.info("🔋 Battery warning sensor initialized: translation_key=%s", self._translation_key)
+
+    # NOTE: No custom name property - HA uses _attr_translation_key automatically
+    # This ensures proper translation based on user's language setting
 
     @property
     def is_on(self) -> bool:
@@ -1179,15 +1271,12 @@ class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        # EW Transmitter battery warning requires transceiver connection
-        if not self.coordinator.last_update_success:
-            return False
+        """Return if entity is available.
         
-        if not self.coordinator.transceiver or not self.coordinator.transceiver.is_connected:
-            return False
-        
-        return True
+        EW Transmitter battery warning sensors inherit the RX11 transceiver 
+        connection status via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to hass."""
@@ -1254,15 +1343,15 @@ class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
                 if battery_warning != self._battery_warning:
                     self._battery_warning = battery_warning
                     if battery_warning:
-                        _LOGGER.warning("🔋 Battery warning ON for %s (battery empty)", self._attr_name)
+                        _LOGGER.warning("🔋 Battery warning ON for %s (battery empty)", self.name)
                     else:
-                        _LOGGER.info("🔋 Battery warning OFF for %s", self._attr_name)
+                        _LOGGER.info("🔋 Battery warning OFF for %s", self.name)
                     self.async_write_ha_state()
                 
             except Exception as e:
                 _LOGGER.error("Error handling sensor update event: %s", e)
 
-        # Listen for battery events (EW-Transmitter) - new dedicated events
+        # Listen for battery events (Easywave Transmitter) - new dedicated events
         self.async_on_remove(
             self.hass.bus.async_listen("eldat_battery_low", handle_battery_update)
         )
@@ -1279,7 +1368,7 @@ class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
         )
         
         self._listeners_registered = True
-        _LOGGER.info("🎯 Event listeners registered for battery warning sensor: %s", self._attr_name)
+        _LOGGER.info("🎯 Event listeners registered for battery warning sensor: %s", self._attr_unique_id)
 
     async def async_update(self) -> None:
         """Update the sensor state from coordinator data."""
@@ -1290,7 +1379,7 @@ class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
         if battery_warning != self._battery_warning:
             self._battery_warning = battery_warning
             if battery_warning:
-                _LOGGER.warning("🔋 Battery warning ON for %s (from coordinator)", self._attr_name)
+                _LOGGER.warning("🔋 Battery warning ON for %s (from coordinator)", self.name)
 
     @property
     def icon(self) -> str:

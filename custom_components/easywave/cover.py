@@ -20,6 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import EldatCoordinator
 from .entity import EldatEntity
+from .translations import translate, get_language
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -198,30 +199,76 @@ class EldatCover(EldatEntity, CoverEntity):
         
         # Set unique ID and name from entity_spec
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_cover")
-        self._attr_name = entity_spec.get("name", device_info.get('name', 'Motor'))
+        translation_key = entity_spec.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+            self._attr_name = None  # Let HA use translation_key
+        else:
+            self._attr_name = entity_spec.get("name", device_info.get('name', 'Motor'))
         
-        # Set icon from entity_spec
-        self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
+        # Store base icon and state-specific icons from entity_spec
+        self._base_icon = entity_spec.get("icon", "mdi:window-shutter")
+        self._icon_open = entity_spec.get("icon_open", "mdi:window-shutter-open")
+        self._icon_closed = entity_spec.get("icon_closed", "mdi:window-shutter")
+        self._icon_unknown = entity_spec.get("icon_unknown", self._base_icon)
+        self._icon_stopped = entity_spec.get("icon_stopped", "mdi:stop-circle-outline")
+        
+        # Remove _attr_icon set by parent class so dynamic icon property works
+        if hasattr(self, '_attr_icon'):
+            del self._attr_icon
         
         self._attr_is_closed = None
         self._attr_is_closing = False
         self._attr_is_opening = False
+        self._stopped = False  # Neuer Zustand für "Gestoppt"
         
-        # Store operating mode for EW-Receiver
+        # Store operating mode for Easywave Receiver
         self._operating_mode = entity_spec.get("operating_mode", device_info.get("operating_mode", 1))
         self._receiver_kind = entity_spec.get("receiver_kind", device_info.get("receiver_kind", "motor"))
         
-        # Store button config for EW-Receiver (direct RX11 commands)
+        # Store button config for Easywave Receiver (direct RX11 commands)
         self._button_config = entity_spec.get("button_config", {})
         self._rx11_index = device_info.get("rx11_index")
         self._stateless = entity_spec.get("stateless", False)
+        self._assumed_state = entity_spec.get("assumed_state", self._stateless)
+    
+    @property
+    def assumed_state(self) -> bool:
+        """Return True to always show action buttons instead of toggle."""
+        return self._assumed_state
+    
+    @property
+    def icon(self) -> str:
+        """Return icon based on current state."""
+        if self._stopped:
+            return self._icon_stopped
+        elif self._attr_is_closed is None:
+            return self._icon_unknown
+        elif self._attr_is_closed:
+            return self._icon_closed
+        else:
+            return self._icon_open
     
     @property
     def is_closed(self) -> bool | None:
-        """Return if cover is closed. Returns None for stateless covers."""
-        if self._stateless:
-            return None
+        """Return if cover is closed. Shows last known state even for assumed_state covers."""
         return self._attr_is_closed
+    
+    @property
+    def state(self) -> str | None:
+        """Return the state of the cover with stopped support."""
+        if self._stopped:
+            return "stopped"  # HA translates via translations/xx.json entity.cover.channel.state.stopped
+        # Fallback to parent implementation
+        if self._attr_is_opening:
+            return "opening"
+        if self._attr_is_closing:
+            return "closing"
+        if self._attr_is_closed is True:
+            return "closed"
+        if self._attr_is_closed is False:
+            return "open"
+        return None
     
     @property
     def is_closing(self) -> bool:
@@ -240,31 +287,25 @@ class EldatCover(EldatEntity, CoverEntity):
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
         try:
-            # For EW-Receiver with button_config, send command via coordinator
+            # For Easywave Receiver with button_config, send command via coordinator
             if self._button_config and "open" in self._button_config:
                 button_code = self._button_config["open"]
-                _LOGGER.info("📤 EW-Receiver Cover OPEN: serial=%s, button=%d, stateless=%s", 
+                _LOGGER.info("📤 Easywave Receiver Cover OPEN: serial=%s, button=%d, stateless=%s", 
                            self._serial_number[-8:], button_code, self._stateless)
-                
-                # For stateless covers, don't track opening/closing states
-                if not self._stateless:
-                    self._attr_is_opening = True
-                    self._attr_is_closing = False
-                    self.async_write_ha_state()
                 
                 # Send command via coordinator (routes to RX11 for EW receivers)
                 success = await self._send_ew_command(button_code)
                 
                 if success:
                     _LOGGER.info("✅ Cover %s OPEN command sent successfully", self._serial_number[-8:])
+                    # Update state to show last action (even for assumed_state covers)
+                    self._attr_is_closed = False
+                    self._attr_is_opening = False
+                    self._attr_is_closing = False
+                    self._stopped = False
+                    self.async_write_ha_state()
                 else:
                     _LOGGER.warning("❌ Failed to send OPEN command for cover %s", self._serial_number[-8:])
-                
-                # For stateless covers, don't update state
-                if not self._stateless:
-                    self._attr_is_opening = False
-                    self._attr_is_closed = False
-                    self.async_write_ha_state()
                 return
             
             # Fallback: Try device instance for other device types
@@ -301,31 +342,25 @@ class EldatCover(EldatEntity, CoverEntity):
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
         try:
-            # For EW-Receiver with button_config, send command via coordinator
+            # For Easywave Receiver with button_config, send command via coordinator
             if self._button_config and "close" in self._button_config:
                 button_code = self._button_config["close"]
-                _LOGGER.info("📤 EW-Receiver Cover CLOSE: serial=%s, button=%d, stateless=%s", 
+                _LOGGER.info("📤 Easywave Receiver Cover CLOSE: serial=%s, button=%d, stateless=%s", 
                            self._serial_number[-8:], button_code, self._stateless)
-                
-                # For stateless covers, don't track opening/closing states
-                if not self._stateless:
-                    self._attr_is_closing = True
-                    self._attr_is_opening = False
-                    self.async_write_ha_state()
                 
                 # Send command via coordinator (routes to RX11 for EW receivers)
                 success = await self._send_ew_command(button_code)
                 
                 if success:
                     _LOGGER.info("✅ Cover %s CLOSE command sent successfully", self._serial_number[-8:])
+                    # Update state to show last action (even for assumed_state covers)
+                    self._attr_is_closed = True
+                    self._attr_is_opening = False
+                    self._attr_is_closing = False
+                    self._stopped = False
+                    self.async_write_ha_state()
                 else:
                     _LOGGER.warning("❌ Failed to send CLOSE command for cover %s", self._serial_number[-8:])
-                
-                # For stateless covers, don't update state
-                if not self._stateless:
-                    self._attr_is_closing = False
-                    self._attr_is_closed = True
-                    self.async_write_ha_state()
                 return
             
             # Fallback: Try device instance for other device types
@@ -367,21 +402,22 @@ class EldatCover(EldatEntity, CoverEntity):
             return
             
         try:
-            # For EW-Receiver with button_config, send command directly via RX11
+            # For Easywave Receiver with button_config, send command directly via RX11
             if self._button_config and "stop" in self._button_config:
                 button_code = self._button_config["stop"]
-                _LOGGER.info("📤 EW-Receiver Cover STOP: serial=%s, button=%d", 
+                _LOGGER.info("📤 Easywave Receiver Cover STOP: serial=%s, button=%d", 
                            self._serial_number[-8:], button_code)
-                
-                self._attr_is_closing = False
-                self._attr_is_opening = False
-                self.async_write_ha_state()
                 
                 # Send command via RX11
                 success = await self._send_ew_command(button_code)
                 
                 if success:
                     _LOGGER.info("✅ Cover %s STOP command sent successfully", self._serial_number[-8:])
+                    # Update state to show "Gestoppt"
+                    self._attr_is_closing = False
+                    self._attr_is_opening = False
+                    self._stopped = True
+                    self.async_write_ha_state()
                 else:
                     _LOGGER.warning("❌ Failed to send STOP command for cover %s", self._serial_number[-8:])
                 return
@@ -509,7 +545,12 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
                         serial_number[-8:], self._current_cover_position, self._runtime_measured)
         
         # Set up entity attributes
-        self._attr_name = entity_spec.get("name", f"EWneo-Motor {serial_number}")
+        translation_key = entity_spec.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+            self._attr_name = None  # Let HA use translation_key
+        else:
+            self._attr_name = entity_spec.get("name", f"EWneo-Motor {serial_number}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_cover_{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
         self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
@@ -637,12 +678,12 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
     
     @property
     def available(self) -> bool:
-        """Return if entity is available - follows RX11 connection status."""
-        return (
-            self.coordinator.last_update_success 
-            and self.coordinator.transceiver 
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available - follows RX11 connection status.
+        
+        EWneo covers inherit the RX11 transceiver connection status via via_device 
+        linkage.
+        """
+        return self._is_rx11_connected()
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass, set up event listeners."""
@@ -897,7 +938,8 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
             _LOGGER.info("🔄 Sending EWB_CHANGE_STATE to EWneo cover %s: mode=%d, state_bytes=%s", 
                         self._serial_number, mode, [f"0x{b:02X}" for b in state_bytes])
             
-            # Send command via coordinator's transceiver
+            # Send command via coordinator's transceiver with automatic retry on failure
+            retry_attempted = False
             result = await self.coordinator.transceiver.rx11_ewb_change_state(
                 self._gateway_serial, self._serial_number, mode, state_bytes
             )
@@ -905,12 +947,45 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
             # Check for error responses
             if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
                 error_type = result[0]
+                
+                # Automatic retry for RF_TIMEOUT (once, without delay)
+                if error_type == "ERR_RF_TIMEOUT" and not retry_attempted:
+                    retry_attempted = True
+                    _LOGGER.info("🔄 EWneo cover %s: Timeout - automatischer Wiederholungsversuch...", self._serial_number[-8:])
+                    result = await self.coordinator.transceiver.rx11_ewb_change_state(
+                        self._gateway_serial, self._serial_number, mode, state_bytes
+                    )
+                    # Re-check result after retry
+                    if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
+                        error_type = result[0]
+                    else:
+                        error_type = None  # Retry succeeded
+                
                 if error_type == "ERR_RF_TIMEOUT":
                     error_type, receiver_serial, gateway_serial = result
-                    # Mark device as unreachable
+                    # Mark device as unreachable but keep it controllable
                     self._reachable = False
                     self.async_write_ha_state()
-                    _LOGGER.warning("⚠️ EWneo cover %s nicht erreichbar (RF-Timeout)", self._serial_number[-8:])
+                    
+                    # Get friendly device name for notification
+                    device_name = self._device_info.get("name") if self._device_info else None
+                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                    
+                    # Send persistent notification to user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "notification_id": f"eldat_device_unreachable_{self._serial_number}",
+                            "title": "⚠️ Gerät nicht erreichbar",
+                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
+                                       f"Der Befehl wurde nicht ausgeführt. "
+                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
+                        },
+                        blocking=False,
+                    )
+                    
+                    _LOGGER.warning("⚠️ EWneo cover %s nicht erreichbar (Timeout)", self._serial_number[-8:])
                     return False
                 else:
                     _LOGGER.error("❌ EWneo cover %s Fehler: %s", self._serial_number[-8:], error_type)
@@ -958,6 +1033,14 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
                 from datetime import datetime
                 self._reachable = True
                 self._last_seen = datetime.now()
+                
+                # Dismiss any previous unreachable notification
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
+                    blocking=False,
+                )
                 
                 # Force immediate Home Assistant state update
                 self.async_write_ha_state()
@@ -1206,7 +1289,12 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
                     self._channel, serial_number[-8:], self._gateway_serial[-8:] if self._gateway_serial else "None", self._device_type_code)
         
         # Set up entity attributes
-        self._attr_name = entity_spec.get("name", f"EWneo DualMotor CH{self._channel} {serial_number}")
+        translation_key = entity_spec.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+            self._attr_name = None  # Let HA use translation_key
+        else:
+            self._attr_name = entity_spec.get("name", f"EWneo DualMotor CH{self._channel} {serial_number}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_dual_motor_ch{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
         self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
@@ -1217,15 +1305,21 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         _LOGGER.info("✅ EWneo-DualMotor cover entity CH%d initialized: %s (%s)", self._channel, self._attr_name, self._attr_unique_id)
         
     async def _async_query_initial_state(self) -> None:
-        """Query initial motor state for this specific channel to check for runtime measurement capability."""
+        """Query initial motor state for this specific channel to check for runtime measurement capability.
+        
+        For multi-channel motors, we query each channel individually with Mode 2/10/18/26
+        to get the full state including persistent runtime measurement information.
+        Mode 0 only provides summary status without runtime_measured flag.
+        """
         try:
-            _LOGGER.info("🔍 EWneo-DualMotor CH%d %s: Querying initial state for runtime measurement", 
-                        self._channel, self._serial_number[-8:])
+            # Map channel to query mode: CH1=2, CH2=10, CH3=18, CH4=26
+            channel_mode_map = {1: 2, 2: 10, 3: 18, 4: 26}
+            query_mode = channel_mode_map.get(self._channel, 0)
             
-            # ALWAYS use Mode 0 for dual motors (all channels in one 32-bit word)
-            query_mode = 0
+            _LOGGER.info("🔍 EWneo-DualMotor CH%d %s: Querying initial state with Mode %d for runtime measurement", 
+                        self._channel, self._serial_number[-8:], query_mode)
             
-            # Use coordinator to perform EwbQueryState with Mode 0
+            # Use coordinator to perform EwbQueryState with channel-specific mode
             result = await self.coordinator._query_ewneo_state_with_mode(
                 self._gateway_serial,
                 self._serial_number,
@@ -1233,11 +1327,11 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             )
             
             if result:
-                _LOGGER.info("✅ EWneo-DualMotor CH%d %s: Mode 0 query successful, state will be processed via event", 
-                            self._channel, self._serial_number[-8:])
+                _LOGGER.info("✅ EWneo-DualMotor CH%d %s: Mode %d query successful, state will be processed via event", 
+                            self._channel, self._serial_number[-8:], query_mode)
             else:
-                _LOGGER.warning("⚠️ EWneo-DualMotor CH%d %s: Mode 0 state query failed", 
-                               self._channel, self._serial_number[-8:])
+                _LOGGER.warning("⚠️ EWneo-DualMotor CH%d %s: Mode %d state query failed", 
+                               self._channel, self._serial_number[-8:], query_mode)
                 
         except Exception as e:
             _LOGGER.error("❌ EWneo-DualMotor CH%d %s: Error during initial state query: %s", 
@@ -1313,6 +1407,7 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             
         if self._stored_position:
             attrs["stored_position"] = self._stored_position
+        
             
         return attrs
 
@@ -1485,7 +1580,8 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             _LOGGER.warning("🔄 Sending EWB_CHANGE_STATE to EWneo dual motor %s CH%d: mode=%d, state_bytes=%s", 
                         self._serial_number, self._channel, mode, [f"0x{b:02X}" for b in state_bytes])
             
-            # Send command via coordinator's transceiver
+            # Send command via coordinator's transceiver with automatic retry on failure
+            retry_attempted = False
             result = await self.coordinator.transceiver.rx11_ewb_change_state(
                 self._gateway_serial, self._serial_number, mode, state_bytes
             )
@@ -1493,13 +1589,46 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             # Check for error responses
             if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
                 error_type = result[0]
+                
+                # Automatic retry for RF_TIMEOUT (once, without delay)
+                if error_type == "ERR_RF_TIMEOUT" and not retry_attempted:
+                    retry_attempted = True
+                    _LOGGER.info("🔄 EWneo dual motor %s CH%d: Timeout - automatischer Wiederholungsversuch...", self._serial_number[-8:], self._channel)
+                    result = await self.coordinator.transceiver.rx11_ewb_change_state(
+                        self._gateway_serial, self._serial_number, mode, state_bytes
+                    )
+                    # Re-check result after retry
+                    if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
+                        error_type = result[0]
+                    else:
+                        error_type = None  # Retry succeeded
+                
                 if error_type == "ERR_RF_TIMEOUT":
-                    # Mark device as unreachable
+                    # Mark device as unreachable but keep it controllable
                     self._reachable = False
                     self.async_write_ha_state()
-                    _LOGGER.warning("⚠️ EWneo dual motor %s CH%d nicht erreichbar (RF-Timeout)", self._serial_number[-8:], self._channel)
+                    
+                    # Get friendly device name for notification
+                    device_name = self._device_info.get("name") if self._device_info else None
+                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]} Kanal {self._channel}"
+                    
+                    # Send persistent notification to user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "notification_id": f"eldat_device_unreachable_{self._serial_number}_ch{self._channel}",
+                            "title": "⚠️ Gerät nicht erreichbar",
+                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
+                                       f"Der Befehl wurde nicht ausgeführt. "
+                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
+                        },
+                        blocking=False,
+                    )
+                    
+                    _LOGGER.warning("⚠️ EWneo dual motor %s CH%d nicht erreichbar (Timeout)", self._serial_number[-8:], self._channel)
                     return False
-                else:
+                elif error_type:
                     _LOGGER.warning("⚠️ EWneo dual motor %s CH%d Fehler: %s", self._serial_number[-8:], self._channel, error_type)
                     return False
             elif result:
@@ -1548,6 +1677,14 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
                 from datetime import datetime
                 self._reachable = True
                 self._last_seen = datetime.now()
+                
+                # Dismiss any previous unreachable notification
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}_ch{self._channel}"},
+                    blocking=False,
+                )
                 
                 # Force immediate Home Assistant state update
                 self.async_write_ha_state()
@@ -1843,7 +1980,12 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
                     self._channel, serial_number[-8:], self._gateway_serial[-8:] if self._gateway_serial else "None", self._device_type_code)
         
         # Set up entity attributes
-        self._attr_name = entity_spec.get("name", f"EWneo-QuadMotor CH{self._channel} {serial_number}")
+        translation_key = entity_spec.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+            self._attr_name = None  # Let HA use translation_key
+        else:
+            self._attr_name = entity_spec.get("name", f"EWneo-QuadMotor CH{self._channel} {serial_number}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_quad_motor_ch{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
         self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
@@ -1854,15 +1996,21 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
         _LOGGER.info("✅ EWneo-QuadMotor cover entity CH%d initialized: %s (%s)", self._channel, self._attr_name, self._attr_unique_id)
         
     async def _async_query_initial_state(self) -> None:
-        """Query initial motor state for this specific channel to check for runtime measurement capability."""
+        """Query initial motor state for this specific channel to check for runtime measurement capability.
+        
+        For multi-channel motors, we query each channel individually with Mode 2/10/18/26
+        to get the full state including persistent runtime measurement information.
+        Mode 0 only provides summary status without runtime_measured flag.
+        """
         try:
-            _LOGGER.info("🔍 EWneo-QuadMotor CH%d %s: Querying initial state for runtime measurement", 
-                        self._channel, self._serial_number[-8:])
+            # Map channel to query mode: CH1=2, CH2=10, CH3=18, CH4=26
+            channel_mode_map = {1: 2, 2: 10, 3: 18, 4: 26}
+            query_mode = channel_mode_map.get(self._channel, 0)
             
-            # ALWAYS use Mode 0 for quad motors (all channels in one 32-bit word)
-            query_mode = 0
+            _LOGGER.info("🔍 EWneo-QuadMotor CH%d %s: Querying initial state with Mode %d for runtime measurement", 
+                        self._channel, self._serial_number[-8:], query_mode)
             
-            # Use coordinator to perform EwbQueryState with Mode 0
+            # Use coordinator to perform EwbQueryState with channel-specific mode
             result = await self.coordinator._query_ewneo_state_with_mode(
                 self._gateway_serial,
                 self._serial_number,
@@ -1870,11 +2018,11 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             )
             
             if result:
-                _LOGGER.info("✅ EWneo-QuadMotor CH%d %s: Mode 0 query successful, state will be processed via event", 
-                            self._channel, self._serial_number[-8:])
+                _LOGGER.info("✅ EWneo-QuadMotor CH%d %s: Mode %d query successful, state will be processed via event", 
+                            self._channel, self._serial_number[-8:], query_mode)
             else:
-                _LOGGER.warning("⚠️ EWneo-QuadMotor CH%d %s: Mode 0 state query failed", 
-                               self._channel, self._serial_number[-8:])
+                _LOGGER.warning("⚠️ EWneo-QuadMotor CH%d %s: Mode %d state query failed", 
+                               self._channel, self._serial_number[-8:], query_mode)
                 
         except Exception as e:
             _LOGGER.error("❌ EWneo-QuadMotor CH%d %s: Error during initial state query: %s", 
@@ -1950,6 +2098,7 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             
         if self._stored_position:
             attrs["stored_position"] = self._stored_position
+        
             
         return attrs
 
@@ -2178,7 +2327,8 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             _LOGGER.info("🔄 Sending EWB_CHANGE_STATE to EWneo quad motor %s CH%d: mode=%d, state_bytes=%s", 
                         self._serial_number, self._channel, mode, [f"0x{b:02X}" for b in state_bytes])
             
-            # Send command via coordinator's transceiver
+            # Send command via coordinator's transceiver with automatic retry on failure
+            retry_attempted = False
             result = await self.coordinator.transceiver.rx11_ewb_change_state(
                 self._gateway_serial, self._serial_number, mode, state_bytes
             )
@@ -2186,13 +2336,46 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             # Check for error responses
             if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
                 error_type = result[0]
+                
+                # Automatic retry for RF_TIMEOUT (once, without delay)
+                if error_type == "ERR_RF_TIMEOUT" and not retry_attempted:
+                    retry_attempted = True
+                    _LOGGER.info("🔄 EWneo quad motor %s CH%d: Timeout - automatischer Wiederholungsversuch...", self._serial_number[-8:], self._channel)
+                    result = await self.coordinator.transceiver.rx11_ewb_change_state(
+                        self._gateway_serial, self._serial_number, mode, state_bytes
+                    )
+                    # Re-check result after retry
+                    if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
+                        error_type = result[0]
+                    else:
+                        error_type = None  # Retry succeeded
+                
                 if error_type == "ERR_RF_TIMEOUT":
-                    # Mark device as unreachable
+                    # Mark device as unreachable but keep it controllable
                     self._reachable = False
                     self.async_write_ha_state()
-                    _LOGGER.warning("⚠️ EWneo quad motor %s CH%d nicht erreichbar (RF-Timeout)", self._serial_number[-8:], self._channel)
+                    
+                    # Get friendly device name for notification
+                    device_name = self._device_info.get("name") if self._device_info else None
+                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]} Kanal {self._channel}"
+                    
+                    # Send persistent notification to user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "notification_id": f"eldat_device_unreachable_{self._serial_number}_ch{self._channel}",
+                            "title": "⚠️ Gerät nicht erreichbar",
+                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
+                                       f"Der Befehl wurde nicht ausgeführt. "
+                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
+                        },
+                        blocking=False,
+                    )
+                    
+                    _LOGGER.warning("⚠️ EWneo quad motor %s CH%d nicht erreichbar (Timeout)", self._serial_number[-8:], self._channel)
                     return False
-                else:
+                elif error_type:
                     _LOGGER.warning("⚠️ EWneo quad motor %s CH%d Fehler: %s", self._serial_number[-8:], self._channel, error_type)
                     return False
             elif result:
@@ -2241,6 +2424,14 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
                 from datetime import datetime
                 self._reachable = True
                 self._last_seen = datetime.now()
+                
+                # Dismiss any previous unreachable notification
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}_ch{self._channel}"},
+                    blocking=False,
+                )
                 
                 # Force immediate Home Assistant state update
                 self.async_write_ha_state()

@@ -476,8 +476,16 @@ class EldatEWneoLight(EldatEntity, LightEntity):
         return attrs
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return self._available and self.coordinator.transceiver and self.coordinator.transceiver.is_connected
+        """Return if entity is available.
+        
+        EWneo lights inherit the RX11 transceiver connection status via via_device 
+        linkage. Additionally, they track device-specific reachability.
+        """
+        # Base: RX11 must be connected
+        if not self._is_rx11_connected():
+            return False
+        # Device-specific: check if device is reachable
+        return self._available
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass, set up event listeners."""
@@ -547,6 +555,10 @@ class EldatEWneoLight(EldatEntity, LightEntity):
             _LOGGER.error("EWneo light %s: No gateway serial available", self.unique_id)
             return
 
+        # Save old state for potential rollback on timeout
+        old_is_on = self._is_on
+        old_brightness = self._brightness
+
         try:
             # Prepare state data for turning on
             if ATTR_BRIGHTNESS in kwargs and self._attr_color_mode == ColorMode.BRIGHTNESS:
@@ -560,7 +572,8 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                 # Just turn on (100% brightness or simple on)
                 state_data = [100, 0, 0, 0] if self._attr_color_mode == ColorMode.BRIGHTNESS else [1, 0, 0, 0]
 
-            # Send EWB_CHANGE_STATE command
+            # Send EWB_CHANGE_STATE command with automatic retry on failure
+            retry_attempted = False
             result = await self.coordinator.transceiver.rx11_ewb_change_state(
                 gateway_serial=self._gateway_serial,
                 receiver_serial=self._serial_number,
@@ -571,13 +584,52 @@ class EldatEWneoLight(EldatEntity, LightEntity):
             # Check for error responses
             if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
                 error_type = result[0]
+                
+                # Automatic retry for RF_TIMEOUT (once, without delay)
+                if error_type == "ERR_RF_TIMEOUT" and not retry_attempted:
+                    retry_attempted = True
+                    _LOGGER.info("🔄 EWneo light %s: Timeout - automatischer Wiederholungsversuch...", self._serial_number[-8:])
+                    result = await self.coordinator.transceiver.rx11_ewb_change_state(
+                        gateway_serial=self._gateway_serial,
+                        receiver_serial=self._serial_number,
+                        mode=0,
+                        state_data=state_data
+                    )
+                    # Re-check result after retry
+                    if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
+                        error_type = result[0]
+                    else:
+                        error_type = None  # Retry succeeded
+                
                 if error_type == "ERR_RF_TIMEOUT":
-                    # Mark device as unreachable
+                    # Mark device as unreachable but keep it controllable
                     self._reachable = False
+                    
+                    # State was not changed yet, so no rollback needed
+                    # (we only update state on success)
                     self.async_write_ha_state()
-                    _LOGGER.warning("⚠️ EWneo light %s nicht erreichbar (RF-Timeout)", self._serial_number[-8:])
+                    
+                    # Get friendly device name for notification
+                    device_name = self._device_info.get("name") if self._device_info else None
+                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                    
+                    # Send persistent notification to user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "notification_id": f"eldat_device_unreachable_{self._serial_number}",
+                            "title": "⚠️ Gerät nicht erreichbar",
+                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
+                                       f"Der Befehl wurde nicht ausgeführt. "
+                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
+                        },
+                        blocking=False,
+                    )
+                    
+                    _LOGGER.warning("⚠️ EWneo light %s nicht erreichbar (Timeout)", self._serial_number[-8:])
                     return
-                else:
+                elif error_type:
                     _LOGGER.warning("⚠️ EWneo light %s Fehler: %s", self._serial_number[-8:], error_type)
                     return
             elif result:
@@ -592,6 +644,14 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                 from datetime import datetime
                 self._reachable = True
                 self._last_seen = datetime.now()
+                
+                # Dismiss any previous unreachable notification
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
+                    blocking=False,
+                )
                     
                 _LOGGER.info("EWneo light %s: Turned on successfully", self.unique_id)
             else:
@@ -609,8 +669,13 @@ class EldatEWneoLight(EldatEntity, LightEntity):
             _LOGGER.error("EWneo light %s: No gateway serial available", self.unique_id)
             return
 
+        # Save old state for potential rollback on timeout
+        old_is_on = self._is_on
+        old_brightness = self._brightness
+
         try:
-            # Send EWB_CHANGE_STATE command to turn off
+            # Send EWB_CHANGE_STATE command to turn off with automatic retry on failure
+            retry_attempted = False
             result = await self.coordinator.transceiver.rx11_ewb_change_state(
                 gateway_serial=self._gateway_serial,
                 receiver_serial=self._serial_number,
@@ -621,13 +686,52 @@ class EldatEWneoLight(EldatEntity, LightEntity):
             # Check for error responses
             if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
                 error_type = result[0]
+                
+                # Automatic retry for RF_TIMEOUT (once, without delay)
+                if error_type == "ERR_RF_TIMEOUT" and not retry_attempted:
+                    retry_attempted = True
+                    _LOGGER.info("🔄 EWneo light %s: Timeout - automatischer Wiederholungsversuch...", self._serial_number[-8:])
+                    result = await self.coordinator.transceiver.rx11_ewb_change_state(
+                        gateway_serial=self._gateway_serial,
+                        receiver_serial=self._serial_number,
+                        mode=0,
+                        state_data=[0, 0, 0, 0]
+                    )
+                    # Re-check result after retry
+                    if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
+                        error_type = result[0]
+                    else:
+                        error_type = None  # Retry succeeded
+                
                 if error_type == "ERR_RF_TIMEOUT":
-                    # Mark device as unreachable
+                    # Mark device as unreachable but keep it controllable
                     self._reachable = False
+                    
+                    # State was not changed yet, so no rollback needed
+                    # (we only update state on success)
                     self.async_write_ha_state()
-                    _LOGGER.warning("⚠️ EWneo light %s nicht erreichbar (RF-Timeout)", self._serial_number[-8:])
+                    
+                    # Get friendly device name for notification
+                    device_name = self._device_info.get("name") if self._device_info else None
+                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                    
+                    # Send persistent notification to user
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "notification_id": f"eldat_device_unreachable_{self._serial_number}",
+                            "title": "⚠️ Gerät nicht erreichbar",
+                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
+                                       f"Der Befehl wurde nicht ausgeführt. "
+                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
+                        },
+                        blocking=False,
+                    )
+                    
+                    _LOGGER.warning("⚠️ EWneo light %s nicht erreichbar (Timeout)", self._serial_number[-8:])
                     return
-                else:
+                elif error_type:
                     _LOGGER.warning("⚠️ EWneo light %s Fehler: %s", self._serial_number[-8:], error_type)
                     return
             elif result:
@@ -638,6 +742,14 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                 from datetime import datetime
                 self._reachable = True
                 self._last_seen = datetime.now()
+                
+                # Dismiss any previous unreachable notification
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
+                    blocking=False,
+                )
                 
                 _LOGGER.info("EWneo light %s: Turned off successfully", self.unique_id)
             else:

@@ -10,11 +10,25 @@ from homeassistant.helpers.entity_platform import async_get_platforms
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
-from .const import DOMAIN
+from homeassistant.helpers import device_registry as dr
+
+from .const import DOMAIN, DEVICE_TYPE_CODE_MAP
 from .coordinator import EldatCoordinator
 from .entity_registry import get_entity_registry
+from .translations import get_language, t_receiver, DEFAULT_LANGUAGE
+from .helpers import build_model_description
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _get_coordinator(hass: HomeAssistant) -> Optional[EldatCoordinator]:
+    """Get the first available ELDAT coordinator."""
+    if DOMAIN not in hass.data:
+        return None
+    for entry_id, data in hass.data[DOMAIN].items():
+        if isinstance(data, EldatCoordinator):
+            return data
+    return None
 
 SERVICE_RESET_ENTITY_REGISTRY = "reset_entity_registry"
 SERVICE_RELOAD_SENSORS = "reload_sensors"
@@ -23,6 +37,107 @@ SERVICE_CLEANUP_GHOST_DEVICES = "cleanup_ghost_devices"
 SERVICE_CLEANUP_ORPHANED_ENTITIES = "cleanup_orphaned_entities"
 SERVICE_REPAIR_ORPHANED_DEVICES = "repair_orphaned_devices"
 SERVICE_SAVE_DEVICES_TO_REGISTRY = "save_devices_to_registry"
+SERVICE_UPDATE_TRANSLATIONS = "update_translations"
+
+
+# ============================================================
+# Translation update function
+# ============================================================
+
+async def async_update_device_translations(hass: HomeAssistant, coordinator: EldatCoordinator) -> dict[str, Any]:
+    """Update all device names and models in the device registry based on current language.
+    
+    This function updates the Home Assistant device registry with translated device names
+    and model descriptions. Call this when the user language changes.
+    
+    Returns:
+        Dict with update statistics {"updated": int, "errors": int, "language": str}
+    """
+    device_registry = dr.async_get(hass)
+    config_entry_id = coordinator.config_entry.entry_id
+    
+    # Get current language
+    lang = get_language(hass)
+    
+    _LOGGER.info("🌐 Updating device translations to language: %s", lang)
+    
+    updated = 0
+    errors = 0
+    
+    # Iterate through all devices in the registry
+    for device in device_registry.devices.values():
+        # Check if device belongs to this config entry
+        if config_entry_id not in device.config_entries:
+            continue
+        
+        # Get serial number from device identifiers
+        serial_number = None
+        for identifier in device.identifiers:
+            if identifier[0] == DOMAIN:
+                serial_number = identifier[1]
+                break
+        
+        if not serial_number:
+            continue
+        
+        # Skip the gateway device (its name doesn't need translation)
+        if serial_number.endswith("_gateway"):
+            continue
+        
+        # Get device info from coordinator
+        device_info = (
+            coordinator._registered_devices.get(serial_number) or 
+            coordinator.devices.get(serial_number)
+        )
+        
+        if not device_info:
+            _LOGGER.debug("Device %s not found in coordinator", serial_number[-8:])
+            continue
+        
+        try:
+            # Get device type
+            device_type = device_info.get("type", "unknown")
+            if device_type == "unknown" and "device_type_code" in device_info:
+                device_type_code = device_info.get("device_type_code")
+                device_type = DEVICE_TYPE_CODE_MAP.get(device_type_code, device_type)
+            
+            # Build translated model description
+            model_description = build_model_description(device_type, device_info, lang)
+            
+            # Build translated device name
+            if device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
+                # EWneo bidirectional devices: use ewneo_index
+                ewneo_index = device_info.get("ewneo_index")
+                receiver_label = t_receiver(lang)
+                if ewneo_index is not None:
+                    device_name = f"Easywave neo {receiver_label} #{ewneo_index + 1}"
+                else:
+                    device_name = f"Easywave neo {receiver_label} {serial_number[-4:]}"
+            else:
+                # Other devices: use existing name or generate default
+                device_name = device_info.get("name")
+                if not device_name:
+                    device_name = f"Easywave device {serial_number}"
+            
+            # Update device in registry if name or model changed
+            if device.name != device_name or device.model != model_description:
+                device_registry.async_update_device(
+                    device.id,
+                    name=device_name,
+                    model=model_description,
+                )
+                _LOGGER.debug("Updated device %s: name=%s, model=%s", 
+                            serial_number[-8:], device_name, model_description)
+                updated += 1
+            
+        except Exception as e:
+            _LOGGER.error("Error updating device %s: %s", serial_number[-8:], e)
+            errors += 1
+    
+    _LOGGER.info("✅ Device translation update complete: %d updated, %d errors, language: %s", 
+                updated, errors, lang)
+    
+    return {"updated": updated, "errors": errors, "language": lang}
 
 
 # ============================================================
@@ -327,10 +442,34 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         }),
     )
     
-    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s, %s, %s", 
+    async def handle_update_translations(call: ServiceCall) -> None:
+        """Update device names and models based on current language."""
+        coordinator = _get_coordinator(hass)
+        if not coordinator:
+            _LOGGER.error("❌ No coordinator found")
+            return
+        
+        try:
+            result = await async_update_device_translations(hass, coordinator)
+            _LOGGER.info("🌐 Translation update: %d devices updated, language: %s", 
+                        result["updated"], result["language"])
+            
+            # Fire event with results
+            hass.bus.async_fire("eldat_translations_updated", result)
+        except Exception as e:
+            _LOGGER.error("❌ Failed to update translations: %s", e)
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UPDATE_TRANSLATIONS,
+        handle_update_translations,
+        schema=None,
+    )
+    
+    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s, %s, %s, %s", 
                 SERVICE_RESET_ENTITY_REGISTRY, SERVICE_RELOAD_SENSORS, SERVICE_FIX_TRANSCEIVER, 
                 SERVICE_CLEANUP_GHOST_DEVICES, SERVICE_CLEANUP_ORPHANED_ENTITIES, SERVICE_REPAIR_ORPHANED_DEVICES,
-                SERVICE_SAVE_DEVICES_TO_REGISTRY, "refresh_entity_specs")
+                SERVICE_SAVE_DEVICES_TO_REGISTRY, "refresh_entity_specs", SERVICE_UPDATE_TRANSLATIONS)
 
 
 async def async_unload_services(hass: HomeAssistant) -> None:
@@ -343,4 +482,5 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, "refresh_entity_specs")
     hass.services.async_remove(DOMAIN, SERVICE_REPAIR_ORPHANED_DEVICES)
     hass.services.async_remove(DOMAIN, SERVICE_SAVE_DEVICES_TO_REGISTRY)
+    hass.services.async_remove(DOMAIN, SERVICE_UPDATE_TRANSLATIONS)
     _LOGGER.info("🗑️ Unloaded ELDAT services")

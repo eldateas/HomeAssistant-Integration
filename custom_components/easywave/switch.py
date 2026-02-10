@@ -18,6 +18,7 @@ from .const import DOMAIN, EVENT_DEVICE_ADDED, EVENT_FORCE_CREATE
 from .coordinator import EldatCoordinator
 from .entity import EldatEntity
 from .device_icons import get_entity_config_for_device
+from .translations import get_language, translate, DEFAULT_LANGUAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -329,7 +330,7 @@ def _create_switches_for_device(coordinator: EldatCoordinator, serial_number: st
             _LOGGER.debug("No switch entities for transmitter %s (not in Dauer mode)", serial_number[-8:])
         return switches
     
-    # For EW-Receivers, only create switches if explicitly configured as switches
+    # For Easywave Receivers, only create switches if explicitly configured as switches
     if device_type == "ew_receiver":
         entity_specs = device_info.get("entities", [])
         
@@ -346,14 +347,14 @@ def _create_switches_for_device(coordinator: EldatCoordinator, serial_number: st
                 receiver_kind = device_info.get("receiver_kind", "switch")
                 if receiver_kind in ["heating", "cooling", "heating_cooling"]:
                     switches.append(EldatSwitch(coordinator, serial_number, device_info, 0))
-                    _LOGGER.info("✅ Created default switch for configured EW-Receiver %s (kind: %s)", serial_number, receiver_kind)
+                    _LOGGER.info("✅ Created default switch for configured Easywave Receiver %s (kind: %s)", serial_number, receiver_kind)
             return switches
         else:
             # Legacy device without configured entities - create switch for switch type and heating/cooling receivers
             receiver_kind = device_info.get("receiver_kind", "switch")
             if receiver_kind in ["switch", "heating", "cooling", "heating_cooling"]:
                 switches.append(EldatSwitch(coordinator, serial_number, device_info, 0))
-                _LOGGER.info("✅ Created legacy switch for EW-Receiver %s (kind: %s)", serial_number, receiver_kind)
+                _LOGGER.info("✅ Created legacy switch for Easywave Receiver %s (kind: %s)", serial_number, receiver_kind)
             return switches
     
     # Handle EWneo devices (bidirectional receivers)
@@ -430,18 +431,42 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
             _LOGGER.info("🎯 EWneo switch %s: Loaded initial state: %s", serial_number[-8:], "ON" if self._is_on else "OFF")
         
         # Set up entity attributes
-        # For multi-channel devices (dual/quad), use "Kanal X" as entity name
-        # For single-channel devices, use None so only device name is shown
-        if self._device_type_code in [0x06, 0x07]:  # Dual or Quad switch
-            default_name = f"Kanal {self._channel + 1}"
-        else:  # Single channel - no entity name, use device name only
-            default_name = None
-        self._attr_name = entity_spec.get("name", default_name)
+        # Store translation_key for dynamic name resolution
+        self._translation_key = entity_spec.get("translation_key")
+        self._static_name = entity_spec.get("name")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_switch_{self._channel}")
         self._attr_device_class = SwitchDeviceClass.SWITCH
         
-        _LOGGER.info("✅ EWneo switch entity initialized: %s (%s)", self._attr_name, self._attr_unique_id)
-    
+        _LOGGER.info("✅ EWneo switch entity initialized: %s (%s)", self._translation_key or self._static_name or f"Channel {self._channel + 1}", self._attr_unique_id)
+
+    @property
+    def name(self) -> str | None:
+        """Return the dynamically translated name."""
+        if self._translation_key:
+            # Get current language and translate dynamically
+            lang = get_language(self.hass) if self.hass else "en"
+            # Map translation_key to translation path
+            key_map = {
+                "channel_1": "entity.channel",
+                "channel_2": "entity.channel",
+                "channel_3": "entity.channel",
+                "channel_4": "entity.channel",
+            }
+            if self._translation_key in key_map:
+                translated = translate("entity.channel", lang)
+                if translated != "entity.channel":
+                    return translated.format(channel=self._channel + 1)
+                return f"Channel {self._channel + 1}"
+        elif self._device_type_code in [0x06, 0x07]:  # Dual or Quad switch
+            # Dynamic translation for channel
+            lang = get_language(self.hass) if self.hass else "en"
+            translated = translate("entity.channel", lang)
+            if translated != "entity.channel":
+                return translated.format(channel=self._channel + 1)
+            return f"Channel {self._channel + 1}"
+        # Fallback to static name or None (single channel uses device name only)
+        return self._static_name
+
     @property
     def _gateway_serial(self) -> str | None:
         """Get gateway serial from coordinator (dynamically updated)."""
@@ -463,16 +488,29 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         return self._is_on
     
     @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra state attributes."""
+        attrs = {
+            "reachable": self._reachable,
+        }
+        if self._last_seen:
+            attrs["last_seen"] = self._last_seen.isoformat()
+        return attrs
+    
+    @property
     def available(self) -> bool:
         """Return if entity is available.
         
-        EWneo devices require transceiver connection for bidirectional communication.
-        Can also be unavailable if CHANGE_STATE request times out.
+        EWneo devices inherit the RX11 transceiver connection status via via_device
+        linkage. Additionally, they track device-specific reachability (timeout on 
+        CHANGE_STATE requests).
+        
+        Returns False if:
+        - RX11 transceiver is not connected (inherited from base)
+        - Device timed out on last CHANGE_STATE command (device-specific)
         """
-        # Base: RX11 must be connected
-        if not self.coordinator.last_update_success:
-            return False
-        if not self.coordinator.transceiver or not self.coordinator.transceiver.is_connected:
+        # Base: RX11 must be connected (use inherited helper method)
+        if not self._is_rx11_connected():
             return False
         
         # EWneo specific: check if device is reachable (no timeout)
@@ -734,7 +772,8 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                             self._serial_number, "ON" if turn_on else "OFF",
                             f" (timer: {timer_duration}s)" if timer_duration else "")
                 
-                # Send command via coordinator's transceiver
+                # Send command via coordinator's transceiver with automatic retry on failure
+                retry_attempted = False
                 result = await self.coordinator.transceiver.rx11_ewb_change_state(
                     self._gateway_serial, self._serial_number, mode, state_bytes
                 )
@@ -742,6 +781,19 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                 # Check for errors and attempt automatic recovery
                 if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
                     error_type = result[0]
+                    
+                    # Automatic retry for RF_TIMEOUT (once, without delay)
+                    if error_type == "ERR_RF_TIMEOUT" and not retry_attempted:
+                        retry_attempted = True
+                        _LOGGER.info("🔄 EWneo switch %s: Timeout - automatischer Wiederholungsversuch...", self._serial_number[-8:])
+                        result = await self.coordinator.transceiver.rx11_ewb_change_state(
+                            self._gateway_serial, self._serial_number, mode, state_bytes
+                        )
+                        # Re-check result after retry
+                        if result and isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_"):
+                            error_type = result[0]
+                        else:
+                            error_type = None  # Retry succeeded
                     
                     if error_type == "ERR_SERIAL_FILTER":
                         _LOGGER.warning("⚠️ Gateway-Filter-Fehler erkannt - versuche automatische Wiederherstellung...")
@@ -775,10 +827,37 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                     
                     elif error_type == "ERR_RF_TIMEOUT":
                         error_type, receiver_serial, gateway_serial = result
-                        # Mark device as unreachable
+                        # Mark device as unreachable but keep it controllable
                         self._reachable = False
+                        
+                        # Reset state to previous value (command failed)
+                        # old_state was captured at the start of this method
+                        self._is_on = old_state
+                        
+                        # Update Home Assistant state
                         self.async_write_ha_state()
-                        _LOGGER.warning("⚠️ EWneo switch %s nicht erreichbar (RF-Timeout)", self._serial_number[-8:])
+                        
+                        # Get friendly device name for notification
+                        device_name = None
+                        if hasattr(self, 'device_info') and self.device_info:
+                            device_name = self.device_info.get("name")
+                        friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                        
+                        # Send persistent notification to user
+                        await self.hass.services.async_call(
+                            "persistent_notification",
+                            "create",
+                            {
+                                "notification_id": f"eldat_device_unreachable_{self._serial_number}",
+                                "title": "⚠️ Gerät nicht erreichbar",
+                                "message": f"'{friendly_name}' antwortet nicht (Timeout). "
+                                           f"Der Befehl wurde nicht ausgeführt. "
+                                           f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
+                            },
+                            blocking=False,
+                        )
+                        
+                        _LOGGER.warning("⚠️ EWneo switch %s nicht erreichbar (Timeout) - Zustand zurückgesetzt", self._serial_number[-8:])
                         return False
                     
                     elif error_type == "ERR_INVALID_SERIAL":
@@ -798,18 +877,17 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                     else:  # ERR_UNKNOWN or other
                         error_type, error_code, receiver_serial_from_error = result
                         # ErrorCode 255 (0xFF) often means device communication issue
+                        lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
                         if isinstance(error_code, int) and error_code == 255:
-                            raise HomeAssistantError(
-                                f"Kommunikationsfehler mit Empfänger {receiver_serial_from_error[-8:]}. "
-                                f"Das Gerät antwortet nicht korrekt. Mögliche Ursachen: "
-                                f"Gerät ist ausgeschaltet, zu weit entfernt, oder es gibt Funkstörungen. "
-                                f"Versuchen Sie es erneut oder prüfen Sie die Geräteplatzierung."
+                            error_msg = translate("error.communication_error", lang).format(
+                                serial=receiver_serial_from_error[-8:]
                             )
+                            raise HomeAssistantError(error_msg)
                         else:
-                            raise HomeAssistantError(
-                                f"Unbekannter Fehler beim Senden des Befehls (Code: {error_type}, Details: {error_code}). "
-                                f"Bitte versuchen Sie es erneut oder starten Sie Home Assistant neu."
+                            error_msg = translate("error.unknown_error", lang).format(
+                                error_type=error_type, error_code=error_code
                             )
+                            raise HomeAssistantError(error_msg)
                 if result and isinstance(result, tuple) and len(result) == 2:
                     recent_mode, recent_state_bytes = result
                     _LOGGER.info("📥 EWneo switch %s: Received response - mode=%d, bytes=%s", 
@@ -851,6 +929,14 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                     from datetime import datetime
                     self._reachable = True
                     self._last_seen = datetime.now()
+                    
+                    # Dismiss any previous unreachable notification
+                    await self.hass.services.async_call(
+                        "persistent_notification",
+                        "dismiss",
+                        {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
+                        blocking=False,
+                    )
                         
                     # Update Home Assistant state
                     _LOGGER.debug("🟢 EWneo switch %s CH%d: State AFTER update: %s",
@@ -867,9 +953,11 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
     
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the EWneo switch on."""
+        lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+        
         # Check if transceiver is connected
         if not self.coordinator.transceiver.is_connected:
-            raise ServiceValidationError("RX11 nicht verbunden - Befehl kann nicht gesendet werden")
+            raise ServiceValidationError(translate("error.rx11_not_connected", lang))
         
         # Check for timer duration in kwargs
         timer_duration = kwargs.get("timer_duration")
@@ -877,21 +965,25 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         if not success:
             # Get device name from device_info, use entity name as fallback
             device_name = self.device_info.get("name") if self.device_info else None
-            friendly_name = device_name or self._attr_name or self.name or f"Gerät {self._serial_number[-8:]}"
-            raise ServiceValidationError(f"Befehl an '{friendly_name}' fehlgeschlagen - Gerät antwortet nicht")
+            device_prefix = translate("device.device_prefix", lang)
+            friendly_name = device_name or self.name or f"{device_prefix} {self._serial_number[-8:]}"
+            raise ServiceValidationError(translate("error.command_failed", lang).format(device=friendly_name))
     
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the EWneo switch off."""
+        lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+        
         # Check if transceiver is connected
         if not self.coordinator.transceiver.is_connected:
-            raise ServiceValidationError("RX11 nicht verbunden - Befehl kann nicht gesendet werden")
+            raise ServiceValidationError(translate("error.rx11_not_connected", lang))
         
         success = await self._send_ewb_change_state(False)
         if not success:
             # Get device name from device_info, use entity name as fallback
             device_name = self.device_info.get("name") if self.device_info else None
-            friendly_name = device_name or self._attr_name or self.name or f"Gerät {self._serial_number[-8:]}"
-            raise ServiceValidationError(f"Befehl an '{friendly_name}' fehlgeschlagen - Gerät antwortet nicht")
+            device_prefix = translate("device.device_prefix", lang)
+            friendly_name = device_name or self.name or f"{device_prefix} {self._serial_number[-8:]}"
+            raise ServiceValidationError(translate("error.command_failed", lang).format(device=friendly_name))
     
 
 
@@ -982,27 +1074,46 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
         # This preserves the original entity name from entity_specs.py
         self._attr_name = entity_spec.get("name", device_info.get('name', serial_number))
         
-        # Set device-specific icon
-        self._attr_icon = entity_spec.get("icon") or device_config.get("icon", "mdi:toggle-switch-variant")
+        # Store base icon and state-specific icons from entity_spec
+        self._base_icon = entity_spec.get("icon") or device_config.get("icon", "mdi:toggle-switch-variant")
+        self._icon_on = entity_spec.get("icon_on", "mdi:light-switch")
+        self._icon_off = entity_spec.get("icon_off", "mdi:light-switch-off")
+        
+        # Remove _attr_icon set by parent class so dynamic icon property works
+        if hasattr(self, '_attr_icon'):
+            del self._attr_icon
+        
+        # Assumed state: If True, HA shows action buttons instead of toggle
+        self._assumed_state = entity_spec.get("assumed_state", not self._is_heating_cooling)
+
+    @property
+    def assumed_state(self) -> bool:
+        """Return True to always show action buttons instead of toggle."""
+        return self._assumed_state
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on current state."""
+        if self._is_on is None:
+            return self._base_icon
+        elif self._is_on:
+            return self._icon_on
+        else:
+            return self._icon_off
 
     @property
     def is_on(self) -> bool | None:
-        """Return switch state."""
-        if self._is_heating_cooling:
-            # Return actual state for heating/cooling receivers
-            return self._is_on
-        else:
-            # STATELESS: Return None for other types to allow repeated actions
-            return None
+        """Return switch state. Shows last action even for assumed_state switches."""
+        return self._is_on
 
     @property
     def available(self) -> bool:
-        """Return if entity is available - follows RX11 connection status."""
-        return (
-            self.coordinator.last_update_success 
-            and self.coordinator.transceiver 
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available - follows RX11 connection status.
+        
+        Easywave receiver switches inherit the RX11 transceiver connection status 
+        via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to Home Assistant."""
@@ -1234,7 +1345,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                         # Update persistent state for heating/cooling
                         self._update_persistent_state(True, "A")
                     else:
-                        # Stateless update for other types
+                        # Update state to show last action (even for assumed_state switches)
+                        self._is_on = True
                         self.async_write_ha_state()
                     
         except Exception:
@@ -1267,7 +1379,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                         # Update persistent state for heating/cooling
                         self._update_persistent_state(False, "B")
                     else:
-                        # Stateless update for other types
+                        # Update state to show last action (even for assumed_state switches)
+                        self._is_on = False
                         self.async_write_ha_state()
         except Exception:
             _LOGGER.exception("Error turning off configured switch %s", self._attr_unique_id)
@@ -1329,7 +1442,7 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
         # Schedule repeat timer
         self._schedule_repeat_timer()
         
-        _LOGGER.info("🔄 EW-Receiver heating/cooling %s state updated: %s → %s (Code: %s)", 
+        _LOGGER.info("🔄 Easywave Receiver heating/cooling %s state updated: %s → %s (Code: %s)", 
                     self._serial_number, 
                     "ON" if old_state else "OFF",
                     "ON" if self._is_on else "OFF",
@@ -1361,7 +1474,7 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                 if not self._last_command_code or not self.hass or not self.hass.is_running:
                     return
                 
-                _LOGGER.info("🔁 Repeating last command for EW-Receiver heating/cooling %s: Code %s (%s)", 
+                _LOGGER.info("🔁 Repeating last command for Easywave Receiver heating/cooling %s: Code %s (%s)", 
                            self._serial_number, self._last_command_code,
                            "ON" if self._last_command_code == "A" else "OFF")
                 
@@ -1391,33 +1504,33 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                         )
                         
                         if success:
-                            _LOGGER.info("✅ Successfully repeated command for EW-Receiver heating/cooling %s", 
+                            _LOGGER.info("✅ Successfully repeated command for Easywave Receiver heating/cooling %s", 
                                        self._serial_number)
                             # Schedule next repeat
                             self._schedule_repeat_timer()
                         else:
-                            _LOGGER.warning("❌ Failed to repeat command for EW-Receiver heating/cooling %s", 
+                            _LOGGER.warning("❌ Failed to repeat command for Easywave Receiver heating/cooling %s", 
                                           self._serial_number)
                             
             except asyncio.CancelledError:
-                _LOGGER.debug("⏰ Repeat timer cancelled for EW-Receiver heating/cooling %s", 
+                _LOGGER.debug("⏰ Repeat timer cancelled for Easywave Receiver heating/cooling %s", 
                             self._serial_number)
                 raise
             except Exception as e:
-                _LOGGER.error("Error repeating command for EW-Receiver heating/cooling %s: %s", 
+                _LOGGER.error("Error repeating command for Easywave Receiver heating/cooling %s: %s", 
                             self._serial_number, e)
         
         # Create and store the timer task
         self._repeat_timer = self.hass.async_create_task(_repeat_last_command())
-        _LOGGER.debug("⏰ Scheduled repeat timer for EW-Receiver heating/cooling %s (4 hours)", 
+        _LOGGER.debug("⏰ Scheduled repeat timer for Easywave Receiver heating/cooling %s (4 hours)", 
                      self._serial_number)
 
     def _cancel_repeat_timer(self) -> None:
         """Cancel the repeat timer."""
         if self._repeat_timer and not self._repeat_timer.done():
             self._repeat_timer.cancel()
-            _LOGGER.debug("⏰ Cancelled repeat timer for EW-Receiver heating/cooling %s", self._serial_number)
-        self._repeat_timer = FileNotFoundError
+            _LOGGER.debug("⏰ Cancelled repeat timer for Easywave Receiver heating/cooling %s", self._serial_number)
+        self._repeat_timer = None
 
 
 class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
@@ -1492,12 +1605,12 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
     
     @property
     def available(self) -> bool:
-        """Return if entity is available - follows RX11 connection status."""
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.transceiver 
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available - follows RX11 connection status.
+        
+        Transmitter button switches inherit the RX11 transceiver connection status 
+        via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     @property
     def icon(self) -> str:
@@ -1519,7 +1632,7 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
 
 
 class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
-    """Switch entity for EW-Transmitters in 2-button modes (Auf/Zu).
+    """Switch entity for Easywave Transmitters in 2-button modes (Auf/Zu).
 
     Maintains persistent state mapped from button events.
     """
@@ -1534,10 +1647,11 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
         super().__init__(coordinator, serial_number, device_info)
         self._entity_spec = entity_spec
         self._button_map = entity_spec.get("button_map", {})
-        self._options = entity_spec.get("options", ["Auf", "Zu"])
+        # Use untranslated state keys - HA translates these via translations/*.json
+        self._options = entity_spec.get("options", ["up", "down"])
         self._state_key = entity_spec.get("state_key", "transmitter_state")
-        self._on_label = entity_spec.get("on_label", self._options[0])
-        self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "Aus")
+        self._on_label = entity_spec.get("on_label", self._options[0] if self._options else "up")
+        self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "down")
 
         self._attr_name = entity_spec.get("name", f"Transmitter {serial_number} State")
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state")
@@ -1572,7 +1686,9 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
             if event_button is None:
                 button_name = event.data.get("button_name") or event.data.get("subtype") or ""
                 normalized_name = button_name.strip()
-                if normalized_name.lower().startswith("taste "):
+                # Support both German and English button labels
+                name_lower = normalized_name.lower()
+                if name_lower.startswith("taste ") or name_lower.startswith("button "):
                     normalized_name = normalized_name.split()[-1]
                 name_map = {"A": 0, "B": 1, "C": 2, "D": 3}
                 if normalized_name in name_map:
@@ -1626,12 +1742,12 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available - follows RX11 connection status."""
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.transceiver
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available - follows RX11 connection status.
+        
+        Transmitter state switches inherit the RX11 transceiver connection status 
+        via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     async def async_turn_on(self, **kwargs) -> None:
         self._current_state = self._on_label
@@ -1728,19 +1844,24 @@ class EldatSwitch(EldatEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        # Entity is available if coordinator is running AND transceiver is connected
-        return (
-            self._available 
-            and self.coordinator.last_update_success 
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available.
+        
+        Eldat switches inherit the RX11 transceiver connection status via via_device 
+        linkage. Additionally, _available tracks device-specific reachability.
+        """
+        # Base: RX11 must be connected (inherited from base)
+        if not self._is_rx11_connected():
+            return False
+        # Device-specific: check if device is reachable
+        return self._available
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         try:
+            lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+            
             # Check if transceiver is connected
             if not self.coordinator.transceiver.is_connected:
-                raise ServiceValidationError("RX11 nicht verbunden - Befehl kann nicht gesendet werden")
+                raise ServiceValidationError(translate("error.rx11_not_connected", lang))
             
             command = bytes([0x01, self._channel, 0xFF])
             success = await self.coordinator.send_command(self._serial_number, command)
@@ -1752,19 +1873,23 @@ class EldatSwitch(EldatEntity, SwitchEntity):
                     # Stateless update for other types
                     self.async_write_ha_state()
             else:
-                device_name = self._device_info.get("name", f"Gerät {self._serial_number[-8:]}")
-                raise ServiceValidationError(f"{device_name}: RX11 antwortet nicht")
+                device_prefix = translate("device.device_prefix", lang)
+                device_name = self._device_info.get("name") or f"{device_prefix} {self._serial_number[-8:]}"
+                raise ServiceValidationError(translate("error.device_not_responding", lang).format(device=device_name))
         except HomeAssistantError:
             raise
         except Exception as e:
             _LOGGER.exception("Error turning on switch %s channel %d", self._serial_number, self._channel)
-            raise ServiceValidationError(f"Fehler beim Einschalten: {str(e)}")
+            lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+            raise ServiceValidationError(translate("error.turn_on_failed", lang).format(error=str(e)))
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         try:
+            lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+            
             # Check if transceiver is connected
             if not self.coordinator.transceiver.is_connected:
-                raise ServiceValidationError("RX11 nicht verbunden - Befehl kann nicht gesendet werden")
+                raise ServiceValidationError(translate("error.rx11_not_connected", lang))
             
             command = bytes([0x01, self._channel, 0x00])
             success = await self.coordinator.send_command(self._serial_number, command)
@@ -1776,13 +1901,15 @@ class EldatSwitch(EldatEntity, SwitchEntity):
                     # Stateless update for other types
                     self.async_write_ha_state()
             else:
-                device_name = self._device_info.get("name", f"Gerät {self._serial_number[-8:]}")
-                raise ServiceValidationError(f"{device_name}: RX11 antwortet nicht")
+                device_prefix = translate("device.device_prefix", lang)
+                device_name = self._device_info.get("name") or f"{device_prefix} {self._serial_number[-8:]}"
+                raise ServiceValidationError(translate("error.device_not_responding", lang).format(device=device_name))
         except HomeAssistantError:
             raise
         except Exception as e:
             _LOGGER.exception("Error turning off switch %s channel %d", self._serial_number, self._channel)
-            raise ServiceValidationError(f"Fehler beim Ausschalten: {str(e)}")
+            lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+            raise ServiceValidationError(translate("error.turn_off_failed", lang).format(error=str(e)))
 
     def _update_persistent_state(self, is_on: bool, command_code: str) -> None:
         """Update persistent state and schedule repeat timer for heating/cooling receivers."""
@@ -1807,7 +1934,7 @@ class EldatSwitch(EldatEntity, SwitchEntity):
         # Schedule repeat timer
         self._schedule_repeat_timer()
         
-        _LOGGER.info("🔄 EW-Receiver heating/cooling %s state updated: %s → %s (Code: %s)", 
+        _LOGGER.info("🔄 Easywave Receiver heating/cooling %s state updated: %s → %s (Code: %s)", 
                     self._serial_number, 
                     "ON" if old_state else "OFF",
                     "ON" if self._is_on else "OFF",
@@ -1828,7 +1955,7 @@ class EldatSwitch(EldatEntity, SwitchEntity):
                     await asyncio.sleep(self._repeat_interval)
                     
                     if self._last_command_code:
-                        _LOGGER.info("🔁 Repeating last command for EW-Receiver heating/cooling %s: Code %s (%s)", 
+                        _LOGGER.info("🔁 Repeating last command for Easywave Receiver heating/cooling %s: Code %s (%s)", 
                                    self._serial_number, self._last_command_code,
                                    "ON" if self._last_command_code == "A" else "OFF")
                         
@@ -1841,28 +1968,28 @@ class EldatSwitch(EldatEntity, SwitchEntity):
                         )
                         
                         if success:
-                            _LOGGER.info("✅ Successfully repeated command for EW-Receiver heating/cooling %s", 
+                            _LOGGER.info("✅ Successfully repeated command for Easywave Receiver heating/cooling %s", 
                                        self._serial_number)
                             # Schedule next repeat
                             self._schedule_repeat_timer()
                         else:
-                            _LOGGER.warning("❌ Failed to repeat command for EW-Receiver heating/cooling %s", 
+                            _LOGGER.warning("❌ Failed to repeat command for Easywave Receiver heating/cooling %s", 
                                           self._serial_number)
                             
                 except Exception as e:
-                    _LOGGER.error("Error repeating command for EW-Receiver heating/cooling %s: %s", 
+                    _LOGGER.error("Error repeating command for Easywave Receiver heating/cooling %s: %s", 
                                 self._serial_number, e)
             
             # Create and store the timer task
             self._repeat_timer = self.hass.async_create_task(_repeat_last_command())
-            _LOGGER.debug("⏰ Scheduled repeat timer for EW-Receiver heating/cooling %s (4 hours)", 
+            _LOGGER.debug("⏰ Scheduled repeat timer for Easywave Receiver heating/cooling %s (4 hours)", 
                          self._serial_number)
 
     def _cancel_repeat_timer(self) -> None:
         """Cancel the repeat timer."""
         if self._repeat_timer and not self._repeat_timer.done():
             self._repeat_timer.cancel()
-            _LOGGER.debug("⏰ Cancelled repeat timer for EW-Receiver heating/cooling %s", self._serial_number)
+            _LOGGER.debug("⏰ Cancelled repeat timer for Easywave Receiver heating/cooling %s", self._serial_number)
         self._repeat_timer = None
 
     @property

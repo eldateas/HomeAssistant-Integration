@@ -18,6 +18,7 @@ from ....base import (
     ButtonBehaviorMixin,
     EntitySpecsMixin,
 )
+from .....translations import get_button_label, t_battery_level
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
             specs["binary_sensor"].append(self._create_base_entity_spec(
                 "binary_sensor",
                 channel=button_idx,
-                name=f"Taste {button_label}",
+                name=get_button_label(button_idx),  # "Taste A" / "Button A"
                 device_class="button",
                 icon="mdi:gesture-tap-button"
             ))
@@ -145,7 +146,7 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         # Create battery status binary sensor
         battery_warning_spec = self._create_base_entity_spec(
             "binary_sensor",
-            name="Batteriestand",
+            name=t_battery_level(),  # "Batteriestand" / "Battery Level"
             device_class="battery",
             icon="mdi:battery"
         )

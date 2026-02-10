@@ -1,0 +1,1051 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "transmitter_state_cover": {
+        "name": "État",
+        "state": {
+          "on": "Ouvert",
+          "off": "Fermé"
+        }
+      },
+      "transmitter_state_switch": {
+        "name": "État",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé"
+        }
+      },
+      "state_ab": {
+        "name": "État A/B",
+        "state": {
+          "on": "Ouvert",
+          "off": "Fermé"
+        }
+      },
+      "state_cd": {
+        "name": "État C/D",
+        "state": {
+          "on": "Ouvert",
+          "off": "Fermé"
+        }
+      },
+      "button_a": {
+        "name": "Bouton A"
+      },
+      "button_b": {
+        "name": "Bouton B"
+      },
+      "button_c": {
+        "name": "Bouton C"
+      },
+      "button_d": {
+        "name": "Bouton D"
+      },
+      "battery_warning": {
+        "name": "Avertissement batterie"
+      }
+    },
+    "sensor": {
+      "gateway_status": {
+        "state": {
+          "connected": "Connecté",
+          "disconnected": "Déconnecté",
+          "connecting": "Connexion...",
+          "error": "Erreur",
+          "hardware_error": "Erreur matérielle",
+          "not_configured": "Non configuré"
+        }
+      },
+      "transmitter_state": {
+        "name": "État",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé",
+          "up": "Monter",
+          "down": "Descendre",
+          "stop": "Stop",
+          "a": "État A",
+          "b": "État B",
+          "c": "État C",
+          "d": "État D"
+        }
+      },
+      "last_button": {
+        "name": "État",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé",
+          "up": "Monter",
+          "down": "Descendre",
+          "stop": "Stop",
+          "a": "État A",
+          "b": "État B",
+          "c": "État C",
+          "d": "État D"
+        }
+      },
+      "state_1": {
+        "name": "État",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé",
+          "up": "Monter",
+          "down": "Descendre"
+        }
+      },
+      "state_2": {
+        "name": "État C/D",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé",
+          "up": "Monter",
+          "down": "Descendre"
+        }
+      },
+      "state_ab": {
+        "name": "État A/B",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé",
+          "up": "Monter",
+          "down": "Descendre"
+        }
+      },
+      "state_cd": {
+        "name": "État C/D",
+        "state": {
+          "on": "Activé",
+          "off": "Désactivé",
+          "up": "Monter",
+          "down": "Descendre"
+        }
+      },
+      "temperature": {
+        "name": "Température"
+      },
+      "humidity": {
+        "name": "Humidité"
+      },
+      "wind_speed": {
+        "name": "Vitesse du vent"
+      },
+      "brightness": {
+        "name": "Luminosité"
+      },
+      "battery": {
+        "name": "Batterie"
+      }
+    },
+    "button": {
+      "state_a": {
+        "name": "État A"
+      },
+      "state_b": {
+        "name": "État B"
+      },
+      "state_c": {
+        "name": "État C"
+      },
+      "state_d": {
+        "name": "État D"
+      },
+      "toggle": {
+        "name": "Basculer"
+      },
+      "on": {
+        "name": "Activé"
+      },
+      "off": {
+        "name": "Désactivé"
+      },
+      "up": {
+        "name": "Monter"
+      },
+      "down": {
+        "name": "Descendre"
+      },
+      "stop": {
+        "name": "Stop"
+      }
+    },
+    "switch": {
+      "channel": {
+        "name": "Canal {channel}"
+      },
+      "channel_1": {
+        "name": "Canal 1"
+      },
+      "channel_2": {
+        "name": "Canal 2"
+      },
+      "channel_3": {
+        "name": "Canal 3"
+      },
+      "channel_4": {
+        "name": "Canal 4"
+      }
+    },
+    "cover": {
+      "channel": {
+        "name": "Canal {channel}",
+        "state": {
+          "open": "Ouvert",
+          "opening": "Ouverture",
+          "closed": "Fermé",
+          "closing": "Fermeture",
+          "stopped": "Arrêté"
+        }
+      },
+      "channel_1": {
+        "name": "Canal 1"
+      },
+      "channel_2": {
+        "name": "Canal 2"
+      },
+      "channel_3": {
+        "name": "Canal 3"
+      },
+      "channel_4": {
+        "name": "Canal 4"
+      }
+    },
+    "light": {
+      "channel": {
+        "name": "Canal {channel}"
+      },
+      "channel_1": {
+        "name": "Canal 1"
+      },
+      "channel_2": {
+        "name": "Canal 2"
+      },
+      "channel_3": {
+        "name": "Canal 3"
+      },
+      "channel_4": {
+        "name": "Canal 4"
+      }
+    }
+  },
+  "config": {
+    "step": {
+      "_comment_initial_setup": "===== INITIAL SETUP FLOW (Configuration du transceiver) =====",
+      "user": {
+        "title": "Configurer le transceiver USB RX11",
+        "description": "{found_devices} appareils ELDAT trouvés : {device_list}.\n\n{status}\n\nSélectionnez un appareil dans la liste ou utilisez d'autres options.",
+        "data": {
+          "device_path": "Appareil USB",
+          "device_name": "Nom de l'intégration"
+        },
+        "data_description": {
+          "device_path": "Sélectionnez un appareil disponible ou saisie manuelle",
+          "device_name": "Nom d'affichage pour l'intégration"
+        }
+      },
+      "rx11_setup": {
+        "title": "Configurer le transceiver USB RX11",
+        "description": "Appareil détecté :\n**{device_name}**\n\nConnexion : {device_path}"
+      },
+      "device": {
+        "title": "Ajouter un nouvel appareil ELDAT",
+        "description": "Ajoutez un nouvel appareil ELDAT via le transceiver RX11."
+      },
+      "_comment_device_selection": "===== DEVICE TYPE SELECTION FLOW (Sélection du type d'appareil) =====",
+      "device_type_select": {
+        "title": "Sélection de l'appareil",
+        "description": "Quel appareil souhaitez-vous ajouter ?",
+        "menu_options": {
+          "device_transmitter_config": "⚪ Émetteur Easywave",
+          "device_receiver": "⚪ Récepteur Easywave",
+          "device_sensor": "⚪ Capteur Easywave neo",
+          "device_ewneo_receiver": "⚪ Récepteur Easywave neo"
+        }
+      },
+      "device_cancel": {
+        "title": "Annuler"
+      },
+      "_comment_transmitter_flow": "===== EW-TRANSMITTER LEARNING FLOW (Processus d'apprentissage de l'émetteur Easywave) =====",
+      "device_transmitter": {
+        "title": "Apprendre l'émetteur Easywave",
+        "description": "Appuyez sur n'importe quel bouton de l'émetteur Easywave. En attente de télégramme...",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_transmitter_config": {
+        "title": "Mode de fonctionnement",
+        "description": "Quel mode de fonctionnement souhaitez-vous utiliser ?",
+        "menu_options": {
+          "device_transmitter_1button": "⚪ Commande 1 bouton",
+          "device_transmitter_2button": "⚪ Commande 2 boutons",
+          "device_transmitter_3button": "⚪ Commande 3 boutons",
+          "device_type_select": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_grouping": {
+        "title": "Fonctionnement",
+        "description": "Les boutons doivent-ils être créés comme entités séparées ou\ngroupés comme états dans une seule entité ?",
+        "menu_options": {
+          "device_transmitter_grouping_single": "⚪ Commuter individuellement",
+          "device_transmitter_grouping_group": "⚪ Commuter en groupe",
+          "device_transmitter_config": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_switch_mode": {
+        "title": "Comportement",
+        "description": "L'état du commutateur doit-il se réinitialiser après activation\nou rester permanent ?",
+        "menu_options": {
+          "device_transmitter_switch_impulse": "⚪ Impulsion",
+          "device_transmitter_switch_permanent": "⚪ Permanent",
+          "device_transmitter_grouping": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_button_count": {
+        "title": "Nombre de boutons",
+        "description": "Veuillez indiquer le nombre de boutons disponibles.",
+        "menu_options": {
+          "device_transmitter_buttons_1": "⚪ 1 Bouton",
+          "device_transmitter_buttons_2": "⚪ 2 Boutons",
+          "device_transmitter_buttons_3": "⚪ 3 Boutons",
+          "device_transmitter_buttons_4": "⚪ 4 Boutons",
+          "device_transmitter_switch_mode": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_2button_usage": {
+        "title": "États",
+        "description": "Quels états l'émetteur doit-il avoir dans Home Assistant ?",
+        "menu_options": {
+          "device_transmitter_2button_switch": "⚪ ON/OFF",
+          "device_transmitter_2button_cover": "⚪ MONTER/DESCENDRE",
+          "device_transmitter_config": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_2button_button_count": {
+        "title": "Nombre de boutons",
+        "description": "Veuillez indiquer le nombre de boutons disponibles.",
+        "menu_options": {
+          "device_transmitter_2button_2": "⚪ 2 Boutons",
+          "device_transmitter_2button_4": "⚪ 4 Boutons",
+          "device_transmitter_2button_usage": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_description": {
+        "title": "Apprendre l'émetteur",
+        "description": "L'émetteur sera appris avec les paramètres suivants :\n\n• **Mode de fonctionnement :** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Nombre de boutons :** {button_count_text}\n\nVeuillez appuyer sur un bouton de l'émetteur sélectionné à l'étape suivante.",
+        "menu_options": {
+          "device_transmitter_learn_start": "▶️ Apprendre l'émetteur",
+          "device_transmitter_config": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_learn_progress": {
+        "title": "Appuyez sur le bouton de l'émetteur !"
+      },
+      "device_transmitter_learn_timeout": {
+        "title": "Délai dépassé",
+        "description": "Aucun signal radio reçu !\nRéduisez la distance entre l'émetteur et le serveur et répétez le processus.",
+        "menu_options": {
+          "device_transmitter_learn_start": "🔄 Apprendre l'émetteur",
+          "device_transmitter_description": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_confirm_telegram": {
+        "title": "Télégramme reçu",
+        "description": "Un télégramme Easywave a été reçu. Venez-vous d'appuyer sur un bouton de l'émetteur souhaité ?",
+        "menu_options": {
+          "device_transmitter_verify": "✅ OUI, Créer l'appareil",
+          "device_transmitter_learn_start": "🔄 NON, Apprendre un autre émetteur"
+        }
+      },
+      "device_transmitter_already_exists": {
+        "title": "L'appareil existe déjà",
+        "description": "**Cet émetteur Easywave a déjà été appris !**\n\nLe code de l'émetteur est déjà utilisé comme **{device_name}** dans Home Assistant.\nVeuillez répéter le processus et utiliser un émetteur qui n'a pas encore été appris.",
+        "menu_options": {
+          "device_transmitter_learn_start": "🔄 Apprendre l'émetteur",
+          "device_transmitter_description": "⬅️ Retour"
+        }
+      },
+      "device_transmitter_verify": {
+        "title": "Apprentissage réussi",
+        "description": "L'émetteur a été appris avec succès !\n\nAttribuez un nom au nouvel appareil :",
+        "data": {
+          "device_name": "Nom de l'appareil",
+          "area_id": "Zone (optionnel)"
+        }
+      },
+      "_comment_sensor_flow": "===== EWNEO-SENSOR LEARNING FLOW (Processus d'apprentissage du capteur Easywave neo) =====",
+      "device_sensor": {
+        "title": "Apprendre les capteurs Easywave neo",
+        "description": "Déclenchez le capteur Easywave neo ou attendez une mesure automatique. En attente de télégramme...",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_sensor_description": {
+        "title": "Apprendre le capteur",
+        "description": "Home Assistant détecte automatiquement quelles données de mesure sont collectées par le capteur.\n\nVeuillez appuyer sur le bouton d'apprentissage à l'arrière du capteur à l'étape suivante.",
+        "menu_options": {
+          "device_sensor_learn_start": "▶️ Apprendre le capteur",
+          "device_type_select": "⬅️ Retour"
+        }
+      },
+      "device_sensor_learn_progress": {
+        "title": "Appuyez sur le bouton d'apprentissage !",
+        "progress_action": {
+          "waiting_for_sensor_telegram": "🔄 En attente du signal d'apprentissage... Appuyez sur le bouton d'apprentissage du capteur Easywave neo MAINTENANT !"
+        }
+      },
+      "device_sensor_learn_timeout": {
+        "title": "Délai dépassé",
+        "description": "Aucun signal radio reçu !\nRéduisez la distance entre le capteur et le serveur et répétez le processus.",
+        "menu_options": {
+          "device_sensor_learn_start": "🔄 Apprendre le capteur"
+        }
+      },
+      "device_sensor_verify": {
+        "title": "Apprentissage réussi",
+        "description": "Le capteur a été appris avec succès !\n\nCapteurs détectés :\n{sensor_list}\n\nAttribuez un nom au nouvel appareil :",
+        "data": {
+          "device_name": "Nom de l'appareil",
+          "area_id": "Zone (optionnel)"
+        }
+      },
+      "device_sensor_already_exists": {
+        "title": "L'appareil existe déjà",
+        "description": "**Ce capteur Easywave neo a déjà été appris !**\n\nLe capteur est déjà utilisé comme **{device_name}** dans Home Assistant.\nVeuillez répéter le processus et utiliser un capteur qui n'a pas encore été appris.",
+        "menu_options": {
+          "device_sensor_learn_start": "🔄 Apprendre le capteur"
+        }
+      },
+      "_comment_ewneo_receiver_flow": "===== EWNEO-RECEIVER LEARNING FLOW (Processus d'apprentissage du récepteur Easywave neo - Bidirectionnel) =====",
+      "device_ewneo_receiver_learn_cancel": {
+        "title": "Retour"
+      },
+      "device_ewneo_receiver_back": {
+        "title": "Retour"
+      },
+      "device_ewneo_receiver_learn_timeout": {
+        "title": "Délai dépassé",
+        "description": "⏰ **Aucune réponse reçue**\n\nLe système n'a pas reçu de réponse valide. Vous pouvez réessayer.",
+        "menu_options": {
+          "device_ewneo_receiver_programming_mode": "🔄 Réessayer",
+          "device_ewneo_receiver_back": "⬅️ Retour"
+        }
+      },
+      "device_ewneo_receiver_already_exists": {
+        "title": "L'appareil existe déjà",
+        "description": "**Ce récepteur Easywave neo a déjà été appris !**\n\nLe récepteur est déjà utilisé comme **{device_name}** dans Home Assistant.\n\n🔄 **L'appareil a été mis à jour :**\n• Ancien index Easywave neo : {old_index}\n• Nouvel index Easywave neo : {new_index}\n\nVeuillez répéter le processus et utiliser un récepteur qui n'a pas encore été appris.",
+        "menu_options": {
+          "device_ewneo_receiver_programming_mode": "🔄 Apprendre le récepteur"
+        }
+      },
+      "device_ewneo_receiver_programming_mode": {
+        "title": "Apprendre le récepteur",
+        "description": "Veuillez mettre votre récepteur en mode de programmation pour n'importe quel mode de fonctionnement maintenant.\n\nVeuillez cliquer sur \"Suivant\" une fois que le récepteur est en mode de programmation.",
+        "menu_options": {
+          "device_ewneo_receiver_learn_start": "➡️ Suivant",
+          "device_ewneo_receiver_back": "⬅️ Retour"
+        }
+      },
+      "device_ewneo_receiver_verify": {
+        "title": "Apprentissage réussi",
+        "description": "✅ **Le récepteur a été appris avec succès !**\n\nAttribuez un nom au nouvel appareil :",
+        "data": {
+          "device_name": "Nom de l'appareil",
+          "area_id": "Zone (optionnel)"
+        }
+      },
+      "device_ewneo_receiver_complete": {
+        "title": "Récepteur Easywave neo créé avec succès"
+      },
+      "device_ewneo_receiver_learn_start": {
+        "title": "Démarrer l'apprentissage du récepteur Easywave neo"
+      },
+      "device_ewneo_receiver_learn_progress": {
+        "title": "Processus d'apprentissage du récepteur Easywave neo"
+      },
+      "device_ewneo_receiver_confirm_create": {
+        "title": "Créer l'appareil Easywave neo"
+      },
+      "device_ewneo_receiver_confirm_back": {
+        "title": "Retour"
+      },
+      "device_ewneo_receiver_confirm_legacy": {
+        "title": "Confirmer l'appareil Easywave neo (Legacy)"
+      },
+      "_comment_ew_receiver_flow": "===== EW-RECEIVER CONFIGURATION FLOW (Configuration du récepteur Easywave - Unidirectionnel) =====",
+      "device_receiver_type": {
+        "title": "Mode de fonctionnement",
+        "description": "Quel mode de fonctionnement souhaitez-vous utiliser ?",
+        "menu_options": {
+          "device_receiver_mode_impulse": "⚪ IMPULSION (1 bouton)",
+          "device_receiver_mode_on_off": "⚪ ON/OFF (2 boutons)",
+          "device_receiver_mode_up_down": "⚪ MONTER/DESCENDRE (2 boutons)",
+          "device_receiver_mode_up_stop_down": "⚪ MONTER/STOP/DESCENDRE (3 boutons)",
+          "device_receiver_mode_heating": "⚪ ON/OFF (Chauffage)",
+          "device_receiver_mode_universal": "⚪ UNIVERSEL (4 boutons)",
+          "device_type_select": "⬅️ Retour"
+        }
+      },
+      "device_receiver_description": {
+        "title": "Apprendre le récepteur",
+        "description": "Veuillez mettre votre récepteur en mode de programmation pour **{operating_mode}** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour savoir comment sélectionner le bon mode de programmation, veuillez consulter le manuel du récepteur.\n\nVeuillez cliquer sur \"Suivant\" une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Suivant",
+          "device_receiver_type": "⬅️ Retour"
+        }
+      },
+      "device_receiver_learn_start": {
+        "title": "Démarrer l'apprentissage du récepteur"
+      },
+      "device_receiver_confirm_learning": {
+        "title": "Confirmer l'apprentissage",
+        "description": "La LED du récepteur est-elle restée allumée pendant 4 secondes ou le processus d'apprentissage a-t-il été confirmé par le récepteur ? (voir manuel)",
+        "menu_options": {
+          "device_receiver_verify": "✅ Oui",
+          "device_receiver_description": "❌ Non"
+        }
+      },
+      "device_receiver_verify": {
+        "title": "Apprentissage réussi",
+        "description": "Home Assistant a été appris avec succès dans le récepteur !\n\nAssurez-vous que le mode de programmation du récepteur est terminé, la LED ne devrait plus clignoter.\n\nAttribuez un nom au nouvel appareil :",
+        "data": {
+          "device_name": "Nom de l'appareil",
+          "area_id": "Zone (optionnel) :"
+        }
+      },
+      "device_receiver_create": {
+        "title": "Créer le récepteur"
+      },
+      "device_receiver_confirm": {
+        "title": "Récepteur Easywave - Confirmation",
+        "description": "📥 **Configuration du récepteur Easywave - Étape 3/3**\n\n**📋 Configuration :**\n• Appareil : {device_name}\n• Numéro de série : {serial}\n• Index RX11 : {rx11_index}\n• Type : {receiver_kind}\n• Mode : {operating_mode}\n\n**🎛️ Boutons à créer :**\n{button_summary}\n\n**📡 Processus d'apprentissage :**\n\n**1.** {learn_instructions}\n**2.** Cliquez sur 'Créer et envoyer Code A'\n**3.** Le système envoie le Code A au récepteur\n**4.** L'appareil est créé dans Home Assistant\n\n💡 **Remarque :** Après confirmation, le récepteur sera automatiquement configuré et les entités de boutons seront créées.",
+        "menu_options": {
+          "device_receiver_create": "✅ Créer le récepteur",
+          "device_receiver_type": "⬅️ Retour"
+        },
+        "data": {
+          "action": "Action"
+        }
+      },
+      "device_receiver": {
+        "title": "Apprendre le récepteur Easywave",
+        "description": "Appuyez sur le bouton d'apprentissage du récepteur Easywave. En attente de télégramme...",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "_comment_device_confirmation": "===== DEVICE CONFIRMATION & FINALIZATION (Confirmation et finalisation de l'appareil) =====",
+      "device_confirm": {
+        "title": "Confirmer l'appareil",
+        "description": "{description}",
+        "data": {
+          "device_name": "Nom de l'appareil",
+          "action": "Action"
+        }
+      },
+      "device_confirm_create": {
+        "title": "Créer l'appareil"
+      },
+      "device_confirm_back": {
+        "title": "Retour"
+      },
+      "device_save": {
+        "title": "Enregistrer l'appareil"
+      },
+      "device_save_success": {
+        "title": "Création réussie",
+        "description": "L'appareil **{device_name}** est maintenant disponible et les entités ont été créées."
+      },
+      "ew_receiver_config": {
+        "title": "Configurer le récepteur Easywave",
+        "description": "Configurez le récepteur Easywave '{device_name}' (Index RX11 : {rx11_index}) :\n\n**Type de récepteur :** Détermine les fonctions disponibles\n**Mode de fonctionnement :** Nombre et type de boutons de commande",
+        "data": {
+          "receiver_kind": "Type de récepteur",
+          "operating_mode": "Mode de fonctionnement"
+        }
+      },
+      "ew_receiver_learn": {
+        "title": "Activer le mode d'apprentissage du récepteur Easywave",
+        "description": "**ÉTAPE 1 :** Mettre le récepteur en mode d'apprentissage\n\n{mode_instructions}\n\n**Procédure :**\n1. Appuyez sur le bouton d'apprentissage du récepteur Easywave\n2. La LED devrait clignoter (mode d'apprentissage actif)\n3. Confirmez avec 'OK' lorsque le mode d'apprentissage est actif\n\n**Configuration :**\n- Appareil : {device_name}\n- Index RX11 : {rx11_index}\n- Type : {receiver_kind}\n- Mode : {operating_mode}",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "ew_receiver_final_confirm": {
+        "title": "Créer le récepteur Easywave",
+        "description": "**CONFIRMATION FINALE :**\n\nLe récepteur Easywave est prêt à être créé :\n\n**Données de l'appareil :**\n- Nom : {device_name}\n- Index RX11 : {rx11_index}\n- Type : {receiver_kind}\n- Mode de fonctionnement : {operating_mode}\n- Nombre de boutons : {button_count}\n\n**Fonctions disponibles :**\n{button_summary}\n\n⚠️ **Important :** Le test de communication sera effectué lors de la création.",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "_comment_manual_advanced": "===== MANUAL & ADVANCED OPTIONS (Options manuelles et avancées) =====",
+      "show_all_devices": {
+        "title": "Afficher tous les appareils USB",
+        "description": "Trouvés : {total_devices} appareils USB ({eldat_devices} appareils ELDAT).\n\n{warning}",
+        "data": {
+          "device_path": "Sélectionner l'appareil USB",
+          "device_name": "Nom de l'intégration"
+        }
+      },
+      "manual": {
+        "title": "Saisir manuellement l'appareil USB ELDAT",
+        "description": "Entrez le chemin vers votre appareil USB ELDAT :\n\n{example_paths}",
+        "data": {
+          "device_path": "Chemin de l'appareil",
+          "device_name": "Nom de l'intégration"
+        },
+        "data_description": {
+          "device_path": "Chemin complet vers l'appareil USB",
+          "device_name": "Nom d'affichage pour l'intégration"
+        }
+      },
+      "usb_confirm": {
+        "title": "Confirmer l'appareil USB ELDAT",
+        "description": "Appareil USB ELDAT trouvé à {device_path}. Souhaitez-vous l'ajouter ?",
+        "data": {
+          "device_name": "Nom de l'intégration"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de se connecter à l'appareil. Vérifiez le chemin et les permissions.",
+      "invalid_device": "Appareil invalide ou non pris en charge",
+      "invalid_path": "Chemin d'appareil invalide saisi",
+      "learning_timeout": "Aucun appareil détecté dans le délai imparti.",
+      "learning_aborted": "Apprentissage annulé.",
+      "learning_failed": "L'apprentissage de l'appareil a échoué.",
+      "no_coordinator": "Aucun coordinateur disponible.",
+      "no_rx11_found": "Aucun transceiver USB RX11 trouvé. Veuillez connecter le RX11 à un port USB et cliquez sur 'Rechercher à nouveau'.",
+      "no_devices_found": "Aucun appareil USB ELDAT trouvé. Connectez votre appareil et actualisez la liste.",
+      "no_usb_devices_found": "Aucun appareil USB trouvé.",
+      "no_device_selected": "Aucun appareil sélectionné.",
+      "device_type_mismatch": "Le type d'appareil détecté ne correspond pas à la sélection.",
+      "measurement_without_learning": "Télégramme de mesure reçu, mais le capteur doit d'abord être appris. Appuyez sur le bouton d'apprentissage du capteur et réessayez.",
+      "invalid_sensor_telegram": "Télégramme de capteur invalide reçu. Veuillez appuyer sur le bouton d'apprentissage du capteur.",
+      "communication_failed": "Le test de communication avec le récepteur Easywave a échoué. Vérifiez si le récepteur est en mode d'apprentissage.",
+      "communication_error": "Une erreur s'est produite lors du test de communication.",
+      "no_available_ewneo_index": "Aucun index Easywave neo disponible trouvé. Les 128 index Easywave neo (0-127) sont occupés.",
+      "ewneo_learning_failed": "L'apprentissage du récepteur Easywave neo a échoué. Veuillez vérifier la connexion et réessayer.",
+      "ewneo_join_failed": "La connexion au récepteur Easywave neo a échoué. Assurez-vous que l'appareil est en mode d'apprentissage.",
+      "no_preparation_data": "Données de préparation pour le récepteur Easywave neo manquantes. Veuillez redémarrer le processus.",
+      "unknown": "Une erreur inconnue s'est produite"
+    },
+    "abort": {
+      "not_eldat_device": "Ce n'est pas un appareil ELDAT",
+      "already_configured": "L'appareil est déjà configuré",
+      "device_already_exists": "Cet émetteur a déjà été appris et ne peut pas être écrasé.",
+      "invalid_discovery_info": "Informations de découverte invalides",
+      "no_devices": "Aucun transceiver USB RX11 n'a été trouvé.\n\nPour utiliser des appareils avec l'intégration Easywave, connectez un transceiver USB RX11 et réessayez.",
+      "no_rx11_configured": "Aucun transceiver RX11 configuré. Veuillez d'abord configurer un RX11.",
+      "rx11_not_available": "Transceiver RX11 non disponible",
+      "yaml_not_supported": "La configuration YAML n'est pas prise en charge. Veuillez utiliser l'interface utilisateur.",
+      "user_cancelled": "",
+      "device_added": "L'appareil **{device_name}** est maintenant disponible et les entités ont été créées.",
+      "learning_timeout": "Délai dépassé lors de l'apprentissage de l'appareil. Veuillez réessayer.",
+      "no_available_ewneo_index": "Aucun index Easywave neo disponible trouvé. Les 128 index (0-127) sont déjà utilisés.",
+      "ewneo_learning_failed": "L'apprentissage du récepteur Easywave neo a échoué. Veuillez vérifier la connexion et réessayer.",
+      "ewneo_join_failed": "La connexion au récepteur Easywave neo a échoué. Assurez-vous que l'appareil est en mode d'apprentissage.",
+      "no_preparation_data": "Données de préparation pour le récepteur Easywave neo manquantes. Veuillez redémarrer le processus.",
+      "no_learned_device": "Aucun appareil appris disponible",
+      "no_coordinator": "Coordinateur non disponible",
+      "no_rx11_connection": "Aucune connexion RX11 disponible",
+      "rx11_not_connected": "Le transceiver USB RX11 n'est pas connecté.\n\nPour ajouter un nouvel appareil, le RX11 doit être accessible.\nVeuillez vérifier la connexion USB",
+      "no_gateway_serial": "Impossible de charger le numéro de série de la passerelle",
+      "transceiver_not_available": "Le transceiver USB RX11 n'est pas connecté.\n\nPour ajouter un nouvel appareil, le RX11 doit être accessible.\nVeuillez vérifier la connexion USB",
+      "no_available_receivers": "Aucun récepteur disponible trouvé",
+      "no_receiver_serial": "Impossible de charger le numéro de série du récepteur",
+      "receiver_load_failed": "Le récepteur n'a pas pu être chargé",
+      "device_creation_error": "Erreur lors de la création de l'appareil",
+      "unknown": "Une erreur inconnue s'est produite"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options ELDAT",
+        "description": "Configurez l'intégration ELDAT.\n\nAppareils trouvés : {device_count}\nMode d'apprentissage : {learning_status}",
+        "data": {
+          "scan_interval": "Intervalle de scan (secondes)",
+          "auto_discovery": "Découverte automatique des appareils",
+          "action": "Action",
+          "learning_duration": "Durée du mode d'apprentissage (secondes)"
+        },
+        "data_description": {
+          "scan_interval": "Fréquence de recherche de nouveaux appareils",
+          "auto_discovery": "Ajouter automatiquement des appareils via la réception de télégrammes"
+        }
+      }
+    }
+  },
+  "selector": {
+    "device_path": {
+      "manual_entry": "🔧 Saisir le chemin manuellement",
+      "refresh_list": "🔄 Actualiser la liste des appareils",
+      "show_all_devices": "📋 Afficher tous les appareils USB",
+      "back_to_main": "⬅️ Retour à la sélection principale"
+    },
+    "device_type": {
+      "ew_transmitter": "🎛️ Émetteur Easywave (Télécommande/Portable)",
+      "ew_sensor": "🌡️ Capteur Easywave neo (Température/Humidité/Météo)",
+      "ew_receiver": "📥 Récepteur Easywave (configurer sans apprentissage)",
+      "ewneo_receiver": "📥 Commutateur/Moteur Easywave neo (Actionneur de commutation Neo)"
+    },
+    "device_model": {
+      "ewneo_switch": "Commutateur Easywave neo",
+      "ewneo_dimmer": "Variateur Easywave neo",
+      "ewneo_motor": "Moteur Easywave neo",
+      "ewneo_dual_switch": "Commutateur 2 canaux Easywave neo",
+      "ewneo_quad_switch": "Commutateur 4 canaux Easywave neo",
+      "ewneo_dual_motor": "Moteur 2 canaux Easywave neo",
+      "ewneo_quad_motor": "Moteur 4 canaux Easywave neo",
+      "ew_transmitter": "Émetteur Easywave",
+      "ew_receiver": "Récepteur Easywave",
+      "ew_sensor": "Capteur Easywave neo"
+    },
+    "action": {
+      "start_learning": "▶️ Démarrer l'apprentissage",
+      "confirm": "✅ Confirmer",
+      "confirm_send_code_a": "✅ Confirmer et envoyer le Code A",
+      "create_device": "✅ Créer l'appareil",
+      "cancel": "❌ Annuler",
+      "proceed": "✅ Prêt - L'appareil est en mode d'apprentissage",
+      "wait": "⏳ Continuer à attendre",
+      "ok": "✅ OK",
+      "retry": "🔄 Réessayer",
+      "back": "⬅️ Retour",
+      "save": "💾 Enregistrer",
+      "enable_learning": "⚪ Activer le mode d'apprentissage",
+      "disable_learning": "🛑 Désactiver le mode d'apprentissage",
+      "manage_devices": "🔧 Gérer les appareils",
+      "remove_device": "🗑️ Supprimer l'appareil"
+    },
+    "entity_type": {
+      "switch": "🔌 Commutateur (On/Off)",
+      "light": "💡 Lumière (avec fonctionnalités avancées)",
+      "cover": "🏠 Volet roulant/Store"
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "button_press": "changé à l'état \"{subtype}\"",
+      "button_release": "{subtype} relâché",
+      "channel_on": "{subtype} passé à Activé",
+      "channel_off": "{subtype} passé à Désactivé"
+    },
+    "trigger_subtype": {
+      "A": "Bouton A",
+      "B": "Bouton B",
+      "C": "Bouton C",
+      "D": "Bouton D"
+    }
+  },
+  "services": {
+    "add_device": {
+      "name": "Ajouter un appareil",
+      "description": "Ajouter manuellement un appareil à l'intégration ELDAT",
+      "fields": {
+        "serial_number": {
+          "name": "Numéro de série",
+          "description": "Numéro de série de 16 octets de l'appareil (chaîne hexadécimale)"
+        },
+        "device_type": {
+          "name": "Type d'appareil",
+          "description": "Type de l'appareil"
+        },
+        "device_name": {
+          "name": "Nom de l'appareil",
+          "description": "Nom d'affichage pour l'appareil"
+        }
+      }
+    },
+    "remove_device": {
+      "name": "Supprimer un appareil",
+      "description": "Supprimer un appareil ajouté manuellement de l'intégration",
+      "fields": {
+        "serial_number": {
+          "name": "Numéro de série",
+          "description": "Numéro de série de l'appareil à supprimer"
+        },
+        "force": {
+          "name": "Forcer la suppression",
+          "description": "Forcer la suppression même si l'appareil a été découvert automatiquement"
+        }
+      }
+    },
+    "refresh_entity_specs": {
+      "name": "Actualiser les spécifications d'entité",
+      "description": "Recréer les spécifications d'entité pour un appareil (met à jour les icônes, fonctionnalités, etc.). Rechargez l'intégration après exécution.",
+      "fields": {
+        "serial_number": {
+          "name": "Numéro de série",
+          "description": "Numéro de série de l'appareil à mettre à jour"
+        }
+      }
+    },
+    "ew_receiver_toggle": {
+      "name": "Basculer (On/Off)",
+      "description": "Effectuer la fonction bascule d'un récepteur Easywave (commande à un bouton avec appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction bascule"
+        }
+      }
+    },
+    "ew_receiver_ein": {
+      "name": "Activé",
+      "description": "Activer le récepteur Easywave (commande à deux boutons avec appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Activé"
+        }
+      }
+    },
+    "ew_receiver_aus": {
+      "name": "Désactivé",
+      "description": "Désactiver le récepteur Easywave (commande à deux boutons avec appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Désactivé"
+        }
+      }
+    },
+    "ew_receiver_motor_auf": {
+      "name": "Moteur monter",
+      "description": "Monter le moteur/volet roulant (appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Monter"
+        }
+      }
+    },
+    "ew_receiver_motor_zu": {
+      "name": "Moteur descendre",
+      "description": "Descendre le moteur/volet roulant (appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Descendre"
+        }
+      }
+    },
+    "ew_receiver_motor_stopp": {
+      "name": "Moteur stop",
+      "description": "Arrêter le moteur/volet roulant (appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Stop"
+        }
+      }
+    },
+    "ew_receiver_dimmer_heller": {
+      "name": "Variateur plus lumineux",
+      "description": "Augmenter la luminosité du variateur (appui long pour fonction de variation continue)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Plus lumineux"
+        }
+      }
+    },
+    "ew_receiver_dimmer_dunkler": {
+      "name": "Variateur plus sombre",
+      "description": "Diminuer la luminosité du variateur (appui long pour fonction de variation continue)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Plus sombre"
+        }
+      }
+    },
+    "ew_receiver_hvac_heizen_kuehlen": {
+      "name": "CVC Chauffage/Climatisation",
+      "description": "Activer le mode chauffage/climatisation (sans appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction Chauffage/Climatisation"
+        }
+      }
+    },
+    "ew_receiver_hvac_aus": {
+      "name": "CVC désactivé",
+      "description": "Désactiver le chauffage/climatisation (sans appui long)",
+      "fields": {
+        "entity_id": {
+          "name": "Entité bouton",
+          "description": "L'entité bouton du récepteur Easywave pour la fonction CVC désactivé"
+        }
+      }
+    },
+    "device_remove": {
+      "name": "Supprimer l'appareil",
+      "description": "Supprimer complètement un appareil ELDAT de Home Assistant",
+      "fields": {
+        "device_id": {
+          "name": "ID de l'appareil",
+          "description": "L'ID d'appareil Home Assistant de l'appareil à supprimer"
+        },
+        "force": {
+          "name": "Forcer la suppression",
+          "description": "Supprimer également l'appareil s'il n'a pas été ajouté manuellement"
+        },
+        "blacklist": {
+          "name": "Ajouter à la liste noire",
+          "description": "Ajouter l'appareil à la liste noire après suppression"
+        }
+      }
+    },
+    "device_recreate": {
+      "name": "Recréer l'appareil",
+      "description": "Supprimer et recréer l'appareil (pour dépannage)",
+      "fields": {
+        "device_id": {
+          "name": "ID de l'appareil",
+          "description": "L'ID d'appareil Home Assistant de l'appareil à recréer"
+        }
+      }
+    },
+    "device_disable": {
+      "name": "Désactiver l'appareil",
+      "description": "Désactiver toutes les entités de cet appareil",
+      "fields": {
+        "device_id": {
+          "name": "ID de l'appareil",
+          "description": "L'ID d'appareil Home Assistant de l'appareil à désactiver"
+        }
+      }
+    },
+    "device_enable": {
+      "name": "Activer l'appareil",
+      "description": "Activer toutes les entités désactivées de cet appareil",
+      "fields": {
+        "device_id": {
+          "name": "ID de l'appareil",
+          "description": "L'ID d'appareil Home Assistant de l'appareil à activer"
+        }
+      }
+    },
+    "cleanup_ghost_devices": {
+      "name": "Nettoyer les appareils fantômes",
+      "description": "Rechercher et signaler les appareils inutilisés ou inactifs (appareils fantômes)"
+    },
+    "cleanup_orphaned_entities": {
+      "name": "Supprimer les entités orphelines",
+      "description": "Supprimer toutes les entités orphelines des appareils déjà supprimés de Home Assistant"
+    }
+  },
+  "common": {
+    "state": {
+      "on": "Activé",
+      "off": "Désactivé",
+      "up": "Monter",
+      "down": "Descendre",
+      "stop": "Stop",
+      "stopped": "Arrêté",
+      "open": "Ouvert",
+      "closed": "Fermé"
+    },
+    "status": {
+      "connected": "Connecté",
+      "disconnected": "Déconnecté",
+      "connecting": "Connexion...",
+      "error": "Erreur",
+      "hardware_error": "Erreur matérielle (USB déconnecté ?)",
+      "not_configured": "Non configuré"
+    },
+    "button": {
+      "a": "Bouton A",
+      "b": "Bouton B",
+      "c": "Bouton C",
+      "d": "Bouton D"
+    },
+    "state_label": {
+      "a": "État A",
+      "b": "État B",
+      "c": "État C",
+      "d": "État D"
+    },
+    "entity": {
+      "state": "État",
+      "state_ab": "État A/B",
+      "state_cd": "État C/D",
+      "battery": "Batterie",
+      "battery_warning": "Avertissement batterie",
+      "battery_level": "Niveau de batterie",
+      "channel": "Canal {channel}",
+      "temperature": "Température",
+      "humidity": "Humidité",
+      "wind_speed": "Vitesse du vent",
+      "brightness": "Luminosité"
+    },
+    "error": {
+      "communication_error": "Erreur de communication avec le récepteur {serial}. L'appareil ne répond pas correctement. Causes possibles : appareil éteint, trop éloigné ou interférences radio. Réessayez ou vérifiez l'emplacement de l'appareil.",
+      "unknown_error": "Erreur inconnue lors de l'envoi de la commande (Code : {error_type}, Détails : {error_code}). Veuillez réessayer ou redémarrer Home Assistant.",
+      "rx11_not_connected": "RX11 non connecté - impossible d'envoyer la commande",
+      "command_failed": "La commande vers '{device}' a échoué - l'appareil ne répond pas",
+      "device_not_responding": "{device} : RX11 ne répond pas",
+      "turn_on_failed": "Erreur lors de l'activation : {error}",
+      "turn_off_failed": "Erreur lors de la désactivation : {error}",
+      "cannot_delete_rx11_with_devices": "Le transceiver USB RX11 ne peut pas être supprimé tant que d'autres appareils sont configurés. Veuillez d'abord supprimer tous les appareils via le menu à trois points, ou supprimez l'intégration entière sous : Paramètres → Appareils & Services → Intégration ELDAT → Supprimer"
+    },
+    "notification": {
+      "rx11_disconnected_title": "⚠️ Connexion RX11 perdue",
+      "rx11_disconnected_message": "Le transceiver USB RX11 n'est pas connecté. Tentative de reconnexion automatique...",
+      "rx11_reconnected_title": "✅ Connexion RX11 rétablie",
+      "rx11_reconnected_message": "Le transceiver USB RX11 est à nouveau connecté. Tous les appareils sont disponibles."
+    },
+    "device": {
+      "unknown": "Inconnu",
+      "new_device": "Nouvel appareil",
+      "unknown_device": "Appareil inconnu",
+      "device_prefix": "Appareil",
+      "receiver": "Récepteur",
+      "transmitter": "Émetteur",
+      "sensor": "Capteur"
+    },
+    "ewneo": {
+      "switch": "Commutateur Easywave neo",
+      "dimmer": "Variateur Easywave neo",
+      "motor": "Moteur Easywave neo",
+      "dual_switch": "Commutateur 2 canaux Easywave neo",
+      "quad_switch": "Commutateur 4 canaux Easywave neo",
+      "dual_motor": "Moteur 2 canaux Easywave neo",
+      "quad_motor": "Moteur 4 canaux Easywave neo",
+      "sensor": "Capteur Easywave neo"
+    },
+    "sensor_type": {
+      "temperature": "Température",
+      "humidity": "Humidité",
+      "wind": "Vitesse du vent",
+      "rain": "Pluie",
+      "light": "Luminosité",
+      "pressure": "Pression atmosphérique"
+    },
+    "device_info": {
+      "easywave_transmitter": "Émetteur Easywave",
+      "easywave_receiver": "Récepteur Easywave",
+      "easywave_neo_sensor": "Capteur Easywave neo",
+      "easywave_neo_receiver": "Récepteur Easywave neo",
+      "operating_type_1": "Commande 1 bouton",
+      "operating_type_2": "Commande 2 boutons",
+      "operating_type_3": "Commande 3 boutons",
+      "grouping_single": "Individuel",
+      "grouping_group": "Groupe",
+      "switch_impulse": "Impulsion",
+      "switch_permanent": "Permanent",
+      "buttons": "{count} Boutons",
+      "receiver_impulse": "Impulsion",
+      "receiver_switch_2button": "ON/OFF",
+      "receiver_cover_2button": "MONTER/DESCENDRE",
+      "receiver_motor_3button": "MONTER/STOP/DESCENDRE",
+      "receiver_heating_cooling": "Chauffage",
+      "receiver_universal_4button": "Universel",
+      "channel_count": "{count} canaux"
+    }
+  }
+}

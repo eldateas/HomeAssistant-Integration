@@ -52,7 +52,7 @@ async def async_setup_entry(
         channels = device_info.get("channels", 1)
         
         # Create buttons based on device type
-        # NOTE: EW-Transmitters fire events instead of creating button entities
+        # NOTE: Easywave Transmitters fire events instead of creating button entities
         # Only create button entities for bidirectional/receiver devices
         if device_type in ["ewneo_transceiver", "ewneo_bidi_transmitter"]:
             # Multi-channel transceivers get individual button entities for sending commands
@@ -91,12 +91,18 @@ async def async_setup_entry(
         # NOTE: Remove buttons are no longer created - devices can be deleted via the
         # three-dot menu in the integration view (async_remove_config_entry_device)
         
-        # Check if this device has configured button entities
-        button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
+        # Get button entities from entity_specs (dynamically generated)
+        from .entity_specs import create_entity_specs_for_device
+        entity_specs = create_entity_specs_for_device(serial_number, device_info)
+        button_entities = entity_specs.get("button", [])
+        
+        # Fallback: Check if device_info has pre-stored entities
+        if not button_entities:
+            button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
         
         has_action_buttons = False  # Track if device has actual action buttons (not just remove)
         
-        # Skip button creation for heating/cooling EW-Receivers and EWneo devices
+        # Skip button creation for heating/cooling Easywave Receivers and EWneo devices
         # Motor receivers use configured button entities from entity specs
         device_type = device_info.get("type", "unknown")
         receiver_kind = device_info.get("receiver_kind", "switch")
@@ -127,14 +133,15 @@ async def async_setup_entry(
                     # Create standard button
                     button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                     buttons.append(button)
-                    _LOGGER.info("✅ Created EW-Receiver button: %s (%s)", entity_spec.get('name'), action)
+                    _LOGGER.info("✅ Created Easywave Receiver button: %s (%s)", 
+                                entity_spec.get('translation_key') or entity_spec.get('name'), action)
                 except Exception as e:
                     _LOGGER.error("Error creating configured button for %s: %s", serial_number, e)
         elif skip_action_buttons and is_neo_device:
             _LOGGER.debug("Skipped action button creation for EWneo device %s - uses switch entities only", 
                         serial_number)
         elif skip_action_buttons:
-            _LOGGER.debug("Skipped action button creation for EW-Receiver %s (heating/cooling) - using toggle switches instead", 
+            _LOGGER.debug("Skipped action button creation for Easywave Receiver %s (heating/cooling) - using toggle switches instead", 
                         serial_number)
         else:
             # Create additional legacy button entities for bidirectional device types
@@ -182,14 +189,14 @@ async def async_setup_entry(
                     _LOGGER.debug("Skipping device %s - action button entities already created during initial setup", serial_number)
                     return
                 else:
-                    # For EW-Receivers, check if we actually have entities to create
+                    # For Easywave Receivers, check if we actually have entities to create
                     entity_info = event_data.get("entity_info", {})
                     button_entities = entity_info.get("entities", [])
                     if not button_entities:
-                        _LOGGER.debug("Skipping EW-Receiver %s - no button entities configured", serial_number)
+                        _LOGGER.debug("Skipping Easywave Receiver %s - no button entities configured", serial_number)
                         return
                     else:
-                        _LOGGER.debug("Retrying EW-Receiver %s - found %d entities to create", serial_number, len(button_entities))
+                        _LOGGER.debug("Retrying Easywave Receiver %s - found %d entities to create", serial_number, len(button_entities))
             
         _LOGGER.info("🔘 Handling device added event for %s (type: %s)", serial_number, device_type)
         
@@ -198,23 +205,27 @@ async def async_setup_entry(
         
         new_buttons = []
         
-        # For EW-Receivers, create additional configured button entities with press detection
+        # For Easywave Receivers, create additional configured button entities with press detection
         # Skip heating/cooling receivers as they use toggle switches instead
         if device_type == "ew_receiver":
             receiver_kind = device_info.get("receiver_kind", "switch")
             
             # Skip button creation for heating/cooling receivers - they use toggle switches
             if receiver_kind in ["heating", "cooling", "heating_cooling"]:
-                _LOGGER.debug("Skipping button creation for EW-Receiver %s (%s) - using toggle switches instead", 
+                _LOGGER.debug("Skipping button creation for Easywave Receiver %s (%s) - using toggle switches instead", 
                             serial_number, receiver_kind)
             else:
-                # Get button entities from event_info or device_info
-                entity_info = event_data.get("entity_info", {})
-                button_entities = entity_info.get("entities", [])
+                # Get button entities from entity_specs (dynamically generated)
+                from .entity_specs import create_entity_specs_for_device
+                entity_specs = create_entity_specs_for_device(serial_number, device_info)
+                button_entities = entity_specs.get("button", [])
                 
-                # Fallback to device_info if entity_info is empty
+                # Fallback to event_info or device_info if entity_specs is empty
                 if not button_entities:
-                    button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
+                    entity_info = event_data.get("entity_info", {})
+                    button_entities = entity_info.get("entities", [])
+                    if not button_entities:
+                        button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
                     _LOGGER.debug("Using button entities from device_info for %s: %d buttons", 
                                 serial_number, len(button_entities))
             
@@ -228,12 +239,14 @@ async def async_setup_entry(
                         # Create standard button
                         button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                         new_buttons.append(button)
-                        _LOGGER.info("✅ Created EW-Receiver button: %s (%s)", entity_spec.get('name'), entity_spec.get('action'))
+                        _LOGGER.info("✅ Created Easywave Receiver button: %s (%s)", 
+                                    entity_spec.get('translation_key') or entity_spec.get('name'), 
+                                    entity_spec.get('action'))
                     except Exception as e:
-                        _LOGGER.error("❌ Error creating EW-Receiver button for %s: %s", serial_number, e)
+                        _LOGGER.error("❌ Error creating Easywave Receiver button for %s: %s", serial_number, e)
         elif device_type == "ew_transmitter":
-            # EW-Transmitters don't need action buttons - they only send signals
-            _LOGGER.debug("EW-Transmitter device %s - no button entities needed", serial_number[-8:])
+            # Easywave Transmitters don't need action buttons - they only send signals
+            _LOGGER.debug("Easywave Transmitter device %s - no button entities needed", serial_number[-8:])
         else:
             # For other device types, create additional legacy buttons
             additional_buttons = _create_buttons_for_device(serial_number, device_info)
@@ -334,12 +347,12 @@ class EldatButton(EldatEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.transceiver
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available.
+        
+        Eldat buttons inherit the RX11 transceiver connection status via via_device 
+        linkage.
+        """
+        return self._is_rx11_connected()
 
     async def async_press(self) -> None:
         """Handle the button press."""
@@ -366,7 +379,7 @@ class EldatButton(EldatEntity, ButtonEntity):
 
 
 class EWReceiverUIButton(EldatEntity, ButtonEntity):
-    """EW-Receiver button optimized for Home Assistant UI with explicit short/long press actions."""
+    """Easywave Receiver button optimized for Home Assistant UI with explicit short/long press actions."""
     
     def __init__(
         self,
@@ -375,13 +388,13 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
     ) -> None:
-        """Initialize the EW-Receiver UI button."""
+        """Initialize the Easywave Receiver UI button."""
         super().__init__(coordinator, serial_number, device_info)
         
         # Entity configuration from spec
         self._entity_spec = entity_spec
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{entity_spec.get('action', 'button')}")
-        self._attr_name = entity_spec.get("name", "EW-Receiver Button")
+        self._attr_name = entity_spec.get("name", "Easywave Receiver Button")
         self._attr_icon = entity_spec.get("icon", "mdi:gesture-tap")
         
         # Button configuration
@@ -405,17 +418,17 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         self._press_start_time: Optional[float] = None
         self._long_press_task: Optional[asyncio.Task] = None
         
-        _LOGGER.debug("✅ EW-Receiver UI Button created: %s (Channel: %d, Action: %s, Type: %s, Supports Long Press: %s)", 
+        _LOGGER.debug("✅ Easywave Receiver UI Button created: %s (Channel: %d, Action: %s, Type: %s, Supports Long Press: %s)", 
                      self._attr_name, self._channel, self._action, self._action_type, self._supports_long_press)
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.transceiver
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available.
+        
+        EW Receiver UI buttons inherit the RX11 transceiver connection status 
+        via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
@@ -454,7 +467,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         elif self._action_type == "press_and_hold" and self._is_long_press_active:
             return "Stop Command"  # Clear indication that button stops the active command
         else:
-            return self._entity_spec.get("name", "EW-Receiver Button")
+            return self._entity_spec.get("name", "Easywave Receiver Button")
 
     @property
     def icon(self) -> str:
@@ -468,7 +481,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle button press - execute the configured action type or handle double-click detection."""
-        _LOGGER.info("🔘 EW-Receiver UI Button pressed: %s (Type: %s, Supports Long Press: %s)", 
+        _LOGGER.info("🔘 Easywave Receiver UI Button pressed: %s (Type: %s, Supports Long Press: %s)", 
                     self._attr_name, self._action_type, self._supports_long_press)
         
         try:
@@ -494,7 +507,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                 press_type = "short"
             
             if success:
-                _LOGGER.info("✅ EW-Receiver %s successful: %s", press_type, self._attr_name)
+                _LOGGER.info("✅ Easywave Receiver %s successful: %s", press_type, self._attr_name)
                 
                 # Update button icon based on state
                 if self._action_type == "press_and_hold":
@@ -538,10 +551,10 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                         "device_name": self._device_info.get("name", "Unknown")
                     })
             else:
-                _LOGGER.warning("❌ EW-Receiver %s failed: %s", press_type, self._attr_name)
+                _LOGGER.warning("❌ Easywave Receiver %s failed: %s", press_type, self._attr_name)
                 
         except Exception as e:
-            _LOGGER.error("❌ Error in EW-Receiver UI button press for %s: %s", self._attr_name, e)
+            _LOGGER.error("❌ Error in Easywave Receiver UI button press for %s: %s", self._attr_name, e)
 
     async def _handle_long_press_button_click(self) -> None:
         """Handle button press with double-click detection for long press support.
@@ -681,7 +694,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
             
             # Only use receiver methods for actual receivers
             if device_type not in ["ew_receiver", "EW_Receiver"]:
-                _LOGGER.warning("❌ Cannot start continuous sending for device type '%s' - receiver methods only work for EW-Receivers", device_type)
+                _LOGGER.warning("❌ Cannot start continuous sending for device type '%s' - receiver methods only work for Easywave Receivers", device_type)
                 return False
             
             # Get transceiver access to wrapper functions
@@ -891,11 +904,11 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
 
 
 # EWReceiverLongPressButton class removed - no longer needed
-# EW-Receiver buttons now use EldatEWReceiverButton without longpress support
+# Easywave Receiver buttons now use EldatEWReceiverButton without longpress support
 
 
 class EldatEWReceiverButton(EldatEntity, ButtonEntity):
-    """ELDAT button entity with LongPress support for EW-Receiver stateless buttons."""
+    """ELDAT button entity with LongPress support for Easywave Receiver stateless buttons."""
     
     def __init__(
         self,
@@ -910,7 +923,15 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
         # Entity configuration from spec
         self._entity_spec = entity_spec
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{entity_spec.get('action', 'button')}")
-        self._attr_name = entity_spec.get("name", "ELDAT Button")
+        
+        # Use translation_key for HA's translation system if available
+        translation_key = entity_spec.get("translation_key")
+        if translation_key:
+            self._attr_translation_key = translation_key
+            self._attr_has_entity_name = True
+        else:
+            self._attr_name = entity_spec.get("name", "ELDAT Button")
+        
         self._operating_mode = entity_spec.get("operating_mode", 1)
         self._button_config = entity_spec.get("button_config", {})
         self._receiver_kind = entity_spec.get("receiver_kind", "switch")
@@ -929,17 +950,24 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
         else:
             self._attr_icon = self._get_icon_for_button_type()
         
+        # Helper for logging - use translation_key or name
+        entity_label = getattr(self, '_attr_translation_key', None) or getattr(self, '_attr_name', None) or "Button"
         _LOGGER.debug("✅ Konfigurierter Button erstellt: %s (button_code: %d, icon: %s)", 
-                     self._attr_name, self._button_code, self._attr_icon)
+                     entity_label, self._button_code, self._attr_icon)
+
+    @property
+    def _entity_label(self) -> str:
+        """Get entity label for logging (translation_key or name)."""
+        return getattr(self, '_attr_translation_key', None) or getattr(self, '_attr_name', None) or self.entity_id or "Button"
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.transceiver
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available.
+        
+        Configured buttons inherit the RX11 transceiver connection status 
+        via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
@@ -977,7 +1005,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle button press - simple immediate execution."""
-        _LOGGER.info("🔘 Button pressed: %s", self._attr_name)
+        _LOGGER.info("🔘 Button pressed: %s", self._entity_label)
         
         # Execute button press immediately without any timeout
         await self._execute_simple_press()
@@ -988,7 +1016,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
             success = await self._send_normal_press_command()
             
             if success:
-                _LOGGER.info("✅ Simple press successful: %s", self._attr_name)
+                _LOGGER.info("✅ Simple press successful: %s", self._entity_label)
                 
                 # Fire press event (RX11 grundfunktion)
                 self.hass.bus.async_fire("eldat_button_press", {
@@ -1016,7 +1044,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
             
             # Only use receiver methods for actual receivers
             if device_type not in ["ew_receiver", "EW_Receiver"]:
-                _LOGGER.warning("❌ Cannot start continuous command for device type '%s' - receiver methods only work for EW-Receivers", device_type)
+                _LOGGER.warning("❌ Cannot start continuous command for device type '%s' - receiver methods only work for Easywave Receivers", device_type)
                 return False
             
             # Get transceiver access to wrapper functions
@@ -1032,7 +1060,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
                     
                     if success:
                         _LOGGER.info("🚀 StartEwSendCmdLoop started for %s (channel %d)", 
-                                   self._attr_name, self._channel)
+                                   self._entity_label, self._channel)
                         
                         # Fire hold event (emuliert, kontinuierliches Senden)
                         self.hass.bus.async_fire("eldat_button_hold", {
@@ -1070,7 +1098,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
                     
                     if success:
                         _LOGGER.info("🛑 StopEwSendCmdLoop completed for %s (channel %d)", 
-                                   self._attr_name, self._channel)
+                                   self._entity_label, self._channel)
                         
                         # Fire release event (RX11 grundfunktion)
                         self.hass.bus.async_fire("eldat_button_release", {
@@ -1092,7 +1120,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
             _LOGGER.error("❌ Error stopping continuous command: %s", e)
             return False
     async def _send_long_press_command(self) -> bool:
-        """Send LongPress command to EW-Receiver (legacy method)."""
+        """Send LongPress command to Easywave Receiver (legacy method)."""
         try:
             # Create LongPress command based on button type and channel
             command = self._create_long_press_command()
@@ -1112,7 +1140,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
             return False
 
     async def _send_normal_press_command(self) -> bool:
-        """Send normal press command to EW-Receiver."""
+        """Send normal press command to Easywave Receiver."""
         try:
             # Create normal command based on button type and channel
             command = self._create_normal_command()
@@ -1178,12 +1206,12 @@ class EldatTestButton(EldatEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Return if entity is available."""
-        return (
-            self.coordinator.last_update_success
-            and self.coordinator.transceiver
-            and self.coordinator.transceiver.is_connected
-        )
+        """Return if entity is available.
+        
+        Test buttons inherit the RX11 transceiver connection status 
+        via via_device linkage.
+        """
+        return self._is_rx11_connected()
 
     async def async_press(self) -> None:
         """Handle the test button press."""

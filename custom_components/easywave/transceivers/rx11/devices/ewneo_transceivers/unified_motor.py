@@ -11,6 +11,7 @@ import logging
 
 from ....base import DeviceType, DeviceSubtype, OperatingMode
 from .base import EWneoBaseDevice
+from .....translations import translate, DEFAULT_LANGUAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -177,6 +178,12 @@ class RX11EWneoMotor(EWneoBaseDevice):
             ch: 0 for ch in range(1, num_channels + 1)
         }
         
+        # Runtime measurement tracking for multi-channel motors
+        # When status 117 is detected, mark channel for detailed query
+        self._pending_runtime_query: Dict[int, bool] = {
+            ch: False for ch in range(1, num_channels + 1)
+        }
+        
         _LOGGER.debug(
             "EWneo %d-channel motor %s initialized",
             num_channels, serial_number
@@ -187,14 +194,18 @@ class RX11EWneoMotor(EWneoBaseDevice):
         """Return number of channels."""
         return self._num_channels
     
-    def _get_model_name(self) -> str:
-        """Get detailed model name for device info."""
-        channel_models = {
-            1: "Easywave neo Motor",
-            2: "Easywave neo 2-Kanal Motor",
-            4: "Easywave neo 4-Kanal Motor"
+    def _get_model_name(self, language: str = DEFAULT_LANGUAGE) -> str:
+        """Get detailed model name for device info.
+        
+        Uses translation system for proper language support.
+        """
+        channel_translation_keys = {
+            1: "ewneo.motor",
+            2: "ewneo.dual_motor",
+            4: "ewneo.quad_motor"
         }
-        return channel_models.get(self._num_channels, f"Easywave neo {self._num_channels}-Kanal Motor")
+        key = channel_translation_keys.get(self._num_channels, "ewneo.motor")
+        return translate(key, language)
     
     @property
     def supported_entity_types(self) -> List[str]:
@@ -252,6 +263,14 @@ class RX11EWneoMotor(EWneoBaseDevice):
         self._terrace_functions[channel] = bool(state_word & (1 << 2))
         self._stored_positions[channel] = state_word & 0x03
         
+        _LOGGER.debug(
+            "Motor %s Mode0: status=%d, pos=%d, runtime=%s",
+            self.serial_number[-8:],
+            self._motor_status_codes[channel],
+            self._current_positions[channel],
+            self._runtime_measured[channel]
+        )
+        
         # Interpret status and update position
         self._interpret_motor_status(channel)
         self._update_position_info(channel)
@@ -301,12 +320,29 @@ class RX11EWneoMotor(EWneoBaseDevice):
         status_code: int, 
         tilt: bool
     ) -> None:
-        """Update motor state from summary information."""
+        """Update motor state from summary information.
+        
+        For multi-channel motors (2/4 channels), Mode 0 only provides summary status.
+        When status 117 (runtime measurement in progress) is detected, mark the channel
+        for detailed query with Mode 2/10/18/26 to get full runtime measurement info.
+        """
         old_state = self._motor_states[channel]
         old_position = self._positions[channel]
         
         self._motor_status_codes[channel] = status_code
         self._recent_tilts[channel] = tilt
+        
+        # Track runtime measurement in progress (status 117)
+        # When detected, mark channel for detailed query on next telegram
+        if status_code == 117:
+            if not self._pending_runtime_query.get(channel, False):
+                self._pending_runtime_query[channel] = True
+                _LOGGER.info(
+                    "🔧 EWneo %dch motor %s CH%d: Runtime measurement detected (status 117), "
+                    "scheduling Mode %d query",
+                    self._num_channels, self.serial_number[-8:], channel,
+                    self.CHANNEL_MODE_MAP.get(channel, 0)
+                )
         
         self._interpret_motor_status(channel)
         self._update_position_info(channel)
@@ -330,7 +366,11 @@ class RX11EWneoMotor(EWneoBaseDevice):
         super()._parse_extended_mode_state(state_word)
     
     def _parse_channel_full_state(self, channel: int, state_word: int) -> None:
-        """Parse full state for a specific channel (multi-channel mode 2/10/18/26)."""
+        """Parse full state for a specific channel (multi-channel mode 2/10/18/26).
+        
+        This provides complete state information including runtime_measured flag,
+        which is not available in Mode 0 summary responses.
+        """
         # Same format as single-channel mode 0
         self._motor_status_codes[channel] = (state_word >> 25) & 0x7F
         self._current_positions[channel] = (state_word >> 17) & 0x7F
@@ -341,6 +381,22 @@ class RX11EWneoMotor(EWneoBaseDevice):
         self._tilt_measured[channel] = bool(state_word & (1 << 6))
         self._terrace_functions[channel] = bool(state_word & (1 << 2))
         self._stored_positions[channel] = state_word & 0x03
+        
+        # Clear any pending runtime query flag since we now have full state
+        if self._pending_runtime_query.get(channel, False):
+            self._pending_runtime_query[channel] = False
+            _LOGGER.debug(
+                "EWneo motor %s CH%d: Cleared pending runtime query (full state received)",
+                self.serial_number[-8:], channel
+            )
+        
+        _LOGGER.info(
+            "🔧 EWneo %dch motor %s CH%d: Full state - runtime_measured=%s, position=%d, status=%d",
+            self._num_channels, self.serial_number[-8:], channel,
+            self._runtime_measured[channel],
+            self._current_positions[channel],
+            self._motor_status_codes[channel]
+        )
         
         self._interpret_motor_status(channel)
         self._update_position_info(channel)
@@ -354,10 +410,7 @@ class RX11EWneoMotor(EWneoBaseDevice):
             state, text = self.STATUS_CODES[status_code]
             self._motor_states[channel] = state
             self._motor_status_texts[channel] = text
-            
-            # Infer runtime measurement from position-based movement
-            if status_code in [124, 125]:
-                self._runtime_measured[channel] = True
+            # Note: runtime_measured is already extracted from Bit 7 in _parse_single_channel_state
         else:
             self._motor_states[channel] = "unknown"
             self._motor_status_texts[channel] = f"Unknown status code: {status_code}"
@@ -548,6 +601,70 @@ class RX11EWneoMotor(EWneoBaseDevice):
     def gateway_serial(self) -> Optional[str]:
         """Get gateway serial number."""
         return self._gateway_serial or self._device_info.get("gateway_serial")
+
+    # =========================================================================
+    # Runtime Measurement Query Management
+    # =========================================================================
+    
+    def get_pending_runtime_queries(self) -> List[int]:
+        """Get list of channels that need detailed runtime measurement query.
+        
+        When status 117 is detected in Mode 0 (summary), the channel is marked
+        for detailed query. This method returns all channels that should be
+        queried with their respective modes (Mode 2/10/18/26).
+        
+        Returns:
+            List of channel numbers (1-indexed) that need detailed query
+        """
+        return [
+            channel for channel, pending in self._pending_runtime_query.items()
+            if pending
+        ]
+    
+    def get_query_mode_for_channel(self, channel: int) -> int:
+        """Get the EWB query mode for a specific channel.
+        
+        Args:
+            channel: Channel number (1-indexed)
+            
+        Returns:
+            Query mode (2 for CH1, 10 for CH2, 18 for CH3, 26 for CH4)
+        """
+        return self.CHANNEL_MODE_MAP.get(channel, 0)
+    
+    def clear_pending_runtime_query(self, channel: int) -> None:
+        """Clear pending runtime query flag for a channel after successful query.
+        
+        Args:
+            channel: Channel number (1-indexed)
+        """
+        if channel in self._pending_runtime_query:
+            if self._pending_runtime_query[channel]:
+                _LOGGER.debug(
+                    "EWneo motor %s CH%d: Cleared pending runtime query flag",
+                    self.serial_number[-8:], channel
+                )
+            self._pending_runtime_query[channel] = False
+    
+    def has_pending_runtime_queries(self) -> bool:
+        """Check if any channel has a pending runtime measurement query.
+        
+        Returns:
+            True if at least one channel needs detailed query
+        """
+        return any(self._pending_runtime_query.values())
+    
+    def get_pending_query_modes(self) -> List[int]:
+        """Get list of EWB modes needed for pending runtime queries.
+        
+        Returns:
+            List of mode values (2, 10, 18, 26) for channels needing query
+        """
+        return [
+            self.CHANNEL_MODE_MAP[channel]
+            for channel in self.get_pending_runtime_queries()
+            if channel in self.CHANNEL_MODE_MAP
+        ]
 
 
 # Factory functions

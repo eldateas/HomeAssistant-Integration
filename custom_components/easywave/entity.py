@@ -10,6 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, DEVICE_ICONS, DEVICE_TYPE_CODE_MAP
 from .coordinator import EldatCoordinator
 from .helpers import build_model_description
+from .translations import get_language, t_receiver, t_transmitter, t_sensor_device, DEFAULT_LANGUAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,9 +51,23 @@ class EldatEntity(CoordinatorEntity):
         if not hasattr(self, '_attr_icon'):
             self._attr_icon = DEVICE_ICONS.get(device_type, "mdi:devices")
     
+    def _get_gateway_identifier(self) -> tuple | None:
+        """Get the RX11 gateway identifier for via_device linkage.
+        
+        Returns the identifier tuple for the RX11 gateway device if available,
+        enabling devices to inherit the gateway's availability status.
+        """
+        if hasattr(self.coordinator, 'config_entry') and self.coordinator.config_entry:
+            return (DOMAIN, f"{self.coordinator.config_entry.entry_id}_gateway")
+        return None
+    
     @property
     def device_info(self) -> DeviceInfo:
-        """Return device info - dynamically generated from current coordinator data."""
+        """Return device info - dynamically generated from current coordinator data.
+        
+        Devices are linked to the RX11 gateway via via_device, which allows
+        Home Assistant to inherit the gateway's availability status automatically.
+        """
         # Get current device info from coordinator (always up-to-date)
         # Check both registered_devices and devices for the most complete data
         current_device_info = (
@@ -67,29 +82,38 @@ class EldatEntity(CoordinatorEntity):
             device_type_code = current_device_info.get("device_type_code")
             device_type = DEVICE_TYPE_CODE_MAP.get(device_type_code, device_type)
         
-        # Build model description with current data
-        model_description = build_model_description(device_type, current_device_info)
+        # Get language for translations
+        lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+        
+        # Build model description with current data (language-aware)
+        model_description = build_model_description(device_type, current_device_info, lang)
         
         # Generate device name - use short, simple names for EWneo devices
         if device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
             # EWneo bidirectional devices: use ewneo_index (EWB_GET_FD_SERIAL index)
             ewneo_index = current_device_info.get("ewneo_index")
+            receiver_label = t_receiver(lang)
             if ewneo_index is not None:
-                device_name = f"EWneo-Empfänger #{ewneo_index + 1}"
+                device_name = f"Easywave neo {receiver_label} #{ewneo_index + 1}"
             else:
                 # Fallback if no ewneo_index available
-                device_name = f"EWneo-Empfänger {self._serial_number[-4:]}"
+                device_name = f"Easywave neo {receiver_label} {self._serial_number[-4:]}"
         else:
             # Other devices: use existing name or generate default
             device_name = current_device_info.get("name")
             if not device_name:
                 device_name = f"Easywave device {self._serial_number}"
         
-        # Return device_info WITHOUT via_device to prevent issues with old config_entry_ids
+        # Get gateway identifier for via_device linkage
+        # This links devices to the RX11 gateway, allowing inheritance of availability status
+        gateway_identifier = self._get_gateway_identifier()
+        
+        # Return device_info with via_device to link to RX11 gateway
         return DeviceInfo(
             identifiers={(DOMAIN, self._serial_number)},
             name=device_name,
             model=model_description,
+            via_device=gateway_identifier,
         )
 
     @property
@@ -123,10 +147,13 @@ class EldatEntity(CoordinatorEntity):
         
         return attributes
 
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available - follows RX11 connection status."""
-        # All entities follow RX11 transceiver connection status
+    def _is_rx11_connected(self) -> bool:
+        """Check if the RX11 transceiver is connected.
+        
+        This is the base availability check that all entities inherit.
+        Subclasses can add additional availability checks on top of this.
+        """
+        # Check coordinator update success
         if not self.coordinator.last_update_success:
             return False
         
@@ -136,6 +163,20 @@ class EldatEntity(CoordinatorEntity):
             return transceiver.is_connected
         
         return True
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available - follows RX11 connection status.
+        
+        This base implementation checks the RX11 transceiver connection.
+        Since devices are linked via via_device to the RX11 gateway,
+        Home Assistant will automatically propagate unavailability.
+        
+        Subclasses can override this to add additional device-specific
+        availability checks (e.g., timeout, reachability) while still
+        inheriting the RX11 connection status via the base check.
+        """
+        return self._is_rx11_connected()
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""

@@ -11,6 +11,7 @@ import logging
 
 from ....base import DeviceType, DeviceSubtype, OperatingMode
 from .base import EWneoBaseDevice
+from .....translations import translate, DEFAULT_LANGUAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,14 +136,18 @@ class RX11EWneoSwitch(EWneoBaseDevice):
         """Return number of channels."""
         return self._num_channels
     
-    def _get_model_name(self) -> str:
-        """Get detailed model name for device info."""
-        channel_models = {
-            1: "Easywave neo Schalter",
-            2: "Easywave neo 2-Kanal Schalter",
-            4: "Easywave neo 4-Kanal Schalter"
+    def _get_model_name(self, language: str = DEFAULT_LANGUAGE) -> str:
+        """Get detailed model name for device info.
+        
+        Uses translation system for proper language support.
+        """
+        channel_translation_keys = {
+            1: "ewneo.switch",
+            2: "ewneo.dual_switch",
+            4: "ewneo.quad_switch"
         }
-        return channel_models.get(self._num_channels, f"Easywave neo {self._num_channels}-Kanal Schalter")
+        key = channel_translation_keys.get(self._num_channels, "ewneo.switch")
+        return translate(key, language)
     
     @property
     def supported_entity_types(self) -> List[str]:

@@ -418,44 +418,65 @@ def create_compatibility_wrapper(device_manager: DeviceManager):
         
         # DeviceStorage compatibility
         async def load_devices(self) -> Dict[str, Any]:
-            """Compatibility: load_devices."""
+            """Compatibility: load_devices - returns flat dict with all device info including extra_data."""
             await self.manager.load()
-            return {
-                'devices': {
-                    serial: {
-                        'serial_number': device.serial_number,
-                        'device_type': device.device_type,
-                        'name': device.name,
-                        'available': device.availability == DeviceAvailability.AVAILABLE,
-                        'rx11_index': device.rx11_index,
-                        'area': device.area,
-                    }
-                    for serial, device in self.manager.get_all_devices().items()
+            result = {}
+            for serial, device in self.manager.get_all_devices().items():
+                # Build device info with all attributes
+                device_info = {
+                    'serial_number': device.serial_number,
+                    'device_type': device.device_type,
+                    'name': device.name,
+                    'available': device.availability == DeviceAvailability.AVAILABLE,
+                    'rx11_index': device.rx11_index,
+                    'area': device.area,
                 }
-            }
+                # Add extra_data fields (gateway_serial, ewneo_index, entities, platforms, etc.)
+                if hasattr(device, 'extra_data') and device.extra_data:
+                    device_info.update(device.extra_data)
+                result[serial] = device_info
+            return result
         
         async def save_device_config(self, devices: Dict[str, Dict[str, Any]], force: bool = False) -> bool:
-            """Compatibility: save_device_config."""
+            """Compatibility: save_device_config - stores all fields in extra_data."""
+            # Define core fields that map to ManagedDevice attributes
+            core_fields = {'serial_number', 'device_type', 'name', 'rx11_index', 'area'}
+            
             for serial, info in devices.items():
+                # Collect extra fields (everything not in core_fields)
+                # Convert sets to lists for JSON serialization
+                extra_data = {}
+                for k, v in info.items():
+                    if k not in core_fields:
+                        if isinstance(v, set):
+                            extra_data[k] = list(v)
+                        else:
+                            extra_data[k] = v
+                
                 if self.manager.is_whitelisted(serial):
-                    # Remove serial_number from info to avoid duplicate argument
-                    info_copy = {k: v for k, v in info.items() if k != 'serial_number'}
-                    self.manager.update_device_info(serial, **info_copy)
+                    # Update existing device with core fields
+                    core_data = {k: v for k, v in info.items() if k in core_fields and k != 'serial_number'}
+                    self.manager.update_device_info(serial, **core_data)
+                    # Store extra fields in extra_data
+                    if extra_data:
+                        self.manager.update_device_info(serial, extra_data=extra_data)
                 else:
-                    # Extract specific fields to avoid duplicate keyword arguments
+                    # Extract core fields for device creation
                     device_type = info.get('device_type', 'unknown')
                     name = info.get('name')
                     rx11_index = info.get('rx11_index')
                     area = info.get('area')
                     
-                    # Add device with explicit parameters
+                    # Add device with core parameters and extra_data
                     self.manager.add_device(
                         serial_number=serial,
                         device_type=device_type,
                         name=name,
                         rx11_index=rx11_index,
-                        area=area
+                        area=area,
+                        extra_data=extra_data if extra_data else None
                     )
+            
             return await self.manager.save()
     
     return CompatibilityWrapper(device_manager)

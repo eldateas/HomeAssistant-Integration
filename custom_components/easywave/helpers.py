@@ -111,7 +111,7 @@ def battery_percentage_from_level(battery_level: int | None) -> int:
 # from .entity_specs import create_entity_specs_for_device
 
 
-def build_model_description(device_type: str, device_info: dict) -> str:
+def build_model_description(device_type: str, device_info: dict, language: str = "en") -> str:
     """Build model description with device type and operating mode.
     
     This function creates a human-readable model description for Home Assistant's
@@ -121,28 +121,34 @@ def build_model_description(device_type: str, device_info: dict) -> str:
     Args:
         device_type: The device type (e.g., 'ew_transmitter', 'ewneo_sensor')
         device_info: The device information dictionary
+        language: Language code ("de" or "en"), defaults to "en"
         
     Returns:
         A human-readable model description
     """
-    from .const import EWNEO_MODEL_MAP
+    from .const import EWNEO_MODEL_TRANSLATION_KEYS
+    from .translations import translate
     
-    # Map device types to German descriptions
+    # Map device types to translation keys
     type_mapping = {
         # Easywave devices
-        "ew_transmitter": "Easywave Sender",
-        "ew_receiver": "Easywave Empfänger",
+        "ew_transmitter": "device_info.easywave_transmitter",
+        "ew_receiver": "device_info.easywave_receiver",
         
         # Easywave Neo sensors
-        "ewneo_sensor": "Easywave neo Sensor",
-        "ew_sensor": "Easywave neo Sensor",
+        "ewneo_sensor": "device_info.easywave_neo_sensor",
+        "ew_sensor": "device_info.easywave_neo_sensor",
         
         # Legacy/compatibility
-        "ew_transceiver": "Easywave neo Sensor",
+        "ew_transceiver": "device_info.easywave_neo_sensor",
     }
     
-    # Get base description
-    base_description = type_mapping.get(device_type, device_type.replace("_", " ").title())
+    # Get base description (translated)
+    type_key = type_mapping.get(device_type)
+    if type_key:
+        base_description = translate(type_key, language)
+    else:
+        base_description = device_type.replace("_", " ").title()
     
     # Build detailed description with operating type and button/channel info
     details = []
@@ -151,66 +157,66 @@ def build_model_description(device_type: str, device_info: dict) -> str:
     operating_type = device_info.get("operating_type")
     if operating_type and device_type == "ew_transmitter":
         if operating_type == "1":
-            details.append("1-Tast-Bedienung")
+            details.append(translate("device_info.operating_type_1", language))
         elif operating_type == "2":
-            details.append("2-Tast-Bedienung")
+            details.append(translate("device_info.operating_type_2", language))
         elif operating_type == "3":
-            details.append("3-Tast-Bedienung")
+            details.append(translate("device_info.operating_type_3", language))
+    
+    # Add grouping mode for 1-Tast-Bedienung (Einzeln/Gruppe)
+    grouping_mode = device_info.get("grouping_mode")
+    if grouping_mode and device_type == "ew_transmitter" and operating_type == "1":
+        if grouping_mode == "single":
+            details.append(translate("device_info.grouping_single", language))
+        elif grouping_mode == "group":
+            details.append(translate("device_info.grouping_group", language))
     
     # Add switch mode for 1-Tast-Bedienung (Impuls/Dauer)
     switch_mode = device_info.get("switch_mode")
     if switch_mode and device_type == "ew_transmitter" and operating_type == "1":
         if switch_mode == "impulse":
-            details.append("Impuls")
+            details.append(translate("device_info.switch_impulse", language))
         elif switch_mode == "permanent":
-            details.append("Dauer")
+            details.append(translate("device_info.switch_permanent", language))
     
     # Add button count for 1-Tast-Bedienung
     button_count = device_info.get("button_count")
     if button_count and device_type == "ew_transmitter" and operating_type == "1":
-        details.append(f"{button_count} Tasten")
+        details.append(translate("device_info.buttons", language, count=button_count))
     
     # Add button count for 2-Tast and 3-Tast-Bedienung
     if button_count and device_type == "ew_transmitter" and operating_type in ["2", "3"]:
-        details.append(f"{button_count} Tasten")
+        details.append(translate("device_info.buttons", language, count=button_count))
     
     # Add receiver_kind info for receivers
     receiver_kind = device_info.get("receiver_kind")
     if receiver_kind and device_type == "ew_receiver":
-        if receiver_kind == "impulse":
-            details.append("Impuls")
-        elif receiver_kind == "switch_2button":
-            details.append("EIN/AUS")
-        elif receiver_kind == "cover_2button":
-            details.append("AUF/ZU")
-        elif receiver_kind == "motor_3button":
-            details.append("AUF/STOPP/ZU")
-        elif receiver_kind == "heating_cooling":
-            details.append("Heizung")
-        elif receiver_kind == "universal_4button":
-            details.append("Universal")
+        receiver_kind_mapping = {
+            "impulse": "device_info.receiver_impulse",
+            "switch_2button": "device_info.receiver_switch_2button",
+            "cover_2button": "device_info.receiver_cover_2button",
+            "motor_3button": "device_info.receiver_motor_3button",
+            "heating_cooling": "device_info.receiver_heating_cooling",
+            "universal_4button": "device_info.receiver_universal_4button",
+        }
+        kind_key = receiver_kind_mapping.get(receiver_kind)
+        if kind_key:
+            details.append(translate(kind_key, language))
     
     # Add channel info for receivers (legacy support)
     # Exclude EWneo devices as they have their own channel descriptions
     channels = device_info.get("channels")
     if channels and "receiver" in device_type and not receiver_kind and not device_type.startswith("ewneo_"):
-        if channels == 1:
-            details.append("1-Kanal")
-        elif channels == 2:
-            details.append("2-Kanal")
-        elif channels == 4:
-            details.append("4-Kanal")
-        else:
-            details.append(f"{channels}-Kanal")
+        details.append(translate("device_info.channel_count", language, count=channels))
     
     # For EWneo devices, return the specific model name directly based on device_type_code
     if device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
         device_type_code = device_info.get("device_type_code", 0)
-        model = EWNEO_MODEL_MAP.get(device_type_code)
-        if model:
-            return model
+        translation_key = EWNEO_MODEL_TRANSLATION_KEYS.get(device_type_code)
+        if translation_key:
+            return translate(translation_key, language)
         # Fallback for unknown EWneo device types
-        return "Easywave neo Empfänger"
+        return translate("device_info.easywave_neo_receiver", language)
     
     # Combine base description with details
     if details:

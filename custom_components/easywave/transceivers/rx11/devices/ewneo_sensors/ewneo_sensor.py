@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set
 import logging
+import time
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -19,6 +20,7 @@ from ....base import (
     SensorBehaviorMixin,
     EntitySpecsMixin,
 )
+from .....translations import translate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,19 +39,24 @@ NEO_TYPE_SENSOR_MAP = {
 @dataclass
 class SensorTypeConfig:
     """Configuration for a sensor type."""
-    name: str
+    translation_key: str  # Key for translations module
     neo_type: int
     device_class: Optional[str]
     unit: Optional[str]
     icon: str
     entity_type: str  # "sensor" or "binary_sensor"
     value_key: str  # Key in sensor_data dict
+    
+    @property
+    def name(self) -> str:
+        """Get translated name for this sensor type."""
+        return translate(self.translation_key)
 
 
-# Sensor type configurations
+# Sensor type configurations (use translation keys for HA display)
 SENSOR_TYPE_CONFIGS = {
     "temperature": SensorTypeConfig(
-        name="Temperature",
+        translation_key="sensor.temperature",
         neo_type=0x33,
         device_class="temperature",
         unit="°C",
@@ -58,7 +65,7 @@ SENSOR_TYPE_CONFIGS = {
         value_key="temperature"
     ),
     "humidity": SensorTypeConfig(
-        name="Humidity",
+        translation_key="sensor.humidity",
         neo_type=0x34,
         device_class="humidity",
         unit="%",
@@ -67,7 +74,7 @@ SENSOR_TYPE_CONFIGS = {
         value_key="humidity"
     ),
     "wind_speed": SensorTypeConfig(
-        name="Wind Speed",
+        translation_key="sensor.wind",
         neo_type=0x37,
         device_class="wind_speed",
         unit="m/s",
@@ -76,7 +83,7 @@ SENSOR_TYPE_CONFIGS = {
         value_key="wind_speed"
     ),
     "rain": SensorTypeConfig(
-        name="Rain",
+        translation_key="sensor.rain",
         neo_type=0x38,
         device_class="moisture",
         unit=None,
@@ -144,10 +151,42 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         # Initialize battery warning status
         self._battery_warning = False
         
+        # Telegram timing tracking (Byte 7)
+        self._max_telegram_interval: Optional[float] = None  # Maximum interval in seconds
+        self._last_telegram_timestamp: Optional[float] = None  # Unix timestamp of last telegram
+        
         _LOGGER.info(
             "EWneo Sensor %s initialized with sensor types: %s",
             self.serial_number, ", ".join(sorted(self._sensor_types))
         )
+    
+    def _parse_max_telegram_interval(self, byte7: int) -> float:
+        """Parse Byte 7 to calculate maximum telegram interval.
+        
+        Formula: t = c · m · 2^x
+        where:
+        - c = 15 seconds (constant)
+        - x = exponent (bits 7-4)
+        - m = mantissa (bits 3-0)
+        
+        Args:
+            byte7: Byte 7 from telegram data
+            
+        Returns:
+            Maximum interval in seconds
+        """
+        exponent = (byte7 >> 4) & 0x0F  # Bits 7-4
+        mantissa = byte7 & 0x0F  # Bits 3-0
+        
+        # Calculate interval: t = 15 * mantissa * 2^exponent
+        interval = 15.0 * mantissa * (2 ** exponent)
+        
+        _LOGGER.debug(
+            "EWneo sensor %s: Parsed Byte 7 (0x%02X) - exponent=%d, mantissa=%d, interval=%.1fs",
+            self.serial_number, byte7, exponent, mantissa, interval
+        )
+        
+        return interval
     
     def _determine_subtype(self, sensor_types: List[str]) -> DeviceSubtype:
         """Determine device subtype based on configured sensor types.
@@ -214,22 +253,18 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             if not config:
                 continue
             
-            # Determine entity name
-            if len(self._sensor_types) == 1:
-                # Single sensor type - use device name directly
-                entity_name = self.name
-            else:
-                # Multiple sensor types - append sensor type to name
-                entity_name = f"{self.name} {config.name}"
-            
-            # Create entity spec
+            # Use translation_key for HA to translate entity names
+            # HA will look up entity.sensor.<translation_key>.name in translations/*.json
             entity_spec = self._create_base_entity_spec(
                 config.entity_type,
-                name=entity_name,
+                name=None,  # Will be set via translation_key
                 device_class=config.device_class,
                 icon=config.icon,
                 unit_of_measurement=config.unit
             )
+            
+            # Add translation_key for proper HA translation
+            entity_spec["translation_key"] = sensor_type  # "temperature", "humidity", etc.
             
             # Override unique_id to include sensor_type for uniqueness
             entity_spec["unique_id"] = f"{self.serial_number}_{sensor_type}"
@@ -242,14 +277,19 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         # Add battery status binary sensor (instead of percentage sensor)
         battery_warning_spec = self._create_base_entity_spec(
             "binary_sensor",
-            name="Batteriestand",
+            name=None,  # Will be set via translation_key
             device_class="battery",
             icon="mdi:battery"
         )
+        # Add translation_key for proper HA translation
+        battery_warning_spec["translation_key"] = "battery_warning"
         # Override unique_id for battery warning
         battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning"
         battery_warning_spec["sensor_type"] = "battery_warning"
         specs["binary_sensor"].append(battery_warning_spec)
+        
+        # Note: "Zuletzt gesehen" is now shown as an attribute on temperature/humidity sensors
+        # instead of a separate entity to avoid logbook spam
         
         return specs
     
@@ -279,12 +319,13 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
     def _process_neo_sensor_data(self, telegram_data: Dict[str, Any]) -> None:
         """Process EWneo sensor telegram data.
         
-        Parses the 7-byte sensor telegram format:
+        Parses the 8-byte sensor telegram format:
         Byte 0: Version (bits 2-0, should be 0)
         Byte 1: Battery info (bit 7=0 for measurement, bit 6=has battery, bits 5-3=battery level)
         Byte 2: Sensor type (bits 7-2: 4=temperature, 5=humidity) 
         Bytes 3-4: Measurement value (Big-Endian unsigned 16-bit)
         Bytes 5-6: Reference value (optional, Big-Endian unsigned 16-bit)
+        Byte 7: Max telegram interval (bits 7-4=exponent, bits 3-0=mantissa)
         
         Args:
             telegram_data: Telegram data dictionary with 'data' field containing bytes
@@ -292,6 +333,11 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         timestamp = datetime.now()
         self.properties["timestamp"] = timestamp
         self._last_seen = timestamp.timestamp()
+        
+        # Track telegram timestamp for availability monitoring
+        self._last_telegram_timestamp = time.time()
+        _LOGGER.debug("🕐 Setting _last_telegram_timestamp to %s for device %s", 
+                       self._last_telegram_timestamp, self.serial_number[-8:])
         
         # Extract raw data bytes from telegram
         data = telegram_data.get("data", [])
@@ -387,12 +433,84 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             ref_raw_value = (data[5] << 8) | data[6]
             _LOGGER.debug("EWneo sensor %s: Reference value raw=0x%04X",
                         self.serial_number, ref_raw_value)
+        
+        # Byte 7: Maximum telegram interval
+        if len(data) >= 8:
+            byte7 = data[7]
+            self._max_telegram_interval = self._parse_max_telegram_interval(byte7)
+            _LOGGER.info(
+                "EWneo sensor %s: Max telegram interval = %.1fs (%.1f minutes)",
+                self.serial_number,
+                self._max_telegram_interval,
+                self._max_telegram_interval / 60.0
+            )
+    
+    def is_available(self) -> bool:
+        """Check if sensor is available based on telegram timing.
+        
+        Returns:
+            True if sensor is available (last telegram within 2x max interval),
+            False otherwise
+        """
+        # If we haven't received any telegram yet, consider unavailable
+        if self._last_telegram_timestamp is None:
+            return False
+        
+        # If max interval not set, consider available (fallback)
+        if self._max_telegram_interval is None:
+            return True
+        
+        # Calculate time since last telegram
+        time_since_last = time.time() - self._last_telegram_timestamp
+        
+        # Unavailable if more than 2x max interval
+        return time_since_last <= (2.0 * self._max_telegram_interval)
+    
+    def get_availability_status(self) -> Dict[str, Any]:
+        """Get detailed availability status for the sensor.
+        
+        Returns:
+            Dictionary with availability information
+        """
+        if self._last_telegram_timestamp is None or self._max_telegram_interval is None:
+            return {
+                "available": False,
+                "warning": False,
+                "time_since_last": None,
+                "max_interval": None,
+                "status": "no_data"
+            }
+        
+        time_since_last = time.time() - self._last_telegram_timestamp
+        
+        # Determine status
+        if time_since_last > (2.0 * self._max_telegram_interval):
+            status = "unavailable"
+            available = False
+            warning = False
+        elif time_since_last > self._max_telegram_interval:
+            status = "warning"
+            available = True
+            warning = True
+        else:
+            status = "ok"
+            available = True
+            warning = False
+        
+        return {
+            "available": available,
+            "warning": warning,
+            "time_since_last": time_since_last,
+            "max_interval": self._max_telegram_interval,
+            "status": status,
+            "last_telegram_time": datetime.fromtimestamp(self._last_telegram_timestamp).isoformat() if self._last_telegram_timestamp else None
+        }
     
     def get_sensor_data(self) -> Dict[str, Any]:
         """Get current sensor data for all configured sensor types.
         
         Returns:
-            Dictionary with sensor values and battery warning status
+            Dictionary with sensor values, battery warning, and availability status
         """
         data = {}
         
@@ -412,6 +530,14 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         # Add timestamp
         if "timestamp" in self.properties:
             data["timestamp"] = self.properties["timestamp"]
+        
+        # Add availability status
+        availability = self.get_availability_status()
+        data["availability_status"] = availability.get("status")
+        data["availability_warning"] = availability.get("warning", False)
+        data["last_telegram_time"] = availability.get("last_telegram_time")
+        data["time_since_last_telegram"] = availability.get("time_since_last")
+        data["max_telegram_interval"] = availability.get("max_interval")
         
         return data
     

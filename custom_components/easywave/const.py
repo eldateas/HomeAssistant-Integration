@@ -8,6 +8,9 @@ from typing import Final
 DOMAIN: Final = "easywave"
 INTEGRATION_NAME: Final = "Home Assistant Integration for ELDAT devices"
 
+# Documentation URL Base
+DOCS_URL_BASE: Final = "https://github.com/your-repo/easywave/blob/main/docs/"
+
 # USB Device Information
 ELDAT_VID: Final = 0x155A  # Vendor ID
 ELDAT_PIDS: Final = [0x1014]  # Product ID - RX11 USB Transceiver
@@ -67,15 +70,16 @@ DEVICE_TYPE_CODE_MAP: Final = {
     0x09: "ewneo_quad_motor",
 }
 
-# Central mapping for device_type_code to model description (EWneo-Typ)
-EWNEO_MODEL_MAP: Final = {
-    0x03: "Easywave neo Schalter",
-    0x04: "Easywave neo Dimmer",
-    0x05: "Easywave neo Motor",
-    0x06: "Easywave neo 2-Kanal Schalter",
-    0x07: "Easywave neo 4-Kanal Schalter",
-    0x08: "Easywave neo 2-Kanal Motor",
-    0x09: "Easywave neo 4-Kanal Motor",
+# Central mapping for device_type_code to translation key for model names
+# Use translate() from translations.py to get localized model names
+EWNEO_MODEL_TRANSLATION_KEYS: Final = {
+    0x03: "ewneo.switch",
+    0x04: "ewneo.dimmer",
+    0x05: "ewneo.motor",
+    0x06: "ewneo.dual_switch",
+    0x07: "ewneo.quad_switch",
+    0x08: "ewneo.dual_motor",
+    0x09: "ewneo.quad_motor",
 }
 
 # NEO Subtypes für Telegram Mapping
@@ -189,7 +193,7 @@ LEARNING_TIMEOUT: Final = 180  # Timeout für EWneo Receiver Learning (3 Minuten
 # Device Names und Labels
 DEVICE_NAME_PREFIXES: Final = {
     "ew_transmitter": "Easywave Sender",
-    "ew_receiver": "EW-Receiver",
+    "ew_receiver": "Easywave Receiver",
     "ew_temperature_sensor": "EWneo-Sensoren", 
     "ew_humidity_sensor": "EWneo-Sensoren",
     "ew_sensor": "EWneo-Sensoren",
@@ -208,7 +212,16 @@ DEVICE_NAME_PREFIXES: Final = {
     "ewneo_quad_motor": "EWneo-QuadMotor"
 }
 
-# Button Labels
+# Button Labels (translation keys - actual labels come from translations.py)
+BUTTON_LABELS_KEYS: Final = {
+    TM_BUTTON_A: "button.a",
+    TM_BUTTON_B: "button.b", 
+    TM_BUTTON_C: "button.c",
+    TM_BUTTON_D: "button.d"
+}
+
+# Legacy BUTTON_LABELS for backwards compatibility (German defaults)
+# New code should use translations.get_button_label() instead
 BUTTON_LABELS: Final = {
     TM_BUTTON_A: "Taste A",
     TM_BUTTON_B: "Taste B", 

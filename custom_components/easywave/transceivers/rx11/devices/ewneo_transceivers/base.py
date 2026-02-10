@@ -32,29 +32,42 @@ class EWneoBaseDevice(BaseReceiver):
         self._transceiver = transceiver
         self._initialized = False
     
-    async def async_initialize(self, is_restoration: bool = False) -> bool:
-        """Initialize device by querying current state.
+    async def async_initialize(self, is_restoration: bool = False, max_retries: int = 3) -> bool:
+        """Initialize device by querying current state with retry logic.
         
         Called for BOTH fresh creation and restoration to ensure consistent behavior.
+        Uses retry logic for robustness during startup or reconnect.
         
         Args:
             is_restoration: True if restoring from persistent storage
+            max_retries: Maximum number of retry attempts (default: 3)
             
         Returns:
             True if initialization successful
         """
         if not self._transceiver or not self._gateway_serial:
-            _LOGGER.warning("%s %s: Cannot initialize - missing transceiver or gateway_serial",
-                          self.__class__.__name__, self.serial_number)
+            _LOGGER.warning("%s %s: Cannot initialize - missing transceiver=%s or gateway_serial=%s",
+                          self.__class__.__name__, self.serial_number,
+                          "present" if self._transceiver else "MISSING",
+                          self._gateway_serial if self._gateway_serial else "MISSING")
             return False
         
         source = "restoration" if is_restoration else "fresh creation"
-        _LOGGER.info("🔧 Initializing %s via %s: %s", 
-                    self.__class__.__name__, source, self.serial_number[-8:])
+        _LOGGER.debug("🔧 Initializing %s via %s: serial=%s, gateway=%s", 
+                    self.__class__.__name__, source, 
+                    self.serial_number[-8:] if self.serial_number else "None",
+                    self._gateway_serial[-8:] if self._gateway_serial else "None")
         
-        try:
-            # Query current state (Mode 0)
-            if hasattr(self._transceiver, 'rx11_ewb_query_state'):
+        if not hasattr(self._transceiver, 'rx11_ewb_query_state'):
+            _LOGGER.warning("⚠️ Transceiver does not support rx11_ewb_query_state")
+            return False
+        
+        # Try up to max_retries times without waiting between attempts
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Query current state (Mode 0)
+                _LOGGER.debug("📤 QueryState: gateway=%s, receiver=%s, mode=0 (attempt %d/%d)",
+                            self._gateway_serial[-8:], self.serial_number[-8:], attempt, max_retries)
                 result = await self._transceiver.rx11_ewb_query_state(
                     gateway_serial=self._gateway_serial,
                     receiver_serial=self.serial_number,
@@ -64,26 +77,33 @@ class EWneoBaseDevice(BaseReceiver):
                 if result:
                     recent_mode, state_bytes = result
                     _LOGGER.debug("📥 QueryState result: mode=%d, state=%s", 
-                                recent_mode, [f"0x{b:02X}" for b in state_bytes] if state_bytes else "None")
+                                recent_mode, 
+                                [f"0x{b:02X}" for b in state_bytes] if state_bytes else "None")
                     
-                    # Parse state
-                    if state_bytes and len(state_bytes) >= 5:
-                        self._parse_state_response(bytes(state_bytes))
+                    # Parse state - EWB returns mode separately and 4 bytes state
+                    # Combine them into 5 bytes for _parse_state_response (mode + state)
+                    if state_bytes and len(state_bytes) >= 4:
+                        combined_data = bytes([recent_mode]) + bytes(state_bytes[:4])
+                        self._parse_state_response(combined_data)
                         self._initialized = True
                         _LOGGER.info("✅ %s initialized successfully", self.__class__.__name__)
                         return True
                     else:
-                        _LOGGER.warning("⚠️ QueryState returned invalid state bytes")
+                        _LOGGER.debug("⚠️ QueryState invalid state bytes (attempt %d/%d)", 
+                                      attempt, max_retries)
                 else:
-                    _LOGGER.warning("⚠️ QueryState returned no result")
-            else:
-                _LOGGER.warning("⚠️ Transceiver does not support rx11_ewb_query_state")
-            
-            return False
-            
-        except Exception as e:
-            _LOGGER.error("❌ Error initializing %s: %s", self.__class__.__name__, e)
-            return False
+                    _LOGGER.debug("⚠️ QueryState no result (attempt %d/%d)", 
+                                  attempt, max_retries)
+                
+            except Exception as e:
+                _LOGGER.error("❌ Error initializing %s (attempt %d/%d): %s", 
+                            self.__class__.__name__, attempt, max_retries, e)
+                # Continue to next attempt
+        
+        # All attempts failed - mark as unreachable but don't disable
+        _LOGGER.warning("⚠️ Failed to initialize %s after %d attempts - device unreachable", 
+                       self.__class__.__name__, max_retries)
+        return False
     
     def process_telegram(self, telegram_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming telegram and extract state if present.

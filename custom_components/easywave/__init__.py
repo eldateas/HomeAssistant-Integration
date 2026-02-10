@@ -24,6 +24,7 @@ from .const import (
 )
 from .transceivers import TransceiverFactory, TransceiverType
 from .coordinator import EldatCoordinator
+from .translations import translate, get_language
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -364,17 +365,14 @@ async def async_remove_config_entry_device(
         
         if other_devices:
             # There are other devices - show warning message
-            device_names = [d.name or "Unbekannt" for d in other_devices[:5]]
+            device_names = [d.name or translate("device.unknown", hass=hass) for d in other_devices[:5]]
             device_list = ", ".join(device_names)
             if len(other_devices) > 5:
                 device_list += f" und {len(other_devices) - 5} weitere"
             
             _LOGGER.info("ℹ️ User tried to delete RX11 transceiver with %d other devices present", len(other_devices))
             raise HomeAssistantError(
-                f"Der RX11 USB Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind."
-                f"Bitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, "
-                f"oder entfernen Sie die gesamte Integration unter:"
-                f"Einstellungen → Geräte & Dienste → ELDAT Integration → Löschen"
+                translate("error.cannot_delete_rx11_with_devices", hass=hass)
             )
         else:
             # No other devices - remove the entire integration
@@ -420,9 +418,22 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove a config entry with proper cleanup - removes ALL devices and persistent data."""
     _LOGGER.info("🗑️ Removing ELDAT config entry and all associated data...")
     
-    # Get coordinator for shutdown
+    # Get coordinator for shutdown and index reset
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
+        # Reset all indices before shutdown
+        try:
+            coordinator.reset_all_ew_receiver_indices()
+            _LOGGER.info("✅ Easywave Receiver indices reset")
+        except Exception as e:
+            _LOGGER.warning("⚠️ Could not reset EW receiver indices: %s", e)
+        
+        try:
+            coordinator.reset_all_ewb_indices()
+            _LOGGER.info("✅ EWB indices reset")
+        except Exception as e:
+            _LOGGER.warning("⚠️ Could not reset EWB indices: %s", e)
+        
         await coordinator.async_shutdown()
     
     # Remove all devices associated with this config entry from device registry

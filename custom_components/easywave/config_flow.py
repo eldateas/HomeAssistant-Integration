@@ -26,6 +26,15 @@ from .const import (
     DEFAULT_DEVICE_NAME,
     LEARNING_TIMEOUT,
     EVENT_DEVICE_ADDED,
+    DOCS_URL_BASE,
+)
+from .translations import (
+    translate,
+    get_ewneo_device_name,
+    get_language,
+    t_receiver,
+    t_transmitter,
+    EWNEO_DEVICE_TYPE_KEYS,
 )
 from .transceivers import TransceiverFactory, TransceiverType
 from .transceivers.rx11 import find_rx11_devices, validate_rx11_device
@@ -36,6 +45,11 @@ _LOGGER = logging.getLogger(__name__)
 
 # Learning timeout in seconds (30 seconds for all learning operations)
 LEARNING_TIMEOUT_SECONDS = 30
+
+
+def get_docs_url(step_id: str) -> str:
+    """Generate documentation URL for a config flow step."""
+    return f"{DOCS_URL_BASE}step_{step_id}.md"
 
 
 class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -127,11 +141,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             #     return await self.async_step_rx21_setup()
             
             # No supported transceivers found
-            _LOGGER.warning("Keine unterstützten ELDAT Transceiver gefunden")
+            _LOGGER.warning("Keine unterstützten RX11 USB Transceiver gefunden")
             return self.async_abort(
                 reason="no_devices",
                 description_placeholders={
-                    "details": "Keine RX11 USB Transceiver gefunden. Stellen Sie sicher, dass ein ELDAT RX11 Gerät angeschlossen und erkannt wird."
+                    "details": "Keine RX11 USB Transceiver gefunden. Stellen Sie sicher, dass ein RX11 USB-Gerät angeschlossen und erkannt wird."
                 }
             )
         
@@ -195,6 +209,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         description_placeholders = {
             "device_name": device_label,
             "device_path": device_path,
+            "docs_url": get_docs_url("rx11_setup"),
         }
 
         return self.async_show_form(
@@ -245,14 +260,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "example_path": "/dev/ttyUSB0 or COM3",
                 "transceiver_type": self._transceiver_type.value if self._transceiver_type else "unknown",
+                "docs_url": get_docs_url("manual"),
             }
         )
 
     async def async_step_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle adding a new device to an existing integration.
 
-        This step checks that a coordinator exists and then redirects
-        to the device type selection flow used for learning specific devices.
+        This step checks that a coordinator exists, verifies RX11 connection,
+        and then redirects to the device type selection flow.
         """
         # Ensure an entry exists
         entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
@@ -264,15 +280,32 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not coordinator:
             return self.async_abort(reason="transceiver_not_available")
 
+        # Check if RX11 transceiver is connected
+        transceiver = getattr(coordinator, 'transceiver', None)
+        if not transceiver or not getattr(transceiver, 'is_connected', False):
+            return self.async_abort(reason="rx11_not_connected")
+
         # Redirect to device type selection
         return await self.async_step_device_type_select(user_input)
 
     async def async_step_device_type_select(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Select device type to add - shown as a menu."""
+        # Re-check RX11 connection before showing menu
+        entries = [entry for entry in self._async_current_entries() if entry.domain == DOMAIN]
+        if entries:
+            coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id)
+            if coordinator:
+                transceiver = getattr(coordinator, 'transceiver', None)
+                if not transceiver or not getattr(transceiver, 'is_connected', False):
+                    return self.async_abort(reason="rx11_not_connected")
+        
         # Show a menu with device type options
         return self.async_show_menu(
             step_id="device_type_select",
             menu_options=["device_transmitter_config", "device_receiver", "device_sensor", "device_ewneo_receiver"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_type_select"),
+            },
         )
     
     async def async_step_device_cancel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -293,6 +326,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_config",
             menu_options=["device_transmitter_1button", "device_transmitter_2button", "device_transmitter_3button", "device_type_select"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_config"),
+            },
         )
 
     async def async_step_device_transmitter_1button(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -320,6 +356,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_grouping",
             menu_options=["device_transmitter_grouping_single", "device_transmitter_grouping_group", "device_transmitter_config"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_grouping"),
+            },
         )
 
     async def async_step_device_transmitter_grouping_single(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -337,6 +376,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_switch_mode",
             menu_options=["device_transmitter_switch_impulse", "device_transmitter_switch_permanent", "device_transmitter_grouping"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_switch_mode"),
+            },
         )
 
     async def async_step_device_transmitter_switch_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -363,6 +405,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_button_count",
             menu_options=menu_options,
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_button_count"),
+            },
         )
 
     async def async_step_device_transmitter_buttons_1(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -394,6 +439,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_2button_usage",
             menu_options=["device_transmitter_2button_switch", "device_transmitter_2button_cover", "device_transmitter_config"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_2button_usage"),
+            },
         )
 
     async def async_step_device_transmitter_2button_switch(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -415,6 +463,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             menu_options=["device_transmitter_2button_2", "device_transmitter_2button_4", "device_transmitter_2button_usage", "device_cancel"],
             description_placeholders={
                 "usage_type": usage_type,
+                "docs_url": get_docs_url("device_transmitter_2button_button_count"),
             }
         )
 
@@ -438,7 +487,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
     async def async_step_device_transmitter_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Show learning menu for EW-Sender with start/cancel options."""
+        """Show learning menu for Easywave Sender with start/cancel options."""
         button_count = self._device_config.get("button_count", 4)
         operating_type = self._device_config.get("operating_type", "1")
         grouping_mode = self._device_config.get("grouping_mode", "single")
@@ -496,6 +545,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "grouping_mode_line": grouping_mode_line,
             "behavior_line": behavior_line,
             "button_count_text": button_count_text,
+            "docs_url": get_docs_url("device_transmitter_description"),
         }
         
         return self.async_show_menu(
@@ -556,6 +606,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_confirm_telegram",
             menu_options=["device_transmitter_verify", "device_transmitter_learn_start"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_confirm_telegram"),
+            },
         )
 
     async def async_step_device_transmitter_verify(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -585,7 +638,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if coordinator:
             sender_index = str(coordinator.get_next_ew_sender_index())
         
-        suggested_name = f"EW-Sender #{sender_index}"
+        # Get language for translations
+        lang = get_language(self.hass)
+        suggested_name = f"Easywave {t_transmitter(lang)} #{sender_index}"
         
         # Get available areas for selection
         from homeassistant.helpers import area_registry as ar
@@ -607,6 +662,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="device_transmitter_verify",
             data_schema=data_schema,
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_verify"),
+            },
         )
 
     async def async_step_device_transmitter_complete(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -655,10 +713,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 # Get next sender index for name
                 sender_index = coordinator.get_next_ew_sender_index()
+                lang = get_language(self.hass)
 
                 if received_serial in coordinator.devices:
                     existing_device = coordinator.devices[received_serial]
-                    existing_device_name = existing_device.get("name", f"EW-Sender {received_serial}")
+                    existing_device_name = existing_device.get("name", f"Easywave {t_transmitter(lang)} {received_serial}")
                     self._learned_device = {
                         "name": existing_device_name,
                         "serial_number": received_serial,
@@ -678,7 +737,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 
                 self._learned_device = {
-                    "name": f"EW-Sender #{sender_index}",
+                    "name": f"Easywave {t_transmitter(lang)} #{sender_index}",
                     "serial_number": received_serial,
                     "type": "ew_transmitter",
                     "device_type": "ew_transmitter",
@@ -716,21 +775,25 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_transmitter_learn_timeout",
             menu_options=["device_transmitter_learn_start", "device_transmitter_description"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_transmitter_learn_timeout"),
+            },
         )
 
     async def async_step_device_transmitter_already_exists(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show info that device already exists."""
         serial_number = "?"
-        device_name = "Unbekannt"
+        device_name = t_unknown(hass=self.hass)  # "Unbekannt" / "Unknown"
         if self._learned_device:
             serial_number = self._learned_device.get("serial_number", "?")
-            device_name = self._learned_device.get("name", "Unbekannt")
+            device_name = self._learned_device.get("name", t_unknown(hass=self.hass))
 
         return self.async_show_menu(
             step_id="device_transmitter_already_exists",
             menu_options=["device_transmitter_learn_start", "device_transmitter_description"],
             description_placeholders={
                 "device_name": device_name,
+                "docs_url": get_docs_url("device_transmitter_already_exists"),
             },
         )
 
@@ -743,6 +806,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_sensor_description",
             menu_options=["device_sensor_learn_start", "device_type_select"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_sensor_description"),
+            },
         )
 
     async def async_step_device_sensor_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -847,7 +913,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 sensor_types = [s for s in detected_sensors if s != "battery"]
                 
-                next_index = getattr(coordinator, "_next_ewneo_sensor_index", 1)
+                next_index = coordinator.get_next_ewneo_sensor_index() if hasattr(coordinator, 'get_next_ewneo_sensor_index') else 1
                 display_name = f"Easywave neo Sensor #{next_index}"
 
                 # Check if sensor already exists (similar to transmitter)
@@ -901,6 +967,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_sensor_learn_timeout",
             menu_options=["device_sensor_learn_start", "device_sensor_description"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_sensor_learn_timeout"),
+            },
         )
 
     async def async_step_device_sensor_already_exists(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -915,6 +984,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             menu_options=["device_sensor_learn_start"],
             description_placeholders={
                 "device_name": device_name,
+                "docs_url": get_docs_url("device_sensor_already_exists"),
             }
         )
 
@@ -943,7 +1013,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         sensor_index = "?"
         if coordinator:
-            sensor_index = str(getattr(coordinator, "_next_ewneo_sensor_index", 1))
+            sensor_index = str(coordinator.get_next_ewneo_sensor_index() if hasattr(coordinator, 'get_next_ewneo_sensor_index') else 1)
         
         suggested_name = f"Easywave neo Sensor #{sensor_index}"
         
@@ -952,27 +1022,23 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         available_sensors = self._learned_device.get("available_sensors", [])
         serial_number = self._learned_device.get("serial_number", "?")
         
-        # German translations for sensor types
-        SENSOR_TRANSLATIONS_DE = {
-            "temperature": "Temperatur",
-            "humidity": "Luftfeuchtigkeit",
-            "air_pressure": "Luftdruck",
-            "brightness": "Helligkeit",
-            "wind_speed": "Windgeschwindigkeit",
-            "rain": "Regen",
-            "battery": "Batterie",
-        }
+        # Get current language
+        lang = get_language(self.hass)
         
-        # Build sensor list for description with German translations
+        # Build sensor list for description with translations
         sensors_to_show = sensor_types or available_sensors
         translated_sensors = []
         for s in sensors_to_show:
-            if s in SENSOR_TRANSLATIONS_DE:
-                translated_sensors.append(f"  • {SENSOR_TRANSLATIONS_DE[s]}")
-            else:
-                translated_sensors.append(f"  • {s.replace('_', ' ').title()}")
+            # Use translation keys from translations module
+            trans_key = f"sensor_type.{s}" if s != "battery" else "entity.battery"
+            translated_name = translate(trans_key, lang)
+            # If translation returns the key, use title case
+            if translated_name == trans_key:
+                translated_name = s.replace('_', ' ').title()
+            translated_sensors.append(f"  • {translated_name}")
         
-        sensor_list = "\n".join(translated_sensors) if translated_sensors else "  • Auto-Erkennung bei Empfang"
+        auto_detect_msg = translate("device.auto_detect", lang) if translate("device.auto_detect", lang) != "device.auto_detect" else ("Auto-Erkennung bei Empfang" if lang == "de" else "Auto-detection on receive")
+        sensor_list = "\n".join(translated_sensors) if translated_sensors else f"  • {auto_detect_msg}"
         
         # Get available areas for selection
         from homeassistant.helpers import area_registry as ar
@@ -998,6 +1064,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "sensor_list": sensor_list,
                 "suggested_name": suggested_name,
                 "serial_short": serial_number[-8:] if serial_number != "?" else "?",
+                "docs_url": get_docs_url("device_sensor_verify"),
             }
         )
 
@@ -1016,12 +1083,12 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             entries = self.hass.config_entries.async_entries(DOMAIN)
             coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
             if coordinator and coordinator.transceiver:
-                _LOGGER.info("🔍 Getting next available EW-Receiver from RX11...")
+                _LOGGER.info("🔍 Getting next available Easywave Receiver from RX11...")
                 
                 # Get next available receiver index from persistent tracking
                 try:
                     index = await coordinator.get_next_free_ew_receiver_index()
-                    _LOGGER.info("✅ Got next free EW-Receiver index from persistent tracking: %d", index)
+                    _LOGGER.info("✅ Got next free Easywave Receiver index from persistent tracking: %d", index)
                 except ValueError:
                     return self.async_abort(reason="no_available_receivers")
                 
@@ -1030,84 +1097,93 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 serial = await coordinator.transceiver.rx11_ew_receiver_get_serial_by_index(index)
                 
                 if not serial:
-                    _LOGGER.error("❌ Failed to get serial for EW-Receiver index %d from RX11", index)
+                    _LOGGER.error("❌ Failed to get serial for Easywave Receiver index %d from RX11", index)
                     return self.async_abort(reason="no_receiver_serial")
                 
+                lang = get_language(self.hass)
                 self._device_config = {
                     "device_type": "ew_receiver",
                     "type": "ew_receiver",
                     "serial_number": serial,
                     "rx11_index": index,
-                    "name": f"EW-Empfänger #{index + 1}"
+                    "name": f"Easywave {t_receiver(lang)} #{index + 1}"
                 }
-                _LOGGER.info("✅ Using EW-Receiver: Index %d, Serial %s", index, serial[-8:])
+                _LOGGER.info("✅ Using Easywave Receiver: Index %d, Serial %s", index, serial[-8:])
                 return await self.async_step_device_receiver_type()
             else:
                 return self.async_abort(reason="no_coordinator")
         except Exception as e:
-            _LOGGER.error("Error getting next available EW-Receiver: %s", e)
+            _LOGGER.error("Error getting next available Easywave Receiver: %s", e)
             return self.async_abort(reason="receiver_load_failed")
 
     async def async_step_device_receiver_type(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure EW receiver device - Step 1: Select operating mode via menu."""
         serial = self._device_config.get("serial_number", "Unknown")
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         
         return self.async_show_menu(
             step_id="device_receiver_type",
             menu_options=["device_receiver_mode_impulse", "device_receiver_mode_on_off", "device_receiver_mode_up_down", "device_receiver_mode_up_stop_down", "device_receiver_mode_heating", "device_receiver_mode_universal", "device_type_select"],
             description_placeholders={
-                "device_name": f"EW-Empfänger #{rx11_index + 1}",
+                "device_name": f"Easywave {t_receiver(lang)} #{rx11_index + 1}",
                 "serial": serial[-12:] if serial else "Unknown",
+                "docs_url": get_docs_url("device_receiver_type"),
             }
         )
 
     async def async_step_device_receiver_mode_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle Impuls (1-Tast) mode selection - creates toggle button."""
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "impulse"
         self._device_config["operating_mode"] = 1
-        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         return await self.async_step_device_receiver_description()
 
     async def async_step_device_receiver_mode_on_off(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle EIN/AUS (2-Tast) mode selection - creates stateless switch entity."""
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "switch_2button"
         self._device_config["operating_mode"] = 2
-        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         return await self.async_step_device_receiver_description()
 
     async def async_step_device_receiver_mode_up_down(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle AUF/ZU (2-Tast) mode selection - creates stateless cover entity (no stop)."""
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "cover_2button"
         self._device_config["operating_mode"] = 2
-        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         return await self.async_step_device_receiver_description()
 
     async def async_step_device_receiver_mode_up_stop_down(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle AUF/STOPP/ZU (3-Tast) mode selection - creates stateless motor entity."""
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "motor_3button"
         self._device_config["operating_mode"] = 3
-        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         return await self.async_step_device_receiver_description()
 
     async def async_step_device_receiver_mode_heating(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle EIN/AUS (Heizung) mode selection - creates heating switch with 4h repeat."""
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "heating_cooling"
         self._device_config["operating_mode"] = 1
-        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         return await self.async_step_device_receiver_description()
 
     async def async_step_device_receiver_mode_universal(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle UNIVERSAL (4-Tast) mode selection - creates 4 individual buttons."""
         rx11_index = self._device_config.get("rx11_index", 0)
+        lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "universal_4button"
         self._device_config["operating_mode"] = 4
-        self._device_config["name"] = f"EW-Empfänger #{rx11_index + 1}"
+        self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         return await self.async_step_device_receiver_description()
     
     async def async_step_device_receiver_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1128,6 +1204,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         placeholders = {
             "operating_mode": operating_mode,
+            "docs_url": get_docs_url("device_receiver_description"),
         }
         
         return self.async_show_menu(
@@ -1169,6 +1246,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_receiver_confirm_learning",
             menu_options=["device_receiver_verify", "device_receiver_description"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_receiver_confirm_learning"),
+            },
         )
     
     async def async_step_device_receiver_verify(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1198,12 +1278,13 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "type": "ew_receiver",
                 "entity_type": "button"
             })
-            _LOGGER.info("✅ Creating EW-Receiver device: %s", device_name)
+            _LOGGER.info("✅ Creating Easywave Receiver device: %s", device_name)
             return await self.async_step_device_save()
         
         # Show form to enter name and area
         rx11_index = self._device_config.get("rx11_index", 0)
-        default_name = f"EW-Empfänger #{rx11_index + 1}"
+        lang = get_language(self.hass)
+        default_name = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         
         return self.async_show_form(
             step_id="device_receiver_verify",
@@ -1211,6 +1292,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("device_name", default=default_name): str,
                 vol.Optional("area_id"): selector.AreaSelector(),
             }),
+            description_placeholders={
+                "docs_url": get_docs_url("device_receiver_verify"),
+            },
         )
         
     # Note: Operating mode selection is now combined into async_step_device_receiver_type
@@ -1227,7 +1311,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_device_receiver_create(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Create the EW-Receiver device and send Code A."""
+        """Create the Easywave Receiver device and send Code A."""
         try:
             entries = self.hass.config_entries.async_entries(DOMAIN)
             coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
@@ -1246,7 +1330,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.warning("⚠️ Code A sending error (continuing): %s", e)
                 
                 # Mark receiver as used persistently in coordinator
-                device_name = self._device_config.get("name", f"EW-Empfänger #{rx11_index + 1}")
+                lang = get_language(self.hass)
+                device_name = self._device_config.get("name") or f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
                 coordinator.mark_ew_receiver_index_used(rx11_index, serial, serial, device_name)
                 _LOGGER.info("🔒 Marked receiver as used persistently: Index %d", rx11_index)
             
@@ -1256,7 +1341,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "type": "ew_receiver",
                 "entity_type": "button"
             })
-            _LOGGER.info("✅ Creating EW-Receiver device with serial: %s", serial[-8:] if serial else "Unknown")
+            _LOGGER.info("✅ Creating Easywave Receiver device with serial: %s", serial[-8:] if serial else "Unknown")
             return await self.async_step_device_save()
                 
         except Exception as e:
@@ -1269,7 +1354,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             rx11_index = user_input.get("rx11_index", 0)
             self._device_config = {
                 "serial_number": user_input.get("serial_number"),
-                "name": user_input.get("name", f"EW-Receiver (Index {rx11_index})"),  # Temporär, wird mit receiver_kind aktualisiert
+                "name": user_input.get("name", f"Easywave Receiver (Index {rx11_index})"),  # Temporär, wird mit receiver_kind aktualisiert
                 "rx11_index": rx11_index
             }
             return await self.async_step_device_receiver_type()
@@ -1282,7 +1367,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("rx11_index"): int
             }),
             description_placeholders={
-                "instruction": "Enter the EW-Receiver serial number manually."
+                "instruction": "Enter the Easywave Receiver serial number manually.",
+                "docs_url": get_docs_url("device_receiver_manual"),
             }
         )
         
@@ -1292,7 +1378,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         receiver_kind = self._device_config.get("receiver_kind", "switch")
         operating_mode = self._device_config.get("operating_mode", 1)
         serial = self._device_config.get("serial_number", "Unknown")
-        name = self._device_config.get("name", "EW-Receiver")
+        name = self._device_config.get("name", "Easywave Receiver")
         rx11_index = self._device_config.get("rx11_index", "Unknown")
         
         # Generate operating mode description based on new receiver_kind values
@@ -1332,9 +1418,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 mode_desc = "3-Tast"
                 button_summary = "• Button A\n• Button B\n• Button C"
             else:
-                mode_desc = f"Modus {operating_mode}"
-                button_summary = "• Standardkonfiguration"
-            learn_instructions = f"Empfänger in {operating_mode}-Tast Lernmodus versetzen."
+                mode_desc = f"Mode {operating_mode}" if get_language(self.hass) == "en" else f"Modus {operating_mode}"
+                button_summary = "• Standard configuration" if get_language(self.hass) == "en" else "• Standardkonfiguration"
+            lang = get_language(self.hass)
+            learn_instructions = f"Put receiver in {operating_mode}-button learning mode." if lang == "en" else f"Empfänger in {operating_mode}-Tast Lernmodus versetzen."
         
         return {
             "data_schema": vol.Schema({}),
@@ -1346,6 +1433,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "operating_mode": mode_desc,
                 "button_summary": button_summary,
                 "learn_instructions": learn_instructions,
+                "docs_url": get_docs_url("device_receiver_confirm"),
             }
         }
 
@@ -1376,8 +1464,28 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
     async def async_step_device_ewneo_receiver(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Configure EWneo receiver device - start with preparation."""
-        # Clean up any leftover preparation data
+        """Configure EWneo receiver device - start with preparation.
+        
+        Reuses existing preparation data (including reserved index) if available,
+        to avoid wasting indices when retrying after a timeout.
+        """
+        # Check if we have valid preparation data that can be reused
+        if hasattr(self, '_ewneo_preparation') and self._ewneo_preparation:
+            prep = self._ewneo_preparation
+            coordinator = prep.get("coordinator")
+            ewneo_index = prep.get("ewneo_index")
+            gateway_serial = prep.get("gateway_serial")
+            
+            # Verify coordinator and index are still valid
+            if coordinator and ewneo_index is not None and gateway_serial:
+                # Check if the index is still reserved/used by us
+                if coordinator.is_ewb_index_used(ewneo_index):
+                    _LOGGER.info("♻️ Reusing existing EWneo preparation (index: %d)", ewneo_index)
+                    return await self.async_step_device_ewneo_receiver_programming_mode()
+                else:
+                    _LOGGER.info("⚠️ Previous EWneo index %d was freed, getting new one", ewneo_index)
+        
+        # No valid preparation, create new one
         if hasattr(self, '_ewneo_preparation'):
             delattr(self, '_ewneo_preparation')
         return await self.async_step_device_ewneo_receiver_prepare()
@@ -1469,6 +1577,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "ewneo_index": str(ewneo_index) if ewneo_index is not None else "-",
                 "gateway_serial": gateway_serial or "-",
+                "docs_url": get_docs_url("device_ewneo_receiver_description"),
             },
             menu_options=["device_ewneo_receiver_programming_mode", "device_ewneo_receiver_back"],
         )
@@ -1478,34 +1587,31 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_ewneo_receiver_programming_mode",
             menu_options=["device_ewneo_receiver_learn_start", "device_ewneo_receiver_back"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_ewneo_receiver_programming_mode"),
+            },
         )
 
     async def async_step_device_ewneo_receiver_learn_start(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Start learning - immediately start the task and show progress."""
-        _LOGGER.warning("🔵 async_step_device_ewneo_receiver_learn_start CALLED! user_input=%s", user_input)
-        
         # Check if preparation data exists
         if not hasattr(self, '_ewneo_preparation') or not self._ewneo_preparation:
-            _LOGGER.error("❌ No preparation data!")
+            _LOGGER.error("No preparation data for EWneo learning")
             return self.async_abort(reason="no_preparation_data")
         
         coordinator = self._ewneo_preparation.get("coordinator")
         ewneo_index = self._ewneo_preparation.get("ewneo_index")
         gateway_serial = self._ewneo_preparation.get("gateway_serial")
         
-        _LOGGER.warning("🔵 Preparation data: index=%s, gateway=%s", ewneo_index, gateway_serial[-8:] if gateway_serial else None)
-        
         if not coordinator or ewneo_index is None or not gateway_serial:
-            _LOGGER.error("❌ Missing coordinator or index or gateway!")
+            _LOGGER.error("Missing coordinator, index, or gateway for EWneo learning")
             return self.async_abort(reason="no_preparation_data")
         
         # Start the learning task immediately
-        _LOGGER.warning("🚀 Starting EWneo learning task from learn_start...")
+        _LOGGER.debug("Starting EWneo learning task for index %d", ewneo_index)
         self._ewneo_learn_task = self.hass.async_create_task(
             self._do_ewneo_receiver_learning_with_timeout(coordinator, ewneo_index, gateway_serial)
         )
-        
-        _LOGGER.warning("🔵 Task created, showing progress...")
         
         # Show progress immediately
         return self.async_show_progress(
@@ -1516,11 +1622,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_device_ewneo_receiver_learn_progress(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Step 2: Perform the EWneo receiver learning with progress indicator."""
-        _LOGGER.warning("🟣 async_step_device_ewneo_receiver_learn_progress CALLED!")
-        
         # Check if preparation data exists
         if not hasattr(self, '_ewneo_preparation') or not self._ewneo_preparation:
-            _LOGGER.warning("🟣 No preparation data - aborting")
             return self.async_abort(reason="no_preparation_data")
         
         try:
@@ -1529,54 +1632,39 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             gateway_serial = self._ewneo_preparation.get("gateway_serial")
             
             if not coordinator or ewneo_index is None or not gateway_serial:
-                _LOGGER.warning("🟣 Missing data - aborting")
                 return self.async_abort(reason="no_preparation_data")
-
-            _LOGGER.warning("🟣 Task exists: %s, Task done: %s", 
-                           self._ewneo_learn_task is not None,
-                           self._ewneo_learn_task.done() if self._ewneo_learn_task else "N/A")
 
             # Initialize learning task if not started
             if self._ewneo_learn_task is None:
-                _LOGGER.warning("🟣 Task is None - starting new task...")
                 self._ewneo_learn_task = self.hass.async_create_task(
                     self._do_ewneo_receiver_learning_with_timeout(coordinator, ewneo_index, gateway_serial)
                 )
 
             # If task finished, route to next step
             if self._ewneo_learn_task.done():
-                _LOGGER.warning("🟣 Task is DONE - getting result...")
                 result = "error"
                 try:
                     result = self._ewneo_learn_task.result()
-                    _LOGGER.warning("🟣 Task result: %s", result)
                 except asyncio.CancelledError:
-                    _LOGGER.warning("🟣 Task was cancelled")
                     result = "cancelled"
                 except Exception as e:
-                    _LOGGER.error("🟣 Task error: %s", e, exc_info=True)
+                    _LOGGER.error("EWneo learning task error: %s", e)
                     result = "error"
                 finally:
                     self._ewneo_learn_task = None
                     self._ewneo_poll_task = None
 
                 if result == "success":
-                    _LOGGER.warning("🟣 SUCCESS - going to device_ewneo_receiver_verify")
                     return self.async_show_progress_done(next_step_id="device_ewneo_receiver_verify")
                 if result == "already_exists":
-                    _LOGGER.warning("🟣 ALREADY_EXISTS - going to already_exists menu")
                     return self.async_show_progress_done(next_step_id="device_ewneo_receiver_already_exists")
                 if result == "timeout":
-                    _LOGGER.warning("🟣 TIMEOUT - going to timeout menu")
                     return self.async_show_progress_done(next_step_id="device_ewneo_receiver_learn_timeout")
                 if result == "cancelled":
-                    _LOGGER.warning("🟣 CANCELLED - going back")
                     return self.async_show_progress_done(next_step_id="device_ewneo_receiver_description")
-                _LOGGER.warning("🟣 ERROR - aborting")
                 return self.async_abort(reason="ewneo_learning_failed")
 
             # Show progress
-            _LOGGER.warning("🟣 Task NOT done - showing progress...")
             return self.async_show_progress(
                 step_id="device_ewneo_receiver_learn_progress",
                 progress_action="waiting_for_ewneo_join",
@@ -1591,21 +1679,18 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _do_ewneo_receiver_learning_with_timeout(self, coordinator, ewneo_index: int, gateway_serial: str) -> str:
         """Run EWneo receiver learning with an enforced timeout for progress UI."""
-        _LOGGER.warning("🟠 _do_ewneo_receiver_learning_with_timeout ENTERED!")
         try:
-            _LOGGER.warning("🟠 Calling _do_ewneo_receiver_learning via wait_for...")
             # Add a small buffer to ensure the task completes and the UI advances
             result = await asyncio.wait_for(
                 self._do_ewneo_receiver_learning(coordinator, ewneo_index, gateway_serial),
                 timeout=LEARNING_TIMEOUT_SECONDS + 2,
             )
-            _LOGGER.warning("🟠 _do_ewneo_receiver_learning returned: %s", result)
             return result
         except asyncio.TimeoutError:
-            _LOGGER.warning("🟠 asyncio.TimeoutError in wait_for wrapper!")
+            _LOGGER.warning("EWneo learning timed out")
             return "timeout"
         except Exception as e:
-            _LOGGER.error("🟠 Exception in _with_timeout: %s", e, exc_info=True)
+            _LOGGER.error("Error in EWneo learning: %s", e)
             raise
 
     async def async_step_device_ewneo_receiver_learn_wait(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1622,6 +1707,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_ewneo_receiver_learn_wait",
             menu_options=["device_ewneo_receiver_learn_wait", "device_ewneo_receiver_learn_cancel"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_ewneo_receiver_learn_wait"),
+            },
         )
 
     async def async_step_device_ewneo_receiver_learn_cancel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1655,6 +1743,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_menu(
             step_id="device_ewneo_receiver_learn_timeout",
             menu_options=["device_ewneo_receiver_programming_mode", "device_ewneo_receiver_back"],
+            description_placeholders={
+                "docs_url": get_docs_url("device_ewneo_receiver_learn_timeout"),
+            },
         )
 
     async def async_step_device_ewneo_receiver_already_exists(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1671,6 +1762,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "device_name": device_name,
             "old_index": str(old_index),
             "new_index": str(new_index),
+            "docs_url": get_docs_url("device_ewneo_receiver_already_exists"),
         }
         
         # Clean up preparation data and learned device for retry
@@ -1711,18 +1803,12 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         device_type_code = self._learned_device.get("device_type_code", 0)
         serial_number = self._learned_device.get("serial_number", "?")
         
+        # Get language and friendly device type name
+        lang = get_language(self.hass)
+        friendly_type_name = get_ewneo_device_name(device_type_code, lang)
+        
         # Generate suggested name based on device type
-        EWNEO_DEVICE_NAMES = {
-            0x03: "Schalter",
-            0x04: "Dimmer",
-            0x05: "Motor",
-            0x06: "2-Kanal Schalter",
-            0x07: "4-Kanal Schalter",
-            0x08: "2-Kanal Motor",
-            0x09: "4-Kanal Motor",
-        }
-        friendly_type_name = EWNEO_DEVICE_NAMES.get(device_type_code, "Gerät")
-        suggested_name = f"EWneo-Empfänger #{ewneo_index + 1}"
+        suggested_name = f"Easywave neo {t_receiver(lang)} #{ewneo_index + 1}"
         
         # Determine entity type for display
         if device_type_code == 0x04:
@@ -1754,6 +1840,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="device_ewneo_receiver_verify",
             data_schema=data_schema,
+            description_placeholders={
+                "docs_url": get_docs_url("device_ewneo_receiver_verify"),
+            },
         )
 
     async def async_step_device_ewneo_receiver_complete(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -1766,14 +1855,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _do_ewneo_receiver_learning(self, coordinator, ewneo_index: int, gateway_serial: str) -> str:
         """Run EWneo receiver join loop in a background task."""
-        _LOGGER.warning("🟢 _do_ewneo_receiver_learning ENTERED!")
-        _LOGGER.warning("🟢 coordinator=%s, ewneo_index=%s, gateway_serial=%s", 
-                       type(coordinator).__name__, ewneo_index, gateway_serial[-8:] if gateway_serial else None)
-        _LOGGER.info("=== EWNEO TRANSCEIVER LEARNING START ===")
-        _LOGGER.info("🔗 Starting EWneo receiver join loop (max 30 seconds)...")
+        _LOGGER.info("Starting EWneo receiver join loop (max %d seconds)...", LEARNING_TIMEOUT_SECONDS)
 
         try:
-            _LOGGER.warning("🟢 Inside try block, starting loop...")
             start_time = time.time()
             join_result = None
             attempt = 0
@@ -1819,45 +1903,18 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             from .const import DEVICE_TYPES
             device_type_name = DEVICE_TYPES.get(device_type_code, f"unknown_0x{device_type_code:02X}")
             
-            # Multilingual device names based on device type
-            EWNEO_DEVICE_NAMES = {
-                # German names
-                "de": {
-                    0x03: "Schalter, 1-Kanal",       # ewneo_switch - 1 channel
-                    0x04: "Dimmer, 1-Kanal",         # ewneo_dimmer
-                    0x05: "Motor, 1-Kanal",          # ewneo_motor - 1 channel
-                    0x06: "Schalter, 2-Kanal",       # ewneo_dual_switch
-                    0x07: "Schalter, 4-Kanal",       # ewneo_quad_switch
-                    0x08: "Motor, 2-Kanal",          # ewneo_dual_motor
-                    0x09: "Motor, 4-Kanal",          # ewneo_quad_motor
-                },
-                # English names
-                "en": {
-                    0x03: "Switch, 1-Channel",       # ewneo_switch - 1 channel
-                    0x04: "Dimmer, 1-Channel",       # ewneo_dimmer
-                    0x05: "Motor, 1-Channel",        # ewneo_motor - 1 channel
-                    0x06: "Switch, 2-Channel",       # ewneo_dual_switch
-                    0x07: "Switch, 4-Channel",       # ewneo_quad_switch
-                    0x08: "Motor, 2-Channel",        # ewneo_dual_motor
-                    0x09: "Motor, 4-Channel",        # ewneo_quad_motor
-                },
-            }
-            
-            # Detect language from hass config (default to German)
-            language = self.hass.config.language if hasattr(self.hass.config, 'language') else "de"
-            if language not in EWNEO_DEVICE_NAMES:
-                language = "de"  # Fallback to German
-            
-            friendly_type_name = EWNEO_DEVICE_NAMES[language].get(device_type_code, "Gerät" if language == "de" else "Device")
+            # Get language and friendly device type name using translations module
+            lang = get_language(self.hass)
+            friendly_type_name = get_ewneo_device_name(device_type_code, lang)
 
             # Check if receiver already exists (similar to sensor)
             if receiver_serial in coordinator.devices:
                 existing_device = coordinator.devices[receiver_serial]
-                existing_device_name = existing_device.get("name", f"EWneo-Empfänger {receiver_serial}")
+                existing_device_name = existing_device.get("name") or f"Easywave neo {t_receiver(lang)} {receiver_serial}"
                 old_ewneo_index = existing_device.get("ewneo_index")
                 old_gateway_serial = existing_device.get("gateway_serial")
                 
-                _LOGGER.info("⚠️ EWneo receiver already exists: %s (old index: %s, new index: %s)",
+                _LOGGER.info("⚠️ Easywave neo receiver already exists: %s (old index: %s, new index: %s)",
                            existing_device_name, old_ewneo_index, ewneo_index)
                 
                 # Determine specific device type name from device_type_code
@@ -1985,7 +2042,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.info("🎯 EWneo-Receiver joined successfully (Index: %d, Type: 0x%02X)",
                         ewneo_index, device_type_code)
 
-            device_name = f"EWneo-Empfänger #{ewneo_index + 1}"
+            lang = get_language(self.hass)
+            device_name = f"Easywave neo {t_receiver(lang)} #{ewneo_index + 1}"
             self._learned_device["name"] = device_name
             coordinator.mark_ewb_index_used(ewneo_index, gateway_serial, receiver_serial, device_name)
 
@@ -2028,19 +2086,20 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if coordinator:
                 sender_index = str(coordinator.get_next_ew_sender_index())
             
-            suggested_name = f"EW-Sender #{sender_index}"
+            lang = get_language(self.hass)
+            suggested_name = f"Easywave {t_transmitter(lang)} #{sender_index}"
             last_telegram = self._learned_device.get("last_telegram", {})
             button = last_telegram.get("button", "?")
             
             description = (
-                f"✅ **EW-Sender erfolgreich erkannt!**\n\n"
+                f"✅ **Easywave Sender erfolgreich erkannt!**\n\n"
                 f"**🔍 Detected device info:**\n"
                 f"• Serial: `{serial_number[-8:]}`\n"
                 f"• Name: {suggested_name}\n"
                 f"• Button count: {button_count}\n"
                 f"• Button pressed: {button}\n\n"
                 f"**⚡ What will be created:**\n"
-                f"• 1 EW-Sender device\n"
+                f"• 1 Easywave Sender device\n"
                 f"• {button_count} button entities\n\n"
                 f"**⚙️ Gerät anlegen:**\n"
                 f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
@@ -2050,10 +2109,18 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             available_sensors = self._learned_device.get("available_sensors", [])
             suggested_name = self._learned_device.get("name", "Easywave neo Sensor #?")
             
-            sensor_list = "\n".join([f"• {s.replace('_', ' ').title()}" for s in (sensor_types or available_sensors)])
-            if not sensor_list:
-                sensor_list = "• Auto-detection on reception"
-            
+            # Translate sensor type names
+            lang = get_language(self.hass)
+            sensors_to_show = sensor_types or available_sensors
+            translated_sensors = []
+            for s in sensors_to_show:
+                trans_key = f"sensor_type.{s}" if s != "battery" else "entity.battery"
+                translated_name = translate(trans_key, lang)
+                if translated_name == trans_key:
+                    translated_name = s.replace('_', ' ').title()
+                translated_sensors.append(f"• {translated_name}")
+            sensor_list = "\n".join(translated_sensors)
+           
             # Use translation placeholders for EWneo-Sensor description
             description_placeholders = {
                 "serial_short": serial_number[-8:],
@@ -2068,6 +2135,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             device_type_name = self._learned_device.get("device_type_name", "unknown")
             ewneo_index = self._learned_device.get("ewneo_index", "?")
             
+            # Get language
+            lang = get_language(self.hass)
+            
             # Determine entity type for display
             if device_type_code == 0x04:
                 entity_type_display = "Dimmer (Light)"
@@ -2079,17 +2149,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 entity_type_display = "Switch"
             
             # Use stored name or generate fallback with index
-            EWNEO_DEVICE_NAMES = {
-                0x03: "Schalter",
-                0x04: "Dimmer",
-                0x05: "Motor",
-                0x06: "2-Kanal Schalter",
-                0x07: "4-Kanal Schalter",
-                0x08: "2-Kanal Motor",
-                0x09: "4-Kanal Motor",
-            }
-            friendly_type_name = EWNEO_DEVICE_NAMES.get(device_type_code, "Gerät")
-            suggested_name = self._learned_device.get("name", f"EWneo-Empfänger #{ewneo_index + 1}")
+            friendly_type_name = get_ewneo_device_name(device_type_code, lang)
+            suggested_name = self._learned_device.get("name", f"Easywave neo {t_receiver(lang)} #{ewneo_index + 1}")
         else:
             suggested_name = self._learned_device.get("name", f"ELDAT Device ({serial_number})")
             description = (
@@ -2113,7 +2174,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "device_confirm_create": "✅ Anlegen",
                 "device_confirm_rename": "✏️ Namen ändern",
                 "device_confirm_back": "⬅️ Zurück",
-            }
+            },
+            description_placeholders={
+                "docs_url": get_docs_url(step_id),
+            },
         )
 
     async def async_step_device_confirm_create(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -2188,9 +2252,20 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Generate placeholders again for EWneo sensor
                 sensor_types = self._learned_device.get("sensor_types", [])
                 available_sensors = self._learned_device.get("available_sensors", [])
-                sensor_list = "\\n".join([f"• {s.replace('_', ' ').title()}" for s in (sensor_types or available_sensors)])
+                
+                # Translate sensor type names
+                lang = get_language(self.hass)
+                sensors_to_show = sensor_types or available_sensors
+                translated_sensors = []
+                for s in sensors_to_show:
+                    trans_key = f"sensor_type.{s}" if s != "battery" else "entity.battery"
+                    translated_name = translate(trans_key, lang)
+                    if translated_name == trans_key:
+                        translated_name = s.replace('_', ' ').title()
+                    translated_sensors.append(f"• {translated_name}")
+                sensor_list = "\n".join(translated_sensors)
                 if not sensor_list:
-                    sensor_list = "• Auto-detection on reception"
+                    sensor_list = "• Auto-Erkennung bei Empfang" if lang == "de" else "• Auto-detection on reception"
                 
                 serial_number = self._learned_device.get("serial_number", "?")
                 
@@ -2205,7 +2280,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "serial_short": serial_number[-8:],
                         "suggested_name": device_name,
                         "sensor_list": sensor_list,
-                    }
+                        "docs_url": get_docs_url("device_confirm_ewneo_sensor"),
+                    },
                 )
             return await self.async_step_device_confirm()
 
@@ -2217,6 +2293,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
             description_placeholders={
                 "current_name": current_name,
+                "docs_url": get_docs_url("device_confirm_rename"),
             },
         )
         
@@ -2229,10 +2306,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         ewneo_index = self._learned_device.get("ewneo_index")
         
         # Suggest default name and entity type based on device type
+        lang = get_language(self.hass)
         if ewneo_index:
-            suggested_name = f"EWneo-Empfänger #{ewneo_index}"
-        else :
-            suggested_name = "EWneo-Empfänger"
+            suggested_name = f"Easywave neo {t_receiver(lang)} #{ewneo_index}"
+        else:
+            suggested_name = f"Easywave neo {t_receiver(lang)}"
 
         if not self._learned_device.get("name"):
             self._learned_device["name"] = suggested_name
@@ -2243,6 +2321,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "device_ewneo_receiver_confirm_create": "✅ Anlegen",
                 "device_ewneo_receiver_confirm_rename": "✏️ Namen ändern",
                 "device_ewneo_receiver_confirm_back": "⬅️ Zurück",
+            },
+            description_placeholders={
+                "docs_url": get_docs_url("device_ewneo_receiver_confirm"),
             },
         )
 
@@ -2308,6 +2389,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
             description_placeholders={
                 "current_name": current_name,
+                "docs_url": get_docs_url("device_ewneo_receiver_confirm_rename"),
             },
         )
 
@@ -2328,8 +2410,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 import time
                 serial_number = f"MANUAL_{int(time.time())}"
                 device_data["serial_number"] = serial_number
-                
+            
             device_type = device_data.get("device_type", device_data.get("type", "unknown"))
+            
+            # Log device_data for EWneo devices to verify all required fields
+            if device_data.get("neo_device"):
+                _LOGGER.info("💾 Saving EWneo device: serial=%s, type=%s, gateway_serial=%s, ewneo_index=%s",
+                           serial_number[-8:], device_type,
+                           device_data.get('gateway_serial', 'MISSING'),
+                           device_data.get('ewneo_index', 'MISSING'))
             
             if serial_number:
                 # Check if device already exists and remove it cleanly first
@@ -2354,12 +2443,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Determine specific device properties and entities to create
                 entity_info = self._determine_device_entities()
                 
-                _LOGGER.warning("🔍 _determine_device_entities returned: %d entities, platforms: %s", 
+                _LOGGER.debug("Device entities determined: %d entities, platforms: %s", 
                               len(entity_info.get("entities", [])), entity_info.get("platforms", []))
-                for entity in entity_info.get("entities", []):
-                    _LOGGER.warning("  📋 Entity: type=%s, sensor_type=%s, name=%s, unique_id=%s", 
-                                  entity.get("type"), entity.get("sensor_type"), 
-                                  entity.get("name"), entity.get("unique_id", "")[-16:])
                 
                 # Update device info with entity specifications
                 device_data.update(entity_info)
@@ -2380,9 +2465,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 device_name = device_data.get("name", f"{device_type} {serial_number}")
                 
-                # Use the same model description logic as entity.py for consistency
+                # Use the same model description logic as entity.py for consistency (language-aware)
                 from .helpers import build_model_description
-                model = build_model_description(device_type, device_data)
+                from .translations import get_language
+                lang = get_language(self.hass)
+                model = build_model_description(device_type, device_data, lang)
                 
                 device_entry = device_registry.async_get_or_create(
                     config_entry_id=entries[0].entry_id,
@@ -2402,6 +2489,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         _LOGGER.debug("📍 Device area cleared (no area specified)")
                 
                 # Ensure the device data is saved before firing events
+                _LOGGER.info("📦 Device data before save: serial=%s, gateway_serial=%s, neo_device=%s, ewneo_index=%s",
+                           serial_number[-8:], 
+                           device_data.get('gateway_serial', 'MISSING'),
+                           device_data.get('neo_device'),
+                           device_data.get('ewneo_index', 'MISSING'))
                 await coordinator._save_device_configuration()
                 _LOGGER.info("✅ Device configuration saved")
 
@@ -2435,15 +2527,6 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             _LOGGER.warning("⚠️ EwbQueryState failed for EWneo device %s", serial_number[-8:])
                     except Exception as e:
                         _LOGGER.warning("⚠️ Error querying initial EWneo state: %s", e)
-
-                # Register for telegram monitoring if not send-only
-                if device_type != "ew_receiver":
-                    # Use modern transceiver interface
-                    if hasattr(coordinator, 'transceiver'):
-                        await coordinator.transceiver.register_device(serial_number, device_data)
-                    coordinator._known_devices.add(serial_number)
-                else:
-                    _LOGGER.info("EW-Receiver %s is send-only; not registering for incoming telegram monitoring", serial_number)
 
                 _LOGGER.info("Device permanently registered: %s (%s) with %d entities", 
                            device_data.get("name", device_data.get("device_type", "Unbekanntes Gerät")), 
@@ -2548,17 +2631,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         device_type = device_data.get("device_type", device_data.get("type", "unknown"))
         serial_number = device_data.get("serial_number", "unknown")
         
-        _LOGGER.warning("🔍 _determine_device_entities called:")
-        _LOGGER.warning("  📋 device_type: %s", device_type)
-        _LOGGER.warning("  📋 serial_number: %s", serial_number[-16:])
-        _LOGGER.warning("  📋 sensor_types: %s", device_data.get("sensor_types"))
-        _LOGGER.warning("  📋 available_sensors: %s", device_data.get("available_sensors"))
-        
         # Get entity specs from centralized function
         entity_specs = create_entity_specs_for_device(serial_number, device_data)
         
-        _LOGGER.warning("🔍 create_entity_specs_for_device returned: %s", 
-                      {k: len(v) for k, v in entity_specs.items() if v})
+        _LOGGER.debug("Entity specs for %s: %s", 
+                      serial_number[-8:], {k: len(v) for k, v in entity_specs.items() if v})
         
         # Convert entity_specs format (dict of lists) to old format (single list + platforms)
         all_entities = []
@@ -2579,7 +2656,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         elif device_type in ["ew_sensor", "ewneo_sensor"]:
             device_class = "sensor"
             category = "sensor"
-        elif device_type == "ew_receiver" or device_type == "EW-Receiver":
+        elif device_type == "ew_receiver" or device_type == "Easywave Receiver":
             receiver_kind = device_data.get("receiver_kind", "switch")
             if receiver_kind in ["cover_2button", "motor_3button"]:
                 device_class = "garage"

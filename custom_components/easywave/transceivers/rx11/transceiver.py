@@ -33,10 +33,13 @@ def find_rx11_devices():
             
             # Check if device matches RX11 VID/PID
             if port.vid == RX11_VID and port.pid in RX11_PIDS:
+                # Override manufacturer name for ELDAT devices (VID 0x155A)
+                # USB reports "ELDAT GmbH" but we want just "ELDAT"
+                manufacturer = "ELDAT"
                 device_info = {
                     "device": port.device,
                     "name": port.description or f"RX11 Device ({port.device})",
-                    "manufacturer": port.manufacturer or "ELDAT",
+                    "manufacturer": manufacturer,
                     "serial_number": port.serial_number,
                     "vid": port.vid,
                     "pid": port.pid,
@@ -777,7 +780,7 @@ class RX11Transceiver(BaseTransceiver):
             if info_type == 1:
                 device_type = "ew_transmitter"
                 type_name = "transmitter"
-            elif info_type == 0:  # Release events sind auch EW-Transmitter
+            elif info_type == 0:  # Release events sind auch Easywave Transmitter
                 device_type = "ew_transmitter" 
                 type_name = "transmitter"
             elif info_type == 2:
@@ -811,10 +814,10 @@ class RX11Transceiver(BaseTransceiver):
             if info_type == 0:
                 _LOGGER.warning("🔍 RELEASE detected: info_type=0, info_data_len=%d", len(info_data))
                 # This is a release telegram - find the device type and handle accordingly
-                # For EW-Transmitter releases, we need to determine which button was released
+                # For Easywave Transmitter releases, we need to determine which button was released
                 # The button info should be in the first byte of info_data (similar to press)
                 
-                # Check if this could be an EW-Transmitter by pattern matching
+                # Check if this could be an Easywave Transmitter by pattern matching
                 if len(info_data) == 8:
                     # Release telegrams always contain button=0 in the data, but we need the actual button
                     # Use the last pressed button ID from the previous push event
@@ -845,14 +848,14 @@ class RX11Transceiver(BaseTransceiver):
                         "is_release": True,
                     })
                     
-                    _LOGGER.debug("🎛️ EW-Transmitter %s: Button %s (%d) release [status=%s]", 
+                    _LOGGER.debug("🎛️ Easywave Transmitter %s: Button %s (%d) release [status=%s]", 
                                serial_number, button_name, button_id, current_status or "normal")
             
             elif info_type == 1:
 
-                # Für EW-Transmitter: Parse Button-Info aus den Bytes info_data
+                # Für Easywave Transmitter: Parse Button-Info aus den Bytes info_data
                 if len(info_data) >= 1:
-                    # EWB_RCV Telegramm-Format für EW-Transmitter:
+                    # EWB_RCV Telegramm-Format für Easywave Transmitter:
                     # info_data ist 1 Byte lang (bei Press/Battery Low) oder 8 Bytes (bei Release)
                     # info_type bestimmt Press (1) oder Release (0) 
                     # Byte 0 in info_data: Button-ID (0=A, 1=B, 2=C, 3=D)
@@ -862,7 +865,7 @@ class RX11Transceiver(BaseTransceiver):
                         # Bits 1-0 contain button ID, bit 7 is battery low flag
                         raw_button_byte = info_data[0] if info_data else 0
                         
-                        # Battery detection for EW-Transmitter
+                        # Battery detection for Easywave Transmitter
                         # Sequence: Push (button) -> [Push (battery low 0x80)] -> Release
                         # Battery status is ONLY evaluated on Release
                         
@@ -941,11 +944,11 @@ class RX11Transceiver(BaseTransceiver):
                                 "battery_recovered": battery_recovered,  # Flag for coordinator
                             })
                             
-                            _LOGGER.debug("🎛️ EW-Transmitter %s: Button %s (%d) press [status=%s]", 
+                            _LOGGER.debug("🎛️ Easywave Transmitter %s: Button %s (%d) press [status=%s]", 
                                     serial_number, button_name, button_id, self._battery_status.get(serial_number, "normal"))
                         
                     except Exception as e:
-                        _LOGGER.warning("Error parsing EW-Transmitter button data: %s", e, exc_info=True)
+                        _LOGGER.warning("Error parsing Easywave Transmitter button data: %s", e, exc_info=True)
                         # Fallback to basic parsing
                         button_data = info_data[0] if info_data else 0
                         button_id = button_data & 0x03  # Extract button ID
@@ -1484,7 +1487,7 @@ class RX11Transceiver(BaseTransceiver):
             info_type: Optional info type
             timestamp: Optional timestamp
             device_registry: DeviceRegistry instance for persistent storage
-            ew_receiver_allocator: Callback to allocate EW-Receiver (returns Dict with receiver data)
+            ew_receiver_allocator: Callback to allocate Easywave Receiver (returns Dict with receiver data)
             
         Returns:
             Device info dictionary or None on error
@@ -1505,20 +1508,20 @@ class RX11Transceiver(BaseTransceiver):
                 "persistent_storage": True,  # Mark for enhanced persistence
             }
             
-            # Special handling for EW-Receiver devices with persistent serial storage
+            # Special handling for Easywave Receiver devices with persistent serial storage
             if device_type == "EW_Receiver" or device_type.lower() == "ew_receiver":
                 if ew_receiver_allocator:
                     ew_receiver_data = await ew_receiver_allocator(serial_number)
                     if ew_receiver_data:
                         device_info.update(ew_receiver_data)
-                        _LOGGER.info("📝 EW-Receiver serial %s permanently stored for device %s", 
+                        _LOGGER.info("📝 Easywave Receiver serial %s permanently stored for device %s", 
                                    ew_receiver_data.get("ew_receiver_serial", "unknown")[-8:], 
                                    serial_number[-8:])
                     else:
-                        _LOGGER.error("Failed to allocate EW-Receiver for device %s", serial_number)
+                        _LOGGER.error("Failed to allocate Easywave Receiver for device %s", serial_number)
                         return None
                 else:
-                    _LOGGER.warning("No EW-Receiver allocator provided for device %s", serial_number)
+                    _LOGGER.warning("No Easywave Receiver allocator provided for device %s", serial_number)
             
             # For sensor devices, ensure they have sensor capabilities
             elif device_type in ["ew_sensor", "ew_transceiver"]:
@@ -1545,32 +1548,32 @@ class RX11Transceiver(BaseTransceiver):
         device_registry = None,
         index_free_callback: Callable = None
     ) -> None:
-        """Clean up RX11-based device resources including EW-Receiver mappings.
+        """Clean up RX11-based device resources including Easywave Receiver mappings.
         
         Args:
             serial_number: Device serial number
             device_info: Device information dictionary
             device_registry: DeviceRegistry instance
-            index_free_callback: Callback to free EW-Receiver index (func(index))
+            index_free_callback: Callback to free Easywave Receiver index (func(index))
         """
         try:
             device_type = device_info.get("type", "unknown")
             
-            # Clean up EW-Receiver mapping if this was an EW-Receiver device
+            # Clean up Easywave Receiver mapping if this was an Easywave Receiver device
             ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
             ew_receiver_serial = device_info.get("ew_receiver_serial")
             
             if ew_receiver_index is not None:
-                # Remove EW-Receiver mapping from device registry
+                # Remove Easywave Receiver mapping from device registry
                 if device_registry and ew_receiver_serial:
                     if device_registry.remove_ew_receiver_mapping(ew_receiver_index):
-                        _LOGGER.info("🗑️ Removed EW-Receiver mapping: Index %d, Serial %s", 
+                        _LOGGER.info("🗑️ Removed Easywave Receiver mapping: Index %d, Serial %s", 
                                    ew_receiver_index, ew_receiver_serial[-8:])
                 
                 # Free up receiver index persistently
                 if index_free_callback:
                     index_free_callback(ew_receiver_index)
-                    _LOGGER.info("♻️ Freed EW-Receiver index %d for reuse", ew_receiver_index)
+                    _LOGGER.info("♻️ Freed Easywave Receiver index %d for reuse", ew_receiver_index)
             
             # Save device manager changes
             if device_registry and hasattr(device_registry, 'save'):
@@ -1589,7 +1592,7 @@ class RX11Transceiver(BaseTransceiver):
         index_used_callback: Callable = None,
         whitelist_callback: Callable = None
     ) -> None:
-        """Restore RX11-based device with persistent EW-Receiver serial handling.
+        """Restore RX11-based device with persistent Easywave Receiver serial handling.
         
         Args:
             serial_number: Device serial number
@@ -1603,12 +1606,12 @@ class RX11Transceiver(BaseTransceiver):
             
             device_type = device_info.get("type", device_info.get("device_type", "unknown"))
             
-            # Restore EW-Receiver serial mapping if present (unidirectional EW devices)
+            # Restore Easywave Receiver serial mapping if present (unidirectional EW devices)
             ew_receiver_serial = device_info.get("ew_receiver_serial")
             ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
             
             if ew_receiver_serial and ew_receiver_index is not None:
-                # Restore EW-Receiver mapping in device registry
+                # Restore Easywave Receiver mapping in device registry
                 if device_registry:
                     device_registry.store_ew_receiver_mapping(
                         ew_receiver_index, ew_receiver_serial, serial_number
@@ -1616,7 +1619,7 @@ class RX11Transceiver(BaseTransceiver):
                 
                 # Mark receiver as used persistently
                 if index_used_callback:
-                    device_name = device_info.get("name", f"EW-Receiver ({serial_number})")
+                    device_name = device_info.get("name", f"Easywave Receiver ({serial_number})")
                     index_used_callback(ew_receiver_index, ew_receiver_serial, serial_number, device_name)
                 
                 # Add to whitelist (memory-only during setup)
@@ -1628,7 +1631,7 @@ class RX11Transceiver(BaseTransceiver):
                         source="GetFdSerial"
                     )
                 
-                _LOGGER.info("🔄 Restored EW-Receiver mapping: Index %d, Serial %s → Device %s", 
+                _LOGGER.info("🔄 Restored Easywave Receiver mapping: Index %d, Serial %s → Device %s", 
                            ew_receiver_index, ew_receiver_serial[-8:], serial_number[-8:])
             
             # Ensure RX11-based devices have proper sensor configuration

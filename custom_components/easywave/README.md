@@ -62,7 +62,7 @@ Das neue DeviceManager-System (ab v2.0) garantiert:
 ### RX11 Transceiver-Unterstützung
 - Vollständige Integration des ELDAT RX11 Transceivers
 - Native C-Bibliothek Integration für optimale Performance
-- Kontinuierliche EWB Receive-Loop für EWneo-Sensoren, EW-Transmitter und EWneo-Receiver
+- Kontinuierliche EWB Receive-Loop für EWneo-Sensoren, Easywave Transmitter und EWneo-Receiver
 - Automatische Hardware- und Firmware-Versionserkennung
 
 ### Erweiterte EWneo-Geräte-Unterstützung

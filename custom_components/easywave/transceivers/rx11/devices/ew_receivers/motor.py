@@ -23,7 +23,7 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
     """Motor receiver implementation for RX11 transceiver.
     
     Handles EWB/EWneo motor devices for covers, blinds, and shutters.
-    NOT used for classic EW-Receivers - those use entity_specs.py.
+    NOT used for classic Easywave Receivers - those use entity_specs.py.
     Inherits Cover behavior from CoverBehaviorMixin.
     """
     
@@ -54,7 +54,7 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
         """Generate entity specifications for EWneo/EWB motor devices.
         
         EWneo motors create cover entities with all features (open/close/stop/position).
-        This is NOT used for classic EW-Receivers.
+        This is NOT used for classic Easywave Receivers.
         """
         specs = {
             "switch": [],
@@ -222,7 +222,7 @@ def create_rx11_motor_receiver(
 ) -> RX11MotorReceiver:
     """Factory function to create EWneo/EWB motor receiver.
     
-    NOT used for classic EW-Receivers.
+    NOT used for classic Easywave Receivers.
     """
     return RX11MotorReceiver(
         serial_number, 

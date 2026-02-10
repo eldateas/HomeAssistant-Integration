@@ -168,6 +168,11 @@ class RX11Wrapper:
                     _LOGGER.info("🏥 Starting health check task...")
                     await self._start_health_check()
                     
+                    # Initialize all EWneo devices by querying their state
+                    # This is done after health check starts to ensure connection is stable
+                    _LOGGER.info("🔄 Initializing EWneo device states...")
+                    await self._refresh_all_ewneo_device_states()
+                    
                     self._serial_error_count = 0
                     self._consecutive_errors = 0
                     
@@ -324,6 +329,9 @@ class RX11Wrapper:
                         # Start fresh health check (already stopped by disconnect handler)
                         _LOGGER.info("🏥 Starting fresh health check after reconnect...")
                         await self._start_health_check()
+                        
+                        # Query state of all EWneo devices to refresh their current state
+                        await self._refresh_all_ewneo_device_states()
                         
                         # Notify coordinator
                         self._coordinator.async_update_listeners()
@@ -822,6 +830,162 @@ class RX11Wrapper:
         
         return list(gateway_serials)
     
+    async def _refresh_all_ewneo_device_states(self) -> None:
+        """Query state of all EWneo devices after reconnect to update their current state.
+        
+        This ensures that the Home Assistant state reflects the actual device state
+        after a reconnection or startup. Uses retry logic for robustness.
+        """
+        if not self._coordinator:
+            _LOGGER.debug("No coordinator available - skipping EWneo state refresh")
+            return
+        
+        # Get all registered EWneo devices
+        registered_devices = getattr(self._coordinator, '_registered_devices', {})
+        ewneo_devices = []
+        
+        for device_serial, device_info in registered_devices.items():
+            # Check if device is EWneo type (has gateway_serial and neo_device flag)
+            if device_info.get('neo_device') and device_info.get('gateway_serial'):
+                ewneo_devices.append({
+                    'serial': device_serial,
+                    'gateway_serial': device_info.get('gateway_serial'),
+                    'name': device_info.get('name', device_serial[-8:]),
+                    'device_type': device_info.get('device_type', 'unknown')
+                })
+        
+        if not ewneo_devices:
+            _LOGGER.debug("No EWneo devices found - skipping state refresh")
+            return
+        
+        _LOGGER.info("🔄 Refreshing state for %d EWneo device(s) after reconnect...", len(ewneo_devices))
+        
+        # Query state for each device with retry logic (2 attempts, no waiting)
+        success_count = 0
+        for device in ewneo_devices:
+            device_serial = device['serial']
+            device_name = device['name']
+            device_type = device['device_type']
+            
+            # Get device instance from transceiver
+            device_instance = None
+            if hasattr(self._coordinator.transceiver, '_device_instances'):
+                device_instance = self._coordinator.transceiver._device_instances.get(device_serial)
+            
+            if not device_instance or not hasattr(device_instance, 'async_initialize'):
+                _LOGGER.warning("⚠️ Device instance not found or not initializable: %s", device_serial[-8:])
+                continue
+            
+            # Try twice without waiting
+            init_success = False
+            
+            for attempt in range(1, 3):  # 2 attempts
+                try:
+                    _LOGGER.debug("🔧 Initializing EWneo %s %s (attempt %d/2)...", 
+                                device_type, device_name, attempt)
+                    
+                    # Use device's async_initialize method which queries the state
+                    init_success = await device_instance.async_initialize(is_restoration=True, max_retries=1)
+                    
+                    if init_success:
+                        success_count += 1
+                        _LOGGER.info("✅ State refreshed for %s %s (attempt %d)", 
+                                   device_type, device_name, attempt)
+                        
+                        # Fire state update event so entities can update
+                        if hasattr(device_instance, 'get_motor_data'):
+                            motor_data = device_instance.get_motor_data()
+                            # Convert motor data to parsed_state format for cover entity
+                            parsed_state = self._convert_motor_data_to_parsed_state(motor_data, device_type)
+                            if parsed_state and self._coordinator:
+                                self._coordinator.hass.bus.async_fire(
+                                    "eldat_ewneo_state_update",
+                                    {
+                                        "serial_number": device_serial,
+                                        "device_id": device_serial,
+                                        "parsed_state": parsed_state,
+                                        "source": "initialization",
+                                    }
+                                )
+                                _LOGGER.info("📡 Fired state update event for %s after initialization", device_serial[-8:])
+                        
+                        break  # Success - no need to retry
+                    else:
+                        _LOGGER.debug("⚠️ Failed to refresh state for %s (attempt %d/2)", 
+                                      device_name, attempt)
+                        
+                except Exception as e:
+                    _LOGGER.error("❌ Error refreshing state for %s (attempt %d/2): %s", 
+                                device_name, attempt, e)
+                    
+                    # Don't retry on exceptions, move to next device
+                    break
+            
+            # Log final result for this device - mark as unreachable but don't disable entities
+            if not init_success:
+                _LOGGER.warning("❌ Device %s nicht erreichbar - Entitäten bleiben verfügbar", 
+                              device_name)
+        
+        # Log summary
+        if success_count > 0:
+            _LOGGER.info("✅ Successfully refreshed state for %d/%d EWneo device(s)", 
+                        success_count, len(ewneo_devices))
+        else:
+            _LOGGER.warning("⚠️ Failed to refresh state for any EWneo devices")
+    
+    def _convert_motor_data_to_parsed_state(self, motor_data: dict, device_type: str) -> dict:
+        """Convert motor device data to parsed_state format for cover entities.
+        
+        Args:
+            motor_data: Data from device_instance.get_motor_data()
+            device_type: Device type string (ewneo_motor, ewneo_dual_motor, etc.)
+            
+        Returns:
+            Dict in parsed_state format that cover entities expect
+        """
+        try:
+            # Single channel motor data
+            state = motor_data.get("state", "stopped")
+            position = motor_data.get("position")  # Already converted: 0=closed, 100=open
+            current_position_pct = motor_data.get("current_position_pct")
+            target_position_pct = motor_data.get("target_position_pct")
+            control_mode = motor_data.get("control_mode", "positionless")
+            is_moving = motor_data.get("is_moving", False)
+            is_calibrating = motor_data.get("is_calibrating", False)
+            
+            # Determine movement direction
+            is_opening = state == "opening"
+            is_closing = state == "closing"
+            
+            # Build parsed state
+            parsed_state = {
+                "type": "cover",
+                "motor_status": state,
+                "motor_status_code": motor_data.get("motor_status_code", 126),
+                "is_opening": is_opening,
+                "is_closing": is_closing,
+                "is_moving": is_moving,
+                "is_calibrating": is_calibrating,
+                "runtime_measured": control_mode == "position",
+                "supports_position": control_mode == "position",
+                "position_available": position is not None,
+            }
+            
+            # Add position if available
+            if position is not None:
+                parsed_state["position"] = position
+            if current_position_pct is not None:
+                parsed_state["current_position_pct"] = current_position_pct
+            if target_position_pct is not None:
+                parsed_state["target_position"] = target_position_pct
+            
+            _LOGGER.debug("🔄 Converted motor data to parsed_state: %s", parsed_state)
+            return parsed_state
+            
+        except Exception as e:
+            _LOGGER.error("Error converting motor data to parsed_state: %s", e)
+            return {}
+
     async def rx11_ewb_sensor_add_filter(self, gateway_serial: str) -> bool:
         """Add gateway to EWB filter."""
         try:
@@ -1378,8 +1542,8 @@ class RX11Wrapper:
             
             if result == ErrorCode.SUCCESS:
                 receiver_hex = ''.join(f'{b:02X}' for b in receiver)
-                _LOGGER.info("✅ EWB_JOIN_DEVICE SUCCESS: Type=0x%02X, Serial=%s",
-                           device_type, receiver_hex[-8:])
+                _LOGGER.info("✅ EWB_JOIN_DEVICE SUCCESS: Type=0x%02X, Serial=%s (full: %s, len=%d)",
+                           device_type, receiver_hex[-8:], receiver_hex, len(receiver_hex))
                 return (device_type, receiver_hex)
             else:
                 # Timeout or other error - expected during learning, just return None
@@ -1450,7 +1614,7 @@ class RX11Wrapper:
                             recent_mode, [f"0x{b:02X}" for b in recent_state] if recent_state else "None")
                 return (recent_mode, list(recent_state))
             elif result == ErrorCode.ERR_RF_TIMEOUT:
-                _LOGGER.error("❌ EWneo-Empfänger %s nicht erreichbar: RF-Timeout (Gateway: %s)",
+                _LOGGER.error("❌ EWneo-Empfänger %s nicht erreichbar: Timeout (Gateway: %s)",
                              receiver_serial[-8:], gateway_serial[-8:])
                 return ("ERR_RF_TIMEOUT", receiver_serial, gateway_serial)
             elif result == ErrorCode.ERR_INVALID_SERIAL:
@@ -1479,8 +1643,20 @@ class RX11Wrapper:
     ) -> Optional[tuple[int, list]]:
         """Query EWB device state."""
         try:
-            _LOGGER.info("📤 EWB_QUERY_STATE: Gateway=%s, Receiver=%s, Mode=%d",
-                        gateway_serial[-8:], receiver_serial[-8:], desired_mode)
+            _LOGGER.debug("📤 EWB_QUERY_STATE: Gateway=%s, Receiver=%s, Mode=%d",
+                        gateway_serial[-8:] if gateway_serial else "None",
+                        receiver_serial[-8:] if receiver_serial else "None", 
+                        desired_mode)
+            
+            # Validate serial lengths - must be 32 hex chars (16 bytes)
+            if not gateway_serial or len(gateway_serial) != 32:
+                _LOGGER.error("❌ Invalid gateway_serial length: expected 32 chars, got %d chars (%s)",
+                            len(gateway_serial) if gateway_serial else 0, gateway_serial)
+                return None
+            if not receiver_serial or len(receiver_serial) != 32:
+                _LOGGER.error("❌ Invalid receiver_serial length: expected 32 chars, got %d chars (%s)",
+                            len(receiver_serial) if receiver_serial else 0, receiver_serial)
+                return None
             
             gateway_bytes = bytes.fromhex(gateway_serial)
             receiver_bytes = bytes.fromhex(receiver_serial)
@@ -1489,7 +1665,7 @@ class RX11Wrapper:
                 gateway_bytes, receiver_bytes, desired_mode
             )
             
-            _LOGGER.info("📥 EWB_QUERY_STATE result: %d (recent_mode=%d, state=%s)",
+            _LOGGER.debug("📥 EWB_QUERY_STATE result: %d (mode=%d, state=%s)",
                         result, recent_mode, [f"0x{b:02X}" for b in state] if state else "None")
             
             if result == ErrorCode.SUCCESS:

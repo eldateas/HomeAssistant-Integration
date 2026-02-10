@@ -23,7 +23,7 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
     """Switch receiver implementation for RX11 transceiver.
     
     Handles EWB/EWneo switch devices with on/off control.
-    NOT used for classic EW-Receivers - those use entity_specs.py.
+    NOT used for classic Easywave Receivers - those use entity_specs.py.
     Inherits Switch behavior from SwitchBehaviorMixin.
     """
     
@@ -53,7 +53,7 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
         """Generate entity specifications for EWneo/EWB switch devices.
         
         EWneo switches create switch entities with on/off control.
-        This is NOT used for classic EW-Receivers.
+        This is NOT used for classic Easywave Receivers.
         """
         specs = {
             "switch": [],
@@ -146,7 +146,7 @@ def create_rx11_switch_receiver(
 ) -> RX11SwitchReceiver:
     """Factory function to create EWneo/EWB switch receiver.
     
-    NOT used for classic EW-Receivers.
+    NOT used for classic Easywave Receivers.
     """
     return RX11SwitchReceiver(
         serial_number, 

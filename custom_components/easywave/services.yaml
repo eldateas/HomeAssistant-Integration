@@ -48,6 +48,7 @@ remove_device:
       required: false
       default: false
       selector:
+        boolean:
 
 refresh_entity_specs:
   name: Refresh Entity Specs
@@ -60,7 +61,6 @@ refresh_entity_specs:
       example: "1234567890ABCDEF"
       selector:
         text:
-        boolean:
 
 remove_device_by_id:
   name: Remove Device (by ID)
@@ -239,10 +239,10 @@ backup_devices:
       selector:
         text:
 
-# Custom EW-Receiver button services with German labels (corrected for stateless buttons)
+# Custom Easywave Receiver button services with German labels (corrected for stateless buttons)
 ew_receiver_toggle:
   name: Toggle (Ein/Aus)
-  description: Führt Toggle-Funktion eines EW-Receivers aus (Eintastbedienung mit LongPress)
+  description: Führt Toggle-Funktion eines Easywave Receivers aus (Eintastbedienung mit LongPress)
   target:
     entity:
       domain: button
@@ -250,7 +250,7 @@ ew_receiver_toggle:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Toggle-Funktion
+      description: Die Easywave Receiver Button-Entity für Toggle-Funktion
       required: true
       selector:
         entity:
@@ -260,7 +260,7 @@ ew_receiver_toggle:
 
 ew_receiver_ein:
   name: Ein
-  description: Schaltet EW-Receiver ein (Zweitastbedienung mit LongPress)
+  description: Schaltet Easywave Receiver ein (Zweitastbedienung mit LongPress)
   target:
     entity:
       domain: button
@@ -268,7 +268,7 @@ ew_receiver_ein:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Ein-Funktion
+      description: Die Easywave Receiver Button-Entity für Ein-Funktion
       required: true
       selector:
         entity:
@@ -278,7 +278,7 @@ ew_receiver_ein:
 
 ew_receiver_aus:
   name: Aus
-  description: Schaltet EW-Receiver aus (Zweitastbedienung mit LongPress)
+  description: Schaltet Easywave Receiver aus (Zweitastbedienung mit LongPress)
   target:
     entity:
       domain: button
@@ -286,7 +286,7 @@ ew_receiver_aus:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Aus-Funktion
+      description: Die Easywave Receiver Button-Entity für Aus-Funktion
       required: true
       selector:
         entity:
@@ -304,7 +304,7 @@ ew_receiver_motor_auf:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Auf-Funktion
+      description: Die Easywave Receiver Button-Entity für Auf-Funktion
       required: true
       selector:
         entity:
@@ -322,7 +322,7 @@ ew_receiver_motor_zu:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Zu-Funktion
+      description: Die Easywave Receiver Button-Entity für Zu-Funktion
       required: true
       selector:
         entity:
@@ -340,7 +340,7 @@ ew_receiver_motor_stopp:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Stopp-Funktion
+      description: Die Easywave Receiver Button-Entity für Stopp-Funktion
       required: true
       selector:
         entity:
@@ -358,7 +358,7 @@ ew_receiver_dimmer_heller:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Heller-Funktion
+      description: Die Easywave Receiver Button-Entity für Heller-Funktion
       required: true
       selector:
         entity:
@@ -376,7 +376,7 @@ ew_receiver_dimmer_dunkler:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Dunkler-Funktion
+      description: Die Easywave Receiver Button-Entity für Dunkler-Funktion
       required: true
       selector:
         entity:
@@ -394,7 +394,7 @@ ew_receiver_hvac_heizen_kuehlen:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für Heizen/Kühlen-Funktion
+      description: Die Easywave Receiver Button-Entity für Heizen/Kühlen-Funktion
       required: true
       selector:
         entity:
@@ -412,7 +412,7 @@ ew_receiver_hvac_aus:
   fields:
     entity_id:
       name: Button Entity
-      description: Die EW-Receiver Button-Entity für HVAC-Aus-Funktion
+      description: Die Easywave Receiver Button-Entity für HVAC-Aus-Funktion
       required: true
       selector:
         entity:
@@ -500,3 +500,7 @@ cleanup_ghost_devices:
 cleanup_orphaned_entities:
   name: "🗑️ Verwaiste Entitäten entfernen"
   description: Entfernt alle verwaisten Entitäten von bereits gelöschten Geräten aus Home Assistant
+
+update_translations:
+  name: "🌐 Übersetzungen aktualisieren"
+  description: Aktualisiert die Gerätenamen und Modellbeschreibungen basierend auf der aktuellen Sprache. Rufen Sie diesen Service auf, nachdem Sie die Sprache in den Home Assistant Einstellungen geändert haben.

@@ -69,80 +69,6 @@ __all__ = [
     "LightBehaviorMixin"]
 
 
-"""Base classes for ELDAT transceivers and devices.
-
-DEPRECATED: This file is kept for backward compatibility.
-All classes have been moved to the 'base' and 'behaviors' submodules.
-
-New imports:
-    from .base import BaseTransceiver, BaseDevice, BaseReceiver, BaseTransmitter, BaseSensor
-    from .base import DeviceType, DeviceSubtype, OperatingMode, TransceiverType
-    from .behaviors import CoverBehaviorMixin, SwitchBehaviorMixin, etc.
-
-Structured Naming Convention:
-- transceiver_<type>_<device_type>_<operation>: Structured operation naming
-  Example: rx11_ew_receiver_button_start_continuous
-  
-Hierarchy: transceiver -> type -> device_type -> button_type
-- transceiver: RX11, RX21, Gateway
-- type: EW (EasyWave), EWneo, EWB (EasyWave Bidirectional) 
-- device_type: receiver, transmitter, sensor
-- button_type: A(0), B(1), C(2), D(3)
-
-This provides a clear, hierarchical naming structure for all operations
-across different ELDAT device types and transceivers.
-"""
-from __future__ import annotations
-
-# Re-export all classes from new structure for backward compatibility
-from .base import (
-    BaseDevice,
-    BaseDeviceHandler,
-    BaseReceiver,
-    BaseSensor,
-    BaseTransceiver,
-    BaseTransmitter,
-    DeviceInfo,
-    DeviceSubtype,
-    DeviceType,
-    OperatingMode,
-    TransceiverCapabilities,
-    TransceiverType,
-)
-from .behaviors import (
-    ButtonBehaviorMixin,
-    CoverBehaviorMixin,
-    EntitySpecsMixin,
-    LightBehaviorMixin,
-    SensorBehaviorMixin,
-    SwitchBehaviorMixin,
-)
-
-__all__ = [
-    # Enums
-    "TransceiverType",
-    "DeviceType",
-    "DeviceSubtype",
-    "OperatingMode",
-    # Data classes
-    "DeviceInfo",
-    "TransceiverCapabilities",
-    # Base classes
-    "BaseTransceiver",
-    "BaseDeviceHandler",
-    "BaseDevice",
-    "BaseReceiver",
-    "BaseTransmitter",
-    "BaseSensor",
-    # Behavior Mixins
-    "CoverBehaviorMixin",
-    "SwitchBehaviorMixin",
-    "LightBehaviorMixin",
-    "SensorBehaviorMixin",
-    "ButtonBehaviorMixin",
-    "EntitySpecsMixin",
-]
-
 """Supported transceiver types following structured naming.
     
 Each transceiver type supports different device types:
@@ -858,17 +784,23 @@ class EntitySpecsMixin:
         """Create a base entity specification."""
         channel_suffix = f"_ch{channel}" if channel > 0 else ""
         
+        # If name is explicitly None, don't set a default - HA will use device_class translation
+        entity_name = kwargs.get("name")
+        if "name" not in kwargs:
+            entity_name = f"{self.name} {entity_type.title()}{channel_suffix}"
+        
         spec = {
             "type": entity_type,
-            "name": kwargs.get("name", f"{self.name} {entity_type.title()}{channel_suffix}"),
+            "name": entity_name,
             "unique_id": f"{self.serial_number}_{entity_type}{channel_suffix}",
             "channel": channel,
             "device_class": kwargs.get("device_class"),
             "icon": kwargs.get("icon"),
             "unit_of_measurement": kwargs.get("unit_of_measurement"),
+            "has_entity_name": True,  # Always set for proper HA naming
         }
         
-        # Remove None values
+        # Remove None values (except has_entity_name which should stay)
         spec = {k: v for k, v in spec.items() if v is not None}
         
         return spec

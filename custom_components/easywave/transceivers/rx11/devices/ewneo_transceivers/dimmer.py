@@ -6,6 +6,7 @@ import logging
 
 from ....base import DeviceType, DeviceSubtype, OperatingMode
 from .base import EWneoBaseDevice
+from .....translations import translate, DEFAULT_LANGUAGE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,9 +45,12 @@ class RX11EWneoDimmer(EWneoBaseDevice):
         """Return supported entity types."""
         return ["light"]
     
-    def _get_model_name(self) -> str:
-        """Get detailed model name for device info."""
-        return "Easywave neo Dimmer"
+    def _get_model_name(self, language: str = DEFAULT_LANGUAGE) -> str:
+        """Get detailed model name for device info.
+        
+        Uses translation system for proper language support.
+        """
+        return translate("ewneo.dimmer", language)
     
     def _parse_mode0_state(self, state_word: int) -> None:
         """Parse Mode 0 state for dimmer (brightness levels).

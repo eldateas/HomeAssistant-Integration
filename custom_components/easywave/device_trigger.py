@@ -1,6 +1,6 @@
 """Device triggers for ELDAT integration.
 
-This module provides device triggers for EW-Transmitter button presses,
+This module provides device triggers for Easywave Transmitter button presses,
 allowing users to create automations based on button events directly
 in the Home Assistant UI.
 """
@@ -28,7 +28,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# Trigger types for EW-Transmitter buttons (basierend auf RX11 EWB_RCV)
+# Trigger types for Easywave Transmitter buttons (basierend auf RX11 EWB_RCV)
 # Nur die grundlegenden Events vom RX11:
 TRIGGER_TYPE_BUTTON_PRESS = "button_press"        # Taste gedrückt / Zustandswechsel (vom RX11)
 TRIGGER_TYPE_BUTTON_RELEASE = "button_release"    # Taste losgelassen (vom RX11)
@@ -153,7 +153,7 @@ def _get_transmitter_trigger_map(
 async def async_get_triggers(
     hass: HomeAssistant, device_id: str
 ) -> list[dict[str, Any]]:
-    """Return a list of triggers for EW-Transmitter devices."""
+    """Return a list of triggers for Easywave Transmitter devices."""
     device_registry = dr.async_get(hass)
     device = device_registry.async_get(device_id)
     
@@ -174,6 +174,10 @@ async def async_get_triggers(
             break
     
     if not serial_number:
+        return []
+    
+    # Skip gateway device - it's not a transmitter and has no triggers
+    if serial_number.endswith("_gateway"):
         return []
     
     device_info = _get_device_info_for_serial(hass, serial_number)

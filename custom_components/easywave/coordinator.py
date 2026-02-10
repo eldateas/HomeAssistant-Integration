@@ -28,6 +28,12 @@ from .const import (
     BUTTON_LABELS,
     DEVICE_TYPE_CODE_MAP,
 )
+from .translations import (
+    translate,
+    get_button_label,
+    get_language,
+    DEFAULT_LANGUAGE,
+)
 from .transceivers import TransceiverFactory, TransceiverType, BaseTransceiver
 from .device_config import DeviceConfigManager
 from .device_manager import DeviceManager, ManagedDevice, DeviceAvailability, DeviceType
@@ -68,12 +74,12 @@ class EldatCoordinator(DataUpdateCoordinator):
         self._ewb_indices_file = f"{hass.config.config_dir}/eldat/used_ewb_indices.json"
         self._next_free_ewb_index: Optional[int] = 0  # Cache for next known free index
         
-        # EW-Receiver Index Tracking - Persistent storage of used EW receiver indices
+        # Easywave Receiver Index Tracking - Persistent storage of used EW receiver indices
         self._used_ew_receiver_indices: Dict[int, Dict[str, Any]] = {}  # {index: {receiver_serial, device_serial, device_name, created_at}}
         self._ew_receiver_indices_file = f"{hass.config.config_dir}/eldat/used_ew_receiver_indices.json"
         self._next_free_ew_receiver_index: Optional[int] = 0  # Cache for next known free index
 
-        # EW-Transmitter naming index (EW-Sender #N)
+        # Easywave Transmitter naming index (Easywave Sender #N)
         self._next_ew_sender_index: int = 1
         # EWneo sensor naming index (EWneo-Sensor #N)
         self._next_ewneo_sensor_index: int = 1
@@ -132,7 +138,12 @@ class EldatCoordinator(DataUpdateCoordinator):
             self._setup_timeout = None
 
     def _get_transmitter_action_label(self, serial_number: str, button: int | None) -> str | None:
-        """Return semantic action label for a transmitter button."""
+        """Return semantic action label for a transmitter button.
+        
+        Returns UNTRANSLATED state keys (like "on", "off", "up", "down", "stop")
+        that match the entity options. Translation is handled by Home Assistant's
+        frontend via translations/*.json files.
+        """
         if button is None:
             return None
 
@@ -140,33 +151,41 @@ class EldatCoordinator(DataUpdateCoordinator):
         operating_type = device_info.get("operating_type", "1")
         usage_type = device_info.get("usage_type", "switch")
         button_count = device_info.get("button_count", 4)
+        
+        # Use UNTRANSLATED state keys - HA translates these in the frontend
+        # This ensures sensor states match the entity options
 
         if operating_type == "2":
             is_switch_mode = usage_type == "switch"
             if is_switch_mode:
                 if button_count <= 2:
-                    return "Ein" if button == 0 else "Aus" if button == 1 else None
+                    return "on" if button == 0 else "off" if button == 1 else None
                 if button in (0, 1):
-                    return "Ein 1" if button == 0 else "Aus 1"
+                    return "on" if button == 0 else "off"
                 if button in (2, 3):
-                    return "Ein 2" if button == 2 else "Aus 2"
+                    return "on" if button == 2 else "off"
             else:
                 if button_count <= 2:
-                    return "Auf" if button == 0 else "Zu" if button == 1 else None
+                    return "up" if button == 0 else "down" if button == 1 else None
                 if button in (0, 1):
-                    return "Auf 1" if button == 0 else "Zu 1"
+                    return "up" if button == 0 else "down"
                 if button in (2, 3):
-                    return "Auf 2" if button == 2 else "Zu 2"
+                    return "up" if button == 2 else "down"
 
         if operating_type == "3":
             if button == 0:
-                return "Auf"
+                return "up"
             if button == 1:
-                return "Zu"
+                return "down"
             if button in (2, 3):
-                return "Stopp"
+                return "stop"
 
-        return BUTTON_LABELS.get(button, f"Taste {button + 1}")
+        # For 1-button mode, return button letter (a, b, c, d) for proper HA translation
+        button_letters = ["a", "b", "c", "d"]
+        if 0 <= button < len(button_letters):
+            return button_letters[button]
+        
+        return None
         _LOGGER.info("Device setup mode deactivated")
     
     async def _load_used_ewb_indices(self) -> None:
@@ -247,7 +266,7 @@ class EldatCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("💾 Saved %d used EWB indices to registered_devices.json", len(self._used_ewb_indices))
     
     async def _load_used_ew_receiver_indices(self) -> None:
-        """Load used EW-Receiver indices from registered_devices.json (with migration)."""
+        """Load used Easywave Receiver indices from registered_devices.json (with migration)."""
         import json
         import aiofiles
         import os
@@ -263,7 +282,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                         # Convert string keys back to integers
                         self._used_ew_receiver_indices = {int(k): v for k, v in data.get('used_ew_receiver_indices', {}).items()}
                         self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index() if self._used_ew_receiver_indices else 0
-                        _LOGGER.info("📋 Loaded %d used EW-Receiver indices from registered_devices.json (next free: %d)", 
+                        _LOGGER.info("📋 Loaded %d used Easywave Receiver indices from registered_devices.json (next free: %d)", 
                                    len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
                         return
             
@@ -274,25 +293,25 @@ class EldatCoordinator(DataUpdateCoordinator):
                     old_data = json.loads(content)
                     self._used_ew_receiver_indices = {int(k): v for k, v in old_data.get('used_indices', {}).items()}
                     self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index() if self._used_ew_receiver_indices else 0
-                    _LOGGER.info("🔄 Migrated %d EW-Receiver indices from old file (will be saved to registered_devices.json)", 
+                    _LOGGER.info("🔄 Migrated %d Easywave Receiver indices from old file (will be saved to registered_devices.json)", 
                                len(self._used_ew_receiver_indices))
                     return
             
             # No data found
-            _LOGGER.info("📋 No EW-Receiver indices found, starting with empty tracking")
+            _LOGGER.info("📋 No Easywave Receiver indices found, starting with empty tracking")
             self._used_ew_receiver_indices = {}
             self._next_free_ew_receiver_index = 0
         except Exception as e:
-            _LOGGER.error("❌ Failed to load used EW-Receiver indices: %s", e)
+            _LOGGER.error("❌ Failed to load used Easywave Receiver indices: %s", e)
             self._used_ew_receiver_indices = {}
             self._next_free_ew_receiver_index = 0
     
     async def _save_used_ew_receiver_indices(self) -> None:
-        """Save used EW-Receiver indices to registered_devices.json."""
-        # EW-Receiver indices are now saved as part of registered_devices.json
+        """Save used Easywave Receiver indices to registered_devices.json."""
+        # Easywave Receiver indices are now saved as part of registered_devices.json
         # This method triggers a save of the complete file
         await self._save_registered_devices()
-        _LOGGER.debug("💾 Saved %d used EW-Receiver indices to registered_devices.json", len(self._used_ew_receiver_indices))
+        _LOGGER.debug("💾 Saved %d used Easywave Receiver indices to registered_devices.json", len(self._used_ew_receiver_indices))
 
     async def _load_registered_devices(self) -> None:
         """Load registered devices from persistent storage."""
@@ -417,33 +436,11 @@ class EldatCoordinator(DataUpdateCoordinator):
                         await self._save_registered_devices()
                         _LOGGER.info("💾 Updated registered devices with regenerated entity specs")
 
-                    # Restore and/or recompute next naming indices
-                    stored_next_sender = data.get("next_ew_sender_index")
-                    stored_next_ewneo_sensor = data.get("next_ewneo_sensor_index")
-
-                    max_sender_index = 0
-                    max_ewneo_sensor_index = 0
-                    for device_info in loaded_devices.values():
-                        name = device_info.get("name") or ""
-                        match = re.match(r"^EW-Sender #(?P<idx>\d+)$", name)
-                        if match:
-                            max_sender_index = max(max_sender_index, int(match.group("idx")))
-
-                        match = re.match(r"^EWneo-Sensor #(?P<idx>\d+)$", name)
-                        if match:
-                            max_ewneo_sensor_index = max(max_ewneo_sensor_index, int(match.group("idx")))
-
-                    if max_sender_index > 0:
-                        self._next_ew_sender_index = max_sender_index + 1
-                    elif isinstance(stored_next_sender, int) and stored_next_sender > 0:
-                        self._next_ew_sender_index = stored_next_sender
-                    else:
-                        self._next_ew_sender_index = 1
-
-                    if max_ewneo_sensor_index > 0:
-                        self._next_ewneo_sensor_index = max_ewneo_sensor_index + 1
-                    else:
-                        self._next_ewneo_sensor_index = 1
+                    # Initialisiere Legacy-Index-Variablen basierend auf Geräte-Anzahl
+                    # (werden für Kompatibilität beibehalten, aber die eigentliche Logik
+                    # zählt jetzt direkt die Geräte des jeweiligen Typs)
+                    self._recompute_next_sender_index()
+                    self._recompute_next_ewneo_sensor_index()
             else:
                 _LOGGER.info("📋 No registered devices file found, starting with empty list")
         except Exception as e:
@@ -451,9 +448,10 @@ class EldatCoordinator(DataUpdateCoordinator):
             self._registered_devices = {}
 
     def _ensure_default_sender_name(self, device_info: Dict[str, Any]) -> None:
-        """Assign default EW-Sender #N name when no custom name is set."""
-        import re
-
+        """Assign default Easywave Sender #N name when no custom name is set.
+        
+        N = Anzahl der vorhandenen ew_transmitter Geräte + 1
+        """
         if device_info.get("type") != "ew_transmitter":
             return
 
@@ -461,18 +459,21 @@ class EldatCoordinator(DataUpdateCoordinator):
         should_assign = not name  # True if name is empty
 
         if should_assign:
-            device_info["name"] = f"EW-Sender #{self._next_ew_sender_index}"
-            self._next_ew_sender_index += 1
-        else:
-            match = re.match(r"^EW-Sender #(?P<idx>\d+)$", name)
-            if match:
-                existing_idx = int(match.group("idx"))
-                self._next_ew_sender_index = max(self._next_ew_sender_index, existing_idx + 1)
+            # Zähle alle vorhandenen ew_transmitter Geräte
+            existing_count = sum(
+                1 for d in self._registered_devices.values()
+                if d.get("type") == "ew_transmitter"
+            )
+            # Use translated transmitter name
+            from .translations import t_transmitter, get_language
+            lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+            device_info["name"] = f"Easywave {t_transmitter(lang)} #{existing_count + 1}"
 
     def _ensure_default_ewneo_sensor_name(self, device_info: Dict[str, Any]) -> None:
-        """Assign default EWneo-Sensor #N name when no custom name is set."""
-        import re
-
+        """Assign default EWneo-Sensor #N name when no custom name is set.
+        
+        N = Anzahl der vorhandenen ew_sensor/ewneo_sensor Geräte + 1
+        """
         if device_info.get("type") not in ("ew_sensor", "ewneo_sensor"):
             return
 
@@ -483,45 +484,54 @@ class EldatCoordinator(DataUpdateCoordinator):
             should_assign = name.startswith("EWneo-Sensor") or name.startswith("EW-Sensor") or name.startswith("Ew Sensor")
 
         if should_assign:
-            device_info["name"] = f"EWneo-Sensor #{self._next_ewneo_sensor_index}"
-            self._next_ewneo_sensor_index += 1
-        else:
-            match = re.match(r"^EWneo-Sensor #(?P<idx>\d+)$", name)
-            if match:
-                existing_idx = int(match.group("idx"))
-                self._next_ewneo_sensor_index = max(self._next_ewneo_sensor_index, existing_idx + 1)
+            # Zähle alle vorhandenen ew_sensor/ewneo_sensor Geräte
+            existing_count = sum(
+                1 for d in self._registered_devices.values()
+                if d.get("type") in ("ew_sensor", "ewneo_sensor")
+            )
+            device_info["name"] = f"EWneo-Sensor #{existing_count + 1}"
 
     def _recompute_next_sender_index(self) -> None:
-        """Recompute next EW-Sender index from registered devices."""
-        import re
-
-        max_sender_index = 0
-        for device_info in self._registered_devices.values():
-            name = device_info.get("name") or ""
-            match = re.match(r"^EW-Sender #(?P<idx>\d+)$", name)
-            if match:
-                max_sender_index = max(max_sender_index, int(match.group("idx")))
-
-        self._next_ew_sender_index = max_sender_index + 1 if max_sender_index > 0 else 1
+        """Recompute next Easywave Sender index from registered devices.
+        
+        DEPRECATED: Index wird jetzt dynamisch berechnet basierend auf Geräte-Anzahl.
+        Diese Funktion aktualisiert nur noch die Legacy-Variable für Kompatibilität.
+        """
+        # Zähle vorhandene ew_transmitter Geräte
+        count = sum(
+            1 for d in self._registered_devices.values()
+            if d.get("type") == "ew_transmitter"
+        )
+        self._next_ew_sender_index = count + 1
 
     def _recompute_next_ewneo_sensor_index(self) -> None:
-        """Recompute next EWneo-Sensor index from registered devices."""
-        import re
-
-        max_ewneo_sensor_index = 0
-        for device_info in self._registered_devices.values():
-            if device_info.get("type") not in ("ew_sensor", "ewneo_sensor"):
-                continue
-            name = device_info.get("name") or ""
-            match = re.match(r"^EWneo-Sensor #(?P<idx>\d+)$", name)
-            if match:
-                max_ewneo_sensor_index = max(max_ewneo_sensor_index, int(match.group("idx")))
-
-        self._next_ewneo_sensor_index = max_ewneo_sensor_index + 1 if max_ewneo_sensor_index > 0 else 1
+        """Recompute next EWneo-Sensor index from registered devices.
+        
+        DEPRECATED: Index wird jetzt dynamisch berechnet basierend auf Geräte-Anzahl.
+        Diese Funktion aktualisiert nur noch die Legacy-Variable für Kompatibilität.
+        """
+        # Zähle vorhandene ew_sensor/ewneo_sensor Geräte
+        count = sum(
+            1 for d in self._registered_devices.values()
+            if d.get("type") in ("ew_sensor", "ewneo_sensor")
+        )
+        self._next_ewneo_sensor_index = count + 1
 
     def get_next_ew_sender_index(self) -> int:
-        """Get the next available EW-Sender index."""
-        return self._next_ew_sender_index
+        """Get the next available Easywave Sender index (= count + 1)."""
+        count = sum(
+            1 for d in self._registered_devices.values()
+            if d.get("type") == "ew_transmitter"
+        )
+        return count + 1
+    
+    def get_next_ewneo_sensor_index(self) -> int:
+        """Get the next available EWneo-Sensor index (= count + 1)."""
+        count = sum(
+            1 for d in self._registered_devices.values()
+            if d.get("type") in ("ew_sensor", "ewneo_sensor")
+        )
+        return count + 1
     
     def _clean_device_info(self, device_info: Dict[str, Any]) -> None:
         """Remove problematic metadata from device_info that should not be persisted.
@@ -705,7 +715,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             self._ensure_default_sender_name(device_info)
             self._ensure_default_ewneo_sensor_name(device_info)
 
-            # Regenerate entity specs for EW-Transmitters to ensure correct platforms
+            # Regenerate entity specs for Easywave Transmitters to ensure correct platforms
             if device_info.get("type") == "ew_transmitter":
                 device_info = await self._regenerate_entity_specs(serial_number, device_info)
             
@@ -717,12 +727,23 @@ class EldatCoordinator(DataUpdateCoordinator):
             self._known_devices.add(serial_number)
             
             # Add to DeviceManager (single source of truth)
+            # Pass all fields so they get persisted in extra_data
+            core_fields = {'serial_number', 'device_type', 'name', 'rx11_index', 'area', 'type'}
+            extra_data = {}
+            for k, v in device_info.items():
+                if k not in core_fields and k not in ['registered_at', 'config_entry_id', '_known_devices']:
+                    # Convert sets to lists for JSON serialization
+                    if isinstance(v, set):
+                        extra_data[k] = list(v)
+                    else:
+                        extra_data[k] = v
             self.device_manager.add_device(
                 serial_number=serial_number,
                 device_type=device_info.get("device_type", device_info.get("type", "unknown")),
                 name=device_info.get("name", f"Device {serial_number}"),
                 rx11_index=device_info.get("rx11_index"),
-                area=device_info.get("area")
+                area=device_info.get("area"),
+                extra_data=extra_data if extra_data else None
             )
             
             # Save to persistent storage
@@ -847,6 +868,22 @@ class EldatCoordinator(DataUpdateCoordinator):
                 wrapper = self.transceiver._rx11_wrapper
                 wrapper.mark_ewb_index_free(index)
     
+    def reset_all_ewb_indices(self) -> None:
+        """Reset all EWB indices - used when integration is removed."""
+        _LOGGER.info("🔄 Resetting all EWB indices...")
+        
+        # Clear all stored indices
+        self._used_ewb_indices.clear()
+        self._next_free_ewb_index = 0
+        
+        # Clear wrapper tracking if available
+        if hasattr(self.transceiver, '_rx11_wrapper') and self.transceiver._rx11_wrapper:
+            wrapper = self.transceiver._rx11_wrapper
+            wrapper._used_ewb_indices.clear()
+            wrapper._ewb_device_serials.clear()
+        
+        _LOGGER.info("✅ All EWB indices reset to 0")
+    
     async def get_next_free_ewb_index(self) -> int:
         """Get the next free EWB index from persistent tracking (transaction-safe).
         
@@ -917,25 +954,28 @@ class EldatCoordinator(DataUpdateCoordinator):
         return self._used_ewb_indices.get(index)
     
     # ============================================================
-    # EW-Receiver Index Management (unidirectional receivers)
+    # Easywave Receiver Index Management (unidirectional receivers)
     # ============================================================
     
     def mark_ew_receiver_index_used(self, index: int, receiver_serial: str, device_serial: str, device_name: str = None) -> None:
-        """Mark an EW-Receiver index as used by a specific device."""
+        """Mark an Easywave Receiver index as used by a specific device."""
         from datetime import datetime
         
         self._used_ew_receiver_indices[index] = {
             'receiver_serial': receiver_serial,  # Gateway serial from RX11
             'device_serial': device_serial,      # Device's own serial
-            'device_name': device_name or f"EW-Receiver ({device_serial})",
+            'device_name': device_name or f"Easywave Receiver ({device_serial})",
             'created_at': datetime.now().isoformat()
         }
         
         # Update next free index cache
         if index == self._next_free_ew_receiver_index:
             self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
+        
+        # Also update device_manager._rx11_index_to_serial for consistency
+        self.device_manager._rx11_index_to_serial[index] = device_serial
             
-        _LOGGER.info("📍 Marked EW-Receiver index %d as used (device: %s, receiver: %s)", 
+        _LOGGER.info("📍 Marked Easywave Receiver index %d as used (device: %s, receiver: %s)", 
                     index, device_serial[-8:], receiver_serial[-8:])
         
         # Save to persistent storage
@@ -947,14 +987,18 @@ class EldatCoordinator(DataUpdateCoordinator):
             wrapper.mark_receiver_used(index, receiver_serial)
     
     def mark_ew_receiver_index_free(self, index: int) -> None:
-        """Mark an EW-Receiver index as free/available for new devices."""
+        """Mark an Easywave Receiver index as free/available for new devices."""
         if index in self._used_ew_receiver_indices:
             device_info = self._used_ew_receiver_indices.pop(index)
-            _LOGGER.info("♻️ Marked EW-Receiver index %d as free (was: %s)", index, device_info.get('device_name', 'Unknown'))
+            _LOGGER.info("♻️ Marked Easywave Receiver index %d as free (was: %s)", index, device_info.get('device_name', 'Unknown'))
             
             # Update next free index cache if this becomes the new earliest free
             if index < self._next_free_ew_receiver_index:
                 self._next_free_ew_receiver_index = index
+            
+            # Also update device_manager._rx11_index_to_serial
+            if index in self.device_manager._rx11_index_to_serial:
+                del self.device_manager._rx11_index_to_serial[index]
                 
             # Save to persistent storage
             asyncio.create_task(self._save_used_ew_receiver_indices())
@@ -964,41 +1008,50 @@ class EldatCoordinator(DataUpdateCoordinator):
                 wrapper = self.transceiver._rx11_wrapper
                 wrapper.mark_receiver_available(index)
     
-    async def get_next_free_ew_receiver_index(self) -> int:
-        """Get the next free EW-Receiver index from persistent tracking (transaction-safe).
+    def reset_all_ew_receiver_indices(self) -> None:
+        """Reset all Easywave Receiver indices - used when integration is removed."""
+        _LOGGER.info("🔄 Resetting all Easywave Receiver indices...")
         
-        Uses DeviceManager.allocate_rx11_index() for thread-safe allocation
-        with lock protection to prevent race conditions.
+        # Clear all stored indices
+        self._used_ew_receiver_indices.clear()
+        self._next_free_ew_receiver_index = 0
+        
+        # Clear device_manager indices
+        self.device_manager._rx11_index_to_serial.clear()
+        
+        # Clear wrapper tracking if available
+        if hasattr(self.transceiver, '_rx11_wrapper') and self.transceiver._rx11_wrapper:
+            wrapper = self.transceiver._rx11_wrapper
+            wrapper._used_receivers.clear()
+        
+        _LOGGER.info("✅ All Easywave Receiver indices reset to 0")
+    
+    async def get_next_free_ew_receiver_index(self) -> int:
+        """Get the next free Easywave Receiver index from persistent tracking.
+        
+        Uses _used_ew_receiver_indices for tracking which indices are in use.
+        This is the authoritative source for EW receiver index allocation.
         """
-        # Use DeviceManager transaction-safe allocation
-        try:
-            index = self.device_manager.allocate_rx11_index()
-            if index is not None:
-                self._next_free_ew_receiver_index = index
-                return index
-            else:
-                # Fallback if all indices are used
-                _LOGGER.warning("⚠️ DeviceManager allocation failed (all indices used), using fallback")
-                return self._find_next_free_ew_receiver_index()
-        except Exception as e:
-            # Fallback to old method if DeviceManager fails
-            _LOGGER.warning("⚠️ DeviceManager allocation failed: %s, using fallback", e)
-            return self._find_next_free_ew_receiver_index()
+        # Use the persistent tracking from coordinator
+        index = self._find_next_free_ew_receiver_index()
+        self._next_free_ew_receiver_index = index
+        _LOGGER.info("📍 Next free Easywave Receiver index: %d", index)
+        return index
     
     def _find_next_free_ew_receiver_index(self) -> int:
-        """Find the next EW-Receiver index available for assignment."""
+        """Find the next Easywave Receiver index available for assignment."""
         used_indices = set(self._used_ew_receiver_indices.keys())
         for index in range(255):  # EW supports indices 0-254
             if index not in used_indices:
                 return index
-        raise ValueError("No free EW-Receiver indices available (all 0-254 in use)")
+        raise ValueError("No free Easywave Receiver indices available (all 0-254 in use)")
     
     def is_ew_receiver_index_used(self, index: int) -> bool:
-        """Check if an EW-Receiver index is already used."""
+        """Check if an Easywave Receiver index is already used."""
         return index in self._used_ew_receiver_indices
         
     def get_used_ew_receiver_indices(self) -> Dict[int, Dict[str, Any]]:
-        """Get all used EW-Receiver indices with their device information."""
+        """Get all used Easywave Receiver indices with their device information."""
         return self._used_ew_receiver_indices.copy()
     
     async def _sync_ewb_indices_with_wrapper(self) -> None:
@@ -1022,7 +1075,7 @@ class EldatCoordinator(DataUpdateCoordinator):
         _LOGGER.info("🔄 Synchronized %d EWB indices from coordinator to wrapper", len(self._used_ewb_indices))
     
     async def _sync_ew_receiver_indices_with_wrapper(self) -> None:
-        """Synchronize EW-Receiver index tracking between coordinator and transceiver wrapper."""
+        """Synchronize Easywave Receiver index tracking between coordinator, wrapper and device_manager."""
         if not hasattr(self.transceiver, '_rx11_wrapper') or not self.transceiver._rx11_wrapper:
             return
             
@@ -1031,12 +1084,17 @@ class EldatCoordinator(DataUpdateCoordinator):
         # Clear wrapper tracking and rebuild from coordinator's persistent data
         wrapper._used_receivers.clear()
         
+        # Also sync device_manager._rx11_index_to_serial with used_ew_receiver_indices
+        # This ensures index allocation is consistent
+        self.device_manager._rx11_index_to_serial.clear()
+        
         for index, device_info in self._used_ew_receiver_indices.items():
             receiver_serial = device_info.get('receiver_serial')
+            device_serial = device_info.get('device_serial')
             
             if receiver_serial:
                 # Re-read actual serial from RX11 to ensure we have the correct one
-                _LOGGER.warning("🔍 Syncing index %s: stored serial=%s", index, receiver_serial)
+                _LOGGER.debug("🔍 Syncing index %s: stored serial=%s", index, receiver_serial)
                 actual_serial = await wrapper.rx11_ew_receiver_get_serial_by_index(int(index))
                 
                 if actual_serial and actual_serial != receiver_serial:
@@ -1049,11 +1107,15 @@ class EldatCoordinator(DataUpdateCoordinator):
                     self._used_ew_receiver_indices[int(index)] = device_info
                     await self._save_used_ew_receiver_indices()
                 elif actual_serial:
-                    _LOGGER.warning("✅ Serial match for index %s: %s", index, actual_serial[-8:])
+                    _LOGGER.debug("✅ Serial match for index %s: %s", index, actual_serial[-8:])
                 
                 wrapper.mark_receiver_used(int(index), receiver_serial)
                 
-        _LOGGER.info("🔄 Synchronized %d EW-Receiver indices from coordinator to wrapper", len(self._used_ew_receiver_indices))
+                # Sync to device_manager._rx11_index_to_serial
+                if device_serial:
+                    self.device_manager._rx11_index_to_serial[int(index)] = device_serial
+                
+        _LOGGER.info("🔄 Synchronized %d Easywave Receiver indices from coordinator to wrapper and device_manager", len(self._used_ew_receiver_indices))
 
     async def unregister_device_permanently(self, serial_number: str) -> bool:
         """Permanently remove device from all systems including DeviceManager."""
@@ -1115,10 +1177,18 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Step 6: Perform device-specific cleanup (RX11, etc.)
             _LOGGER.info("  Step 6/7: Device-specific cleanup...")
             device_type = device_info.get("type", "unknown")
-            _LOGGER.info("  Device type for cleanup: %s", device_type)
+            neo_device = device_info.get("neo_device", False)
+            _LOGGER.info("  Device type for cleanup: %s (neo_device flag: %s)", device_type, neo_device)
+            
+            # Check if this is an EWneo device using multiple indicators
+            is_ewneo = self._is_ewneo_device(device_type, device_info)
+            
             if device_type == "ew_receiver":
                 await self._cleanup_rx11_device(serial_number, device_info)
-            elif device_type == "ewneo_receiver":
+            elif is_ewneo:
+                # Clean up all EWneo devices (switch, motor, dimmer, etc.)
+                # These include: ewneo_switch, ewneo_motor, ewneo_dimmer, ewneo_sensor, etc.
+                _LOGGER.info("  Device identified as EWneo - sending EWB_REMOVE_DEVICE...")
                 await self._cleanup_ewneo_device(serial_number, device_info)
             else:
                 _LOGGER.info("  No specific cleanup needed for device type: %s", device_type)
@@ -1399,7 +1469,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Initialize EWB index tracking
             await self._load_used_ewb_indices()
             
-            # Initialize EW-Receiver index tracking
+            # Initialize Easywave Receiver index tracking
             await self._load_used_ew_receiver_indices()
             
             # Save to consolidate all data into single file after migration
@@ -1424,7 +1494,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Synchronize EWB index tracking with transceiver wrapper
             await self._sync_ewb_indices_with_wrapper()
             
-            # Synchronize EW-Receiver index tracking with transceiver wrapper
+            # Synchronize Easywave Receiver index tracking with transceiver wrapper
             await self._sync_ew_receiver_indices_with_wrapper()
             
             # Set telegram callback
@@ -1668,13 +1738,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                 if self._last_connection_state != is_connected:
                     _LOGGER.warning("⚠️ RX11 USB Transceiver nicht verbunden - Entitäten werden deaktiviert")
                     # Show persistent notification about disconnection
+                    lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
                     await self.hass.services.async_call(
                         "persistent_notification",
                         "create",
                         {
                             "notification_id": "eldat_rx11_disconnected",
-                            "title": "⚠️ RX11 Verbindung verloren",
-                            "message": "Der RX11 USB-Transceiver ist nicht verbunden. Versuche automatische Wiederverbindung...",
+                            "title": translate("notification.rx11_disconnected_title", lang),
+                            "message": translate("notification.rx11_disconnected_message", lang),
                         },
                         blocking=False,
                     )
@@ -1702,13 +1773,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                     blocking=False,
                 )
                 # Show reconnection success notification
+                lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
                 await self.hass.services.async_call(
                     "persistent_notification",
                     "create",
                     {
                         "notification_id": "eldat_rx11_reconnected",
-                        "title": "✅ RX11 Verbindung wiederhergestellt",
-                        "message": "Der RX11 USB-Transceiver ist wieder verbunden. Alle Geräte sind verfügbar.",
+                        "title": translate("notification.rx11_reconnected_title", lang),
+                        "message": translate("notification.rx11_reconnected_message", lang),
                     },
                     blocking=False,
                 )
@@ -1725,13 +1797,14 @@ class EldatCoordinator(DataUpdateCoordinator):
             else:
                 _LOGGER.warning("⚠️ RX11 USB Transceiver nicht verbunden - Entitäten sind nicht verfügbar")
                 # Show persistent notification about disconnection
+                lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
                 await self.hass.services.async_call(
                     "persistent_notification",
                     "create",
                     {
                         "notification_id": "eldat_rx11_disconnected",
-                        "title": "⚠️ RX11 Verbindung verloren",
-                        "message": "Der RX11 USB-Transceiver ist nicht verbunden. Versuche automatische Wiederverbindung...",
+                        "title": translate("notification.rx11_disconnected_title", lang),
+                        "message": translate("notification.rx11_disconnected_message", lang),
                     },
                     blocking=False,
                 )
@@ -1781,9 +1854,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Check if this telegram is from a registered EWneo device
             is_ewneo_device = self._is_ewneo_device_telegram(serial_number)
             
-            # Fire button events IMMEDIATELY for EW-Transmitters, but NOT for EWneo devices
+            # Fire button events IMMEDIATELY for Easywave Transmitters, but NOT for EWneo devices
             if (telegram_data.get("type") == "ew_transmitter" or telegram_data.get("info_type") in [0, 1]) and not is_ewneo_device:
-                _LOGGER.debug("Firing events for EW-Transmitter telegram")
+                _LOGGER.debug("Firing events for Easywave Transmitter telegram")
                 
                 # Get the function/action from telegram
                 action = telegram_data.get("function")
@@ -1842,6 +1915,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                     if "battery_level" in telegram_data:
                         self.devices[serial_number]["battery_level"] = telegram_data["battery_level"]
                         _LOGGER.warning("🔋 Battery updated in devices dict: %d%%", telegram_data["battery_level"])
+                    
+                    # Update device instance for timestamp tracking and availability monitoring
+                    device_instance = self.get_device_instance(serial_number)
+                    if device_instance and hasattr(device_instance, 'process_telegram'):
+                        device_instance.process_telegram(telegram_data)
+                        _LOGGER.debug("✅ Called process_telegram on device instance %s", serial_number[-8:])
             else:
                 # Device not in self.devices, but is registered - add it now!
                 if is_registered and serial_number in self._registered_devices:
@@ -1859,6 +1938,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                     if "battery_level" in telegram_data:
                         self.devices[serial_number]["battery_level"] = telegram_data["battery_level"]
                         _LOGGER.warning("🔋 Battery set in newly added device: %d%%", telegram_data["battery_level"])
+                    
+                    # Update device instance for timestamp tracking
+                    device_type = self.devices[serial_number].get("type")
+                    if device_type in ["ewneo_sensor", "ew_sensor"]:
+                        device_instance = self.get_device_instance(serial_number)
+                        if device_instance and hasattr(device_instance, 'process_telegram'):
+                            device_instance.process_telegram(telegram_data)
+                            _LOGGER.debug("✅ Called process_telegram on newly added device %s", serial_number[-8:])
                 else:
                     _LOGGER.warning("Device NOT found in coordinator.devices! Serial: %s...%s", 
                                   serial_number[:8], serial_number[-8:])
@@ -1969,7 +2056,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             has_sensor_data = any(key in telegram_data for key in ["temperature", "humidity", "battery_level"])
             
             if has_sensor_data:
-                _LOGGER.warning("🔄 EW-Transmitter %s is sending sensor data, upgrading to EW-Transceiver", 
+                _LOGGER.warning("🔄 Easywave Transmitter %s is sending sensor data, upgrading to EW-Transceiver", 
                               serial_number[-8:])
                 
                 # Update device configuration
@@ -2003,7 +2090,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Add missing sensor entities
                 await self._add_transceiver_sensor_entities(serial_number, device)
                 
-                _LOGGER.info("✅ Successfully upgraded %s from EW-Transmitter to EW-Transceiver", serial_number[-8:])
+                _LOGGER.info("✅ Successfully upgraded %s from Easywave Transmitter to EW-Transceiver", serial_number[-8:])
                 
         except Exception as e:
             _LOGGER.error("❌ Error upgrading transmitter %s: %s", serial_number[-8:], e)
@@ -2011,37 +2098,43 @@ class EldatCoordinator(DataUpdateCoordinator):
     async def _add_transceiver_sensor_entities(self, serial_number: str, device_info: Dict[str, Any]) -> None:
         """Add sensor entities for an upgraded transceiver."""
         try:
+            # Get language for translations
+            lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
+            
             # Define the sensor entities that should be added
             new_entities = [
                 {
                     "type": "sensor",
                     "sensor_type": "temperature", 
-                    "name": "Temperatur",
+                    "translation_key": "temperature",  # HA looks up entity.sensor.temperature.name
                     "unique_id": f"{serial_number}_temperature",
                     "device_class": "temperature",
                     "unit_of_measurement": "°C",
                     "icon": "mdi:thermometer",
                     "state_class": "measurement",
+                    "has_entity_name": True,
                     "current_value": device_info.get("last_temperature")
                 },
                 {
                     "type": "sensor",
                     "sensor_type": "humidity",
-                    "name": "Luftfeuchtigkeit", 
+                    "translation_key": "humidity",  # HA looks up entity.sensor.humidity.name
                     "unique_id": f"{serial_number}_humidity",
                     "device_class": "humidity",
                     "unit_of_measurement": "%",
                     "icon": "mdi:water-percent",
                     "state_class": "measurement",
+                    "has_entity_name": True,
                     "current_value": device_info.get("last_humidity")
                 },
                 {
                     "type": "sensor",
                     "sensor_type": "battery",
-                    "name": "Batterie",
+                    "translation_key": "battery",  # HA looks up entity.sensor.battery.name
                     "unique_id": f"{serial_number}_battery",
                     "device_class": "battery",
-                    "unit_of_measurement": "%", 
+                    "unit_of_measurement": "%",
+                    "has_entity_name": True, 
                     "icon": "mdi:battery",
                     "state_class": "measurement",
                     "current_value": device_info.get("battery_level")
@@ -2110,7 +2203,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Error firing battery event for %s: %s", serial_number[-8:], e)
 
     async def _fire_button_events(self, serial_number: str, telegram_data: Dict[str, Any]) -> None:
-        """Fire button events for EW-Transmitter devices (press/release only).
+        """Fire button events for Easywave Transmitter devices (press/release only).
         
         Supported actions:
         - press (function=1): Button pressed
@@ -2187,7 +2280,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             device_type = device.get("type")
             info_type = telegram_data.get("info_type")
             
-            # Handle EW-Transmitter button press/release events
+            # Handle Easywave Transmitter button press/release events
             if device_type == "ew_transmitter" or info_type == 1:
                 button = telegram_data.get("button")
                 function = telegram_data.get("function")
@@ -2425,6 +2518,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     _LOGGER.debug("Fired EWneo state update event for device %s (from %s, mode=%s)", 
                                 target_device_serial[-8:], serial_number[-8:], query_mode)
+                    
+                    # Check for pending runtime measurement queries on multi-channel motors
+                    await self._check_and_execute_pending_runtime_queries(target_device_serial, target_device_info)
                 else:
                     _LOGGER.warning("⚠️ Could not parse EWneo state for device %s (state_bytes: %s)", 
                                   target_device_serial[-8:], [f"0x{b:02X}" for b in state_bytes])
@@ -2433,6 +2529,89 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
         except Exception as e:
             _LOGGER.error("Error processing EWneo state update for %s: %s", serial_number[-8:], e)
+
+    async def _check_and_execute_pending_runtime_queries(
+        self, 
+        device_serial: str, 
+        device_info: Dict[str, Any]
+    ) -> None:
+        """Check for and execute pending runtime measurement queries for multi-channel motors.
+        
+        When a motor channel reports status 117 (runtime measurement in progress),
+        we need to query the detailed state using Mode 2/10/18/26 to get the full
+        runtime measurement information.
+        
+        Args:
+            device_serial: Device serial number
+            device_info: Device information dictionary
+        """
+        try:
+            # Only for multi-channel motors (dual/quad)
+            device_type = device_info.get("device_type_name", "")
+            num_channels = device_info.get("num_channels", 1)
+            
+            if "dual" not in device_type.lower() and "quad" not in device_type.lower():
+                return
+            if num_channels < 2:
+                return
+                
+            # Get the device instance to check for pending queries
+            device_instance = self.get_device_instance(device_serial)
+            if not device_instance:
+                return
+                
+            # Check if device has the runtime query methods (RX11EWneoMotor)
+            if not hasattr(device_instance, 'has_pending_runtime_queries'):
+                return
+                
+            if not device_instance.has_pending_runtime_queries():
+                return
+                
+            # Get pending channels and their query modes
+            pending_channels = device_instance.get_pending_runtime_queries()
+            gateway_serial = device_info.get("gateway_serial")
+            
+            if not gateway_serial:
+                _LOGGER.warning("⚠️ No gateway serial for device %s, cannot query runtime", device_serial[-8:])
+                return
+            
+            _LOGGER.info(
+                "🔧 EWneo motor %s: Executing pending runtime queries for channels %s",
+                device_serial[-8:], pending_channels
+            )
+            
+            # Execute queries for each pending channel
+            for channel in pending_channels:
+                query_mode = device_instance.get_query_mode_for_channel(channel)
+                
+                _LOGGER.info(
+                    "📡 Querying runtime measurement for %s CH%d (Mode %d)",
+                    device_serial[-8:], channel, query_mode
+                )
+                
+                # Query the detailed state
+                success = await self._query_ewneo_state_with_mode(
+                    gateway_serial, device_serial, mode=query_mode
+                )
+                
+                if success:
+                    # Clear the pending flag after successful query
+                    device_instance.clear_pending_runtime_query(channel)
+                    _LOGGER.info(
+                        "✅ Runtime query successful for %s CH%d",
+                        device_serial[-8:], channel
+                    )
+                else:
+                    _LOGGER.warning(
+                        "⚠️ Runtime query failed for %s CH%d, will retry on next telegram",
+                        device_serial[-8:], channel
+                    )
+                    
+                # Small delay between queries to avoid overwhelming the transceiver
+                await asyncio.sleep(0.1)
+                
+        except Exception as e:
+            _LOGGER.error("Error executing pending runtime queries for %s: %s", device_serial[-8:], e)
 
     # Auto-discovery methods removed - devices must be manually added
 
@@ -2570,6 +2749,35 @@ class EldatCoordinator(DataUpdateCoordinator):
         # DeviceManager whitelist is the single source of truth
         # Devices not in whitelist are automatically not loaded
         return await self.unregister_device_permanently(serial_number)
+
+    def _is_ewneo_device(self, device_type: str, device_info: Dict[str, Any]) -> bool:
+        """Determine if device is an EWneo device with multiple fallback checks.
+        
+        This uses multiple indicators to detect EWneo devices:
+        1. Device type starts with "ewneo_"
+        2. neo_device flag is True
+        3. Has ewneo_index field
+        
+        Args:
+            device_type: The device type string
+            device_info: Device information dictionary
+            
+        Returns:
+            True if device is identified as an EWneo device
+        """
+        # Primary check: type name
+        if device_type and device_type.startswith("ewneo_"):
+            return True
+        
+        # Secondary check: neo_device flag
+        if device_info.get("neo_device", False):
+            return True
+        
+        # Fallback checks: presence of EWneo-specific fields
+        if device_info.get("ewneo_index") is not None:
+            return True
+        
+        return False
     async def _cleanup_rx11_device(self, serial_number: str, device_info: Dict[str, Any]) -> None:
         """Clean up RX11-based device resources - delegates to transceiver."""
         if hasattr(self.transceiver, 'cleanup_rx11_device'):
@@ -2586,50 +2794,115 @@ class EldatCoordinator(DataUpdateCoordinator):
                 ew_receiver_index = device_info.get("ew_receiver_index") or device_info.get("rx11_index")
                 if ew_receiver_index is not None:
                     self.mark_ew_receiver_index_free(ew_receiver_index)
-                    _LOGGER.info("♻️ Freed EW-Receiver index %d", ew_receiver_index)
+                    _LOGGER.info("♻️ Freed Easywave Receiver index %d", ew_receiver_index)
             except Exception as e:
                 _LOGGER.error("Error in legacy RX11 cleanup: %s", e)
 
     async def _cleanup_ewneo_device(self, serial_number: str, device_info: Dict[str, Any]) -> None:
-        """Clean up EWneo-based device resources including EWB index mappings."""
+        """Clean up EWneo-based device resources including EWB index mappings.
+        
+        This method ensures that EWB_REMOVE_DEVICE is sent to the gateway when removing EWneo receivers/transceivers.
+        Note: EWneo Sensors do NOT require EWB_REMOVE_DEVICE - they are only senders, not registered in the gateway.
+        """
         try:
             # Clean up EWB index mapping if this was an EWneo device
             ewneo_index = device_info.get("ewneo_index")
             gateway_serial = device_info.get("gateway_serial")
             receiver_serial = serial_number  # The device's own serial is the receiver serial
+            device_name = device_info.get("name", serial_number[-8:])
+            device_type = device_info.get("type", "unknown")
             
-            _LOGGER.info("🔍 EWneo cleanup debug - ewneo_index: %s, gateway_serial: %s, receiver_serial: %s",
-                        ewneo_index, gateway_serial[-8:] if gateway_serial else None, receiver_serial[-8:])
+            _LOGGER.info("🔍 EWneo cleanup starting - Device: %s (%s), Type: %s, EWB Index: %s, Gateway: %s",
+                        device_name, receiver_serial[-8:], device_type, ewneo_index,
+                        gateway_serial[-8:] if gateway_serial else "N/A")
             
-            # Try to remove the device via EWB protocol first
-            # We need gateway_serial to send the remove command
-            if gateway_serial and receiver_serial:
-                _LOGGER.info("🗑️ Attempting to remove EWneo device via EwbRemoveDevice - Gateway: %s, Receiver: %s", 
-                           gateway_serial[-8:], receiver_serial[-8:])
-                
-                try:
-                    success = await self.transceiver.rx11_ewb_remove_device(gateway_serial, receiver_serial)
-                    if success:
-                        _LOGGER.info("✅ EWneo device successfully removed via EwbRemoveDevice")
-                    else:
-                        _LOGGER.warning("⚠️ EwbRemoveDevice failed, continuing with cleanup")
-                except Exception as e:
-                    _LOGGER.warning("⚠️ EwbRemoveDevice error: %s, continuing with cleanup", e)
+            # Step 1: Determine if EWB_REMOVE_DEVICE should be sent
+            # EWB_REMOVE_DEVICE is ONLY for EWneo receivers/transceivers (devices registered in the gateway)
+            # EWneo Sensors are transmit-only devices and are NOT registered in the gateway
+            is_ewneo_sensor = device_type in ("ewneo_sensor", "ew_sensor")
+            
+            ewb_remove_success = False
+            if is_ewneo_sensor:
+                _LOGGER.info("ℹ️ Skipping EWB_REMOVE_DEVICE for %s - EWneo Sensors are not registered in gateway", 
+                            device_name)
+                ewb_remove_success = True  # Not needed, so treat as "success"
+            elif gateway_serial and receiver_serial:
+                # Only send EWB_REMOVE_DEVICE for EWneo receivers/transceivers
+                ewb_remove_success = await self._send_ewb_remove_device(
+                    gateway_serial, receiver_serial, device_name, device_type
+                )
             else:
-                _LOGGER.warning("⚠️ Cannot remove EWneo device via EWB protocol - missing gateway_serial (%s) or receiver_serial (%s)",
-                              "present" if gateway_serial else "missing",
-                              "present" if receiver_serial else "missing")
+                _LOGGER.error("❌ CRITICAL: Cannot send EWB_REMOVE_DEVICE for %s - Missing critical fields:",
+                            device_name)
+                if not gateway_serial:
+                    _LOGGER.error("   - gateway_serial is MISSING (required for EWB protocol)")
+                if not receiver_serial:
+                    _LOGGER.error("   - receiver_serial is MISSING (should never happen)")
+                _LOGGER.error("   Device will be removed locally but may remain registered in EWneo receiver!")
                     
+            # Step 2: Free up EWB index for reuse
             if ewneo_index is not None:
-                # Free up EWB index for reuse
                 self.mark_ewb_index_free(ewneo_index)
-                _LOGGER.info("♻️ Freed EWB index %d for reuse (was: %s)", ewneo_index, serial_number[-8:])
+                _LOGGER.info("♻️ Freed EWB index %d for reuse (Device: %s)", ewneo_index, device_name)
+            else:
+                _LOGGER.warning("⚠️ No EWB index to free for device %s", device_name)
             
-            _LOGGER.info("🧹 EWneo device cleanup completed for %s (EWB index: %s)", 
-                        serial_number[-8:], ewneo_index)
+            # Summary
+            if ewb_remove_success:
+                _LOGGER.info("✅ COMPLETE: EWneo device '%s' successfully removed (EWB_REMOVE_DEVICE sent + local cleanup)", 
+                            device_name)
+            else:
+                _LOGGER.warning("⚠️ PARTIAL: EWneo device '%s' removed locally but EWB_REMOVE_DEVICE may not have been sent", 
+                              device_name)
             
         except Exception as e:
-            _LOGGER.error("Error cleaning up EWneo device %s: %s", serial_number, e)
+            _LOGGER.error("❌ Error cleaning up EWneo device %s: %s", serial_number, e, exc_info=True)
+    
+    async def _send_ewb_remove_device(self, gateway_serial: str, receiver_serial: str, 
+                                     device_name: str, device_type: str, max_retries: int = 3) -> bool:
+        """Send EWB_REMOVE_DEVICE command to gateway with retry logic.
+        
+        Args:
+            gateway_serial: Gateway/Transceiver serial number (hex string)
+            receiver_serial: EWneo receiver serial number (hex string)  
+            device_name: Human-readable device name for logging
+            device_type: Device type string for logging
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if EWB_REMOVE_DEVICE was sent successfully, False otherwise
+        """
+        _LOGGER.info("📤 Sending EWB_REMOVE_DEVICE for %s (Type: %s) to Gateway %s...",
+                    device_name, device_type, gateway_serial[-8:])
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                success = await self.transceiver.rx11_ewb_remove_device(gateway_serial, receiver_serial)
+                
+                if success:
+                    _LOGGER.info("✅ EWB_REMOVE_DEVICE successfully sent (Attempt %d/%d) - Device: %s",
+                               attempt, max_retries, device_name)
+                    return True
+                else:
+                    _LOGGER.warning("⚠️ EWB_REMOVE_DEVICE failed on attempt %d/%d for %s - Retrying...",
+                                  attempt, max_retries, device_name)
+                    
+                    # Wait before retry (except on last attempt)
+                    if attempt < max_retries:
+                        await asyncio.sleep(0.5)  # 500ms delay between retries
+                        
+            except Exception as e:
+                _LOGGER.warning("⚠️ EWB_REMOVE_DEVICE exception on attempt %d/%d for %s: %s",
+                              attempt, max_retries, device_name, e)
+                
+                # Wait before retry (except on last attempt)
+                if attempt < max_retries:
+                    await asyncio.sleep(0.5)  # 500ms delay between retries
+        
+        # All retries exhausted
+        _LOGGER.error("❌ EWB_REMOVE_DEVICE failed after %d attempts for %s (Gateway: %s, Receiver: %s)",
+                    max_retries, device_name, gateway_serial[-8:], receiver_serial[-8:])
+        return False
 
     async def _save_device_configuration(self) -> None:
         """Save device configuration to persistent storage."""
@@ -2735,14 +3008,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                             if not hasattr(self.transceiver, '_device_instances'):
                                 self.transceiver._device_instances = {}
                             self.transceiver._device_instances[serial_number] = device_instance
-                            
-                            # Initialize EWneo devices (queries state)
-                            if device_info.get("neo_device") and hasattr(device_instance, 'async_initialize'):
-                                _LOGGER.info("🔄 Initializing EWneo device: %s", serial_number)
-                                await device_instance.async_initialize(is_restoration=True)
-                            
-                            _LOGGER.info("✅ Created and stored device instance for %s: %s", 
-                                        serial_number, type(device_instance).__name__)
+            
+                            _LOGGER.info("✅ Created device instance for %s: %s (state query pending)", 
+                            serial_number, type(device_instance).__name__)
                         else:
                             _LOGGER.warning("⚠️ Device factory returned None for %s", serial_number)
                     except Exception as e:
@@ -2772,7 +3040,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             if self._used_ew_receiver_indices:
                 self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
-                _LOGGER.info("📍 Recalculated next free EW-Receiver index after device restore: %d (used: %d indices)", 
+                _LOGGER.info("📍 Recalculated next free Easywave Receiver index after device restore: %d (used: %d indices)", 
                            self._next_free_ew_receiver_index, len(self._used_ew_receiver_indices))
             
             # Fire event to signal that all devices are loaded and available
@@ -2922,7 +3190,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                             serial_number[-8:], device_type)
                 return False
             
-            # For EW-Receiver devices, always use send_command_to_receiver
+            # For Easywave Receiver devices, always use send_command_to_receiver
             if is_ew_receiver:
                 # Convert bytes to command format for send_command_to_receiver
                 if isinstance(command, bytes):
@@ -2937,7 +3205,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     _LOGGER.error("Transceiver does not support send_command_to_receiver for EW receiver")
                     return False
             elif isinstance(command, bytes):
-                # Non-EW-Receiver with bytes - use send_command_to_device
+                # Non-Easywave Receiver with bytes - use send_command_to_device
                 if hasattr(self.transceiver, 'send_command_to_device'):
                     result = await self.transceiver.send_command_to_device(serial_number, command)
                 else:
@@ -3295,7 +3563,7 @@ class EldatCoordinator(DataUpdateCoordinator):
         info_type: int = None,
         timestamp: float = None,
     ) -> bool:
-        """Simplified RX11-based device creation with persistent EW-Receiver serial storage."""
+        """Simplified RX11-based device creation with persistent Easywave Receiver serial storage."""
         try:
             # Check if device already exists
             if serial_number in self.devices:
@@ -3345,7 +3613,7 @@ class EldatCoordinator(DataUpdateCoordinator):
     # async def _create_rx11_ew_device_info(...)
 
     async def _allocate_ew_receiver_with_persistence(self, device_serial: str) -> Dict[str, Any] | None:
-        """Allocate EW-Receiver with persistent serial number storage."""
+        """Allocate Easywave Receiver with persistent serial number storage."""
         try:
             # Get next available receiver with index and serial
             if hasattr(self.transceiver, 'get_next_available_receiver'):
@@ -3369,7 +3637,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     if hasattr(self.transceiver, '_rx11_wrapper'):
                         self.transceiver._rx11_wrapper.mark_receiver_used(ew_receiver_index, ew_receiver_serial)
                     
-                    _LOGGER.info("🎯 Allocated and stored EW-Receiver: Index %d, Serial %s → Device %s", 
+                    _LOGGER.info("🎯 Allocated and stored Easywave Receiver: Index %d, Serial %s → Device %s", 
                                ew_receiver_index, ew_receiver_serial[-8:], device_serial[-8:])
                     
                     return {
@@ -3379,14 +3647,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                         "rx11_based": True,
                     }
                 else:
-                    _LOGGER.error("No available EW-Receiver index found")
+                    _LOGGER.error("No available Easywave Receiver index found")
                     return None
             else:
-                _LOGGER.error("Transceiver does not support EW-Receiver allocation")
+                _LOGGER.error("Transceiver does not support Easywave Receiver allocation")
                 return None
                 
         except Exception as e:
-            _LOGGER.error("Error allocating EW-Receiver with persistence: %s", e)
+            _LOGGER.error("Error allocating Easywave Receiver with persistence: %s", e)
             return None
             return False
 
@@ -3503,7 +3771,7 @@ class EldatCoordinator(DataUpdateCoordinator):
         """Ghost device cleanup is disabled.
         
         DEPRECATED: This method is deprecated and no longer performs any cleanup.
-        Registered devices are never automatically removed, as EW-Transmitters
+        Registered devices are never automatically removed, as Easywave Transmitters
         (battery-powered remotes) may not send signals for extended periods.
         """
         _LOGGER.info("ℹ️ async_cleanup_ghost_devices called but is disabled - registered devices are protected")
@@ -3514,13 +3782,13 @@ class EldatCoordinator(DataUpdateCoordinator):
         try:
             device_type = device_data.get("device_type", "").lower()
             
-            # Check for EW-Transmitters without proper setup
+            # Check for Easywave Transmitters without proper setup
             if "transmitter" in device_type:
                 # Only allow transmitter creation in setup mode or if manually added
                 if not self._setup_mode_active and not device_data.get("added_manually", False):
-                    _LOGGER.warning("🚫 Preventing ghost device creation: EW-Transmitter %s detected outside setup mode", 
+                    _LOGGER.warning("🚫 Preventing ghost device creation: Easywave Transmitter %s detected outside setup mode", 
                                   serial_number[-8:])
-                    _LOGGER.info("💡 Enable setup mode to register EW-Transmitter devices")
+                    _LOGGER.info("💡 Enable setup mode to register Easywave Transmitter devices")
                     return False
                     
                 # Additional validation for transmitters
@@ -3669,7 +3937,7 @@ class EldatCoordinator(DataUpdateCoordinator):
         """Ghost cleanup is disabled - registered devices are never automatically removed.
         
         All devices in the DeviceManager are intentionally registered by the user
-        and should not be removed based on last_seen timestamps. EW-Transmitters
+        and should not be removed based on last_seen timestamps. Easywave Transmitters
         (battery-powered remotes) may not send signals for extended periods.
         
         This method now only returns info about registered devices without removing any.
@@ -4433,8 +4701,8 @@ class EldatCoordinator(DataUpdateCoordinator):
     async def _query_ewneo_state(self, gateway_serial: str, device_serial: str) -> bool:
         """Query initial state of EWneo device using EwbQueryState.
         
-        Returns True if command was sent successfully, False otherwise.
-        State will be received via EWB monitoring and processed automatically.
+        Returns True if command was sent successfully and state was processed, False otherwise.
+        State will also be fired as an event for entities to receive.
         """
         return await self._query_ewneo_state_with_mode(gateway_serial, device_serial, mode=0)
     
@@ -4446,8 +4714,8 @@ class EldatCoordinator(DataUpdateCoordinator):
             device_serial: Target device serial number  
             mode: Query mode (0=summary, 2=motor1 full, 10=motor2 full, etc.)
         
-        Returns True if command was sent successfully, False otherwise.
-        State will be received via EWB monitoring and processed automatically.
+        Returns True if command was sent successfully and state was processed, False otherwise.
+        State will also be fired as an event for entities to receive.
         """
         try:
             if not hasattr(self.transceiver, 'wrapper') or not self.transceiver.wrapper:
@@ -4457,12 +4725,42 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("🔍 Querying EWneo device state: Gateway %s, Device %s, Mode %d", 
                          gateway_serial[-8:], device_serial[-8:], mode)
             
-            # Call RX11 wrapper method (async)
+            # Call RX11 wrapper method (async) - returns (recent_mode, state_bytes) or None
             result = await self.transceiver.wrapper.rx11_ewb_query_state(gateway_serial, device_serial, mode=mode)
             
             if result:
-                _LOGGER.debug("✅ EwbQueryState command sent successfully (mode %d)", mode)
-                return True
+                recent_mode, state_bytes = result
+                _LOGGER.debug("✅ EwbQueryState successful (mode %d): state=%s", 
+                            mode, [f"0x{b:02X}" for b in state_bytes] if state_bytes else "None")
+                
+                # Get device info to determine device type
+                device_info = self.devices.get(device_serial, {})
+                device_type_code = device_info.get("device_type_code", 0)
+                device_type_name = device_info.get("device_type_name", device_info.get("device_type", "ewneo_motor"))
+                
+                # Parse the state using our existing parser
+                parsed_state = self._parse_ewneo_state(device_type_code, list(state_bytes), device_type_name, device_serial, mode=recent_mode)
+                
+                if parsed_state:
+                    _LOGGER.debug("🎯 Parsed EWneo state for %s: %s", device_serial[-8:], parsed_state)
+                    
+                    # Fire event for entities to receive
+                    self.hass.bus.async_fire(
+                        "eldat_ewneo_state_update",
+                        {
+                            "serial_number": device_serial,
+                            "device_id": device_serial,
+                            "parsed_state": parsed_state,
+                            "state_bytes": list(state_bytes),
+                            "query_mode": recent_mode,
+                            "source": "query_state",
+                        }
+                    )
+                    _LOGGER.debug("📡 Fired EWneo state update event for %s (mode=%d)", device_serial[-8:], recent_mode)
+                    return True
+                else:
+                    _LOGGER.warning("⚠️ Could not parse EWneo state for %s", device_serial[-8:])
+                    return False
             else:
                 _LOGGER.warning("⚠️ EwbQueryState command failed (mode %d)", mode)
                 return False
