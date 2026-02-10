@@ -94,7 +94,7 @@ async def async_setup_entry(
                     
                     # Check if this entity already exists in Home Assistant
                     entity_registry = er.async_get(hass)
-                    existing_entity = entity_registry.async_get_entity_id("light", "eldat", lt.unique_id)
+                    existing_entity = entity_registry.async_get_entity_id("light", DOMAIN, lt.unique_id)
                     
                     if existing_entity:
                         _LOGGER.debug("Light: Entity with unique_id %s already exists as %s, skipping", lt.unique_id, existing_entity)

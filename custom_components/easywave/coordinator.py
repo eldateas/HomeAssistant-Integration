@@ -1435,7 +1435,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 if entity_id not in existing_entity_ids:
                     existing_entities.append({
                         "entity_id": entity_id,
-                        "platform": "eldat",
+                        "platform": DOMAIN,
                         "device_class": None,
                         "name": None
                     })
@@ -3358,7 +3358,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Method 2: Find by unique_id pattern (fallback and additional cleanup)
             # This catches entities that might have been orphaned
             for entity_entry in list(entity_registry.entities.values()):
-                if entity_entry.platform == "eldat" and entity_entry.unique_id:
+                if entity_entry.platform == DOMAIN and entity_entry.unique_id:
                     # Check if serial is in unique_id (format: {SERIAL}_{sensor_type})
                     if serial_number.upper() in entity_entry.unique_id.upper():
                         if entity_entry.entity_id not in entities_to_remove:
@@ -3421,7 +3421,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             entities_to_remove = []
             
             for entity in entity_registry.entities.values():
-                if (entity.platform == "eldat" and 
+                if (entity.platform == DOMAIN and 
                     (entity.device_id == device_entry.id if device_entry else
                      serial_number in entity.unique_id)):
                     entities_to_remove.append(entity.entity_id)
@@ -3462,7 +3462,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             orphaned_entities = []
             
             for entity in entity_registry.entities.values():
-                if entity.platform == "eldat":
+                if entity.platform == DOMAIN:
                     eldat_entities.append(entity)
                     
                     # Check if the entity's device still exists in coordinator
@@ -3868,7 +3868,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             orphaned_entities = []
             
             for entity in entity_registry.entities.values():
-                if entity.platform == "eldat":
+                if entity.platform == DOMAIN:
                     eldat_entities.append(entity)
                     
                     # Extract serial from unique_id
@@ -4070,7 +4070,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             entities_to_remove = []
             
             for entity in entity_registry.entities.values():
-                if (entity.platform == "eldat" and 
+                if (entity.platform == DOMAIN and 
                     (entity.device_id == device_entry.id if device_entry else
                      serial_number in entity.unique_id)):
                     entities_to_remove.append(entity.entity_id)

@@ -164,7 +164,7 @@ async def async_setup_entry(
                 for sensor in new_sensors:
                     unique_id = getattr(sensor, '_attr_unique_id', None)
                     if unique_id:
-                        existing_entity = ha_entity_registry.async_get_entity_id("sensor", "eldat", unique_id)
+                        existing_entity = ha_entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
                         if not existing_entity and not entity_registry.is_entity_created_this_session(unique_id):
                             sensors_to_add.append(sensor)
                             entity_registry.mark_entity_created(unique_id, serial_number)
@@ -188,7 +188,7 @@ async def async_setup_entry(
             for sensor in new_sensors:
                 unique_id = getattr(sensor, '_attr_unique_id', None)
                 if unique_id:
-                    existing_entity = ha_entity_registry.async_get_entity_id("sensor", "eldat", unique_id)
+                    existing_entity = ha_entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
                     if not existing_entity and not entity_registry.is_entity_created_this_session(unique_id):
                         sensors_to_add.append(sensor)
                         entity_registry.mark_entity_created(unique_id, serial_number)
@@ -262,7 +262,7 @@ async def async_setup_entry(
                         continue
                     
                     # Check HA's entity registry (single source of truth)
-                    existing_entity = ha_entity_registry.async_get_entity_id("sensor", "eldat", unique_id)
+                    existing_entity = ha_entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
                     
                     if existing_entity:
                         # Entity already exists in HA - skip unless forced

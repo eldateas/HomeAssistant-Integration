@@ -416,11 +416,29 @@ async def async_remove_config_entry_device(
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove a config entry with proper cleanup - removes ALL devices and persistent data."""
+    import homeassistant.helpers.entity_registry as er
+    
     _LOGGER.info("🗑️ Removing ELDAT config entry and all associated data...")
     
-    # Get coordinator for shutdown and index reset
+    # Step 1: Reset global entity registry (prevents old names from persisting)
+    try:
+        from .entity_registry import reset_entity_registry
+        reset_entity_registry()
+        _LOGGER.info("✅ Global entity registry reset")
+    except Exception as e:
+        _LOGGER.warning("⚠️ Could not reset entity registry: %s", e)
+    
+    # Step 2: Get coordinator for shutdown and index reset
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
+        # Clear all tracking sets to prevent stale data
+        coordinator.created_entity_unique_ids.clear()
+        coordinator._devices_with_fired_events.clear()
+        coordinator._known_devices.clear()
+        coordinator.devices.clear()
+        coordinator._registered_devices.clear()
+        _LOGGER.info("✅ Coordinator tracking data cleared")
+        
         # Reset all indices before shutdown
         try:
             coordinator.reset_all_ew_receiver_indices()
@@ -436,61 +454,96 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         
         await coordinator.async_shutdown()
     
-    # Remove all devices associated with this config entry from device registry
+    # Step 3: Remove ALL entities for this integration from entity registry
+    entity_registry = er.async_get(hass)
+    entities_to_remove = []
+    
+    for entity in list(entity_registry.entities.values()):
+        if entity.platform == DOMAIN:
+            entities_to_remove.append(entity.entity_id)
+    
+    for entity_id in entities_to_remove:
+        try:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.debug("🗑️ Removed entity: %s", entity_id)
+        except Exception as e:
+            _LOGGER.warning("⚠️ Could not remove entity %s: %s", entity_id, e)
+    
+    _LOGGER.info("✅ Removed %d entities from entity registry", len(entities_to_remove))
+    
+    # Step 4: Remove all devices associated with this config entry from device registry
     device_registry = dr.async_get(hass)
     devices_to_remove = []
     
-    for device in device_registry.devices.values():
+    for device in list(device_registry.devices.values()):
         # Check if device belongs to this config entry
-        for config_entry_id in device.config_entries:
-            if config_entry_id == entry.entry_id:
-                devices_to_remove.append(device.id)
-                break
+        if entry.entry_id in device.config_entries:
+            devices_to_remove.append(device.id)
     
     # Remove each device
     for device_id in devices_to_remove:
-        device_registry.async_remove_device(device_id)
-        _LOGGER.info("🗑️ Removed device: %s", device_id)
-    
-    _LOGGER.info("✅ ELDAT config entry removed - %d devices deleted", len(devices_to_remove))
-    
-    # Clean up ALL persistent data files
-    import os
-    data_dir = Path(hass.config.config_dir) / "eldat"
-    if data_dir.exists():
         try:
-            # Remove all persistent configuration files
-            files_to_remove = [
-                "registered_devices.json",
-                "managed_devices.json", 
-                "managed_devices_backup.json",
-                # Legacy migration files (if present)
-                "device_whitelist.json",
-                "device_whitelist.json.migrated_backup",
-                "eldat_devices.json",
-                "eldat_devices.json.migrated_backup",
-                "eldat_device_registry.json",
-                "eldat_device_registry.json.migrated_backup",
-            ]
-            removed_count = 0
-            for filename in files_to_remove:
-                filepath = data_dir / filename
-                if filepath.exists():
-                    os.remove(filepath)
-                    removed_count += 1
-                    _LOGGER.info("🗑️ Removed: %s", filename)
-            
-            _LOGGER.info("✅ Removed %d persistent data file(s)", removed_count)
-            
-            # Remove empty directory (use executor to avoid blocking)
-            def _check_and_remove_dir():
-                if not any(data_dir.iterdir()):
-                    data_dir.rmdir()
-                    return True
-                return False
-            
-            if await hass.async_add_executor_job(_check_and_remove_dir):
-                _LOGGER.info("🗑️ Removed empty data directory")
-                
+            device_registry.async_remove_device(device_id)
+            _LOGGER.debug("🗑️ Removed device: %s", device_id)
         except Exception as e:
-            _LOGGER.warning("⚠️ Could not clean up data files: %s", e)
+            _LOGGER.warning("⚠️ Could not remove device %s: %s", device_id, e)
+    
+    _LOGGER.info("✅ Removed %d devices from device registry", len(devices_to_remove))
+    
+    # Step 5: Clean up ALL persistent data files from BOTH directories
+    import os
+    
+    # Files that may exist in each directory
+    files_to_remove = [
+        "registered_devices.json",
+        "managed_devices.json", 
+        "managed_devices_backup.json",
+        "used_ewb_indices.json",
+        "used_ew_receiver_indices.json",
+        # Legacy migration files (if present)
+        "device_whitelist.json",
+        "device_whitelist.json.migrated_backup",
+        "eldat_devices.json",
+        "eldat_devices.json.migrated_backup",
+        "eldat_device_registry.json",
+        "eldat_device_registry.json.migrated_backup",
+    ]
+    
+    # Clean up BOTH directories: "eldat" (coordinator files) and "easywave" (DeviceManager files)
+    data_directories = [
+        Path(hass.config.config_dir) / "eldat",
+        Path(hass.config.config_dir) / DOMAIN,  # "easywave"
+    ]
+    
+    total_removed = 0
+    for data_dir in data_directories:
+        if data_dir.exists():
+            try:
+                removed_count = 0
+                for filename in files_to_remove:
+                    filepath = data_dir / filename
+                    if filepath.exists():
+                        os.remove(filepath)
+                        removed_count += 1
+                        _LOGGER.info("🗑️ Removed: %s/%s", data_dir.name, filename)
+                
+                total_removed += removed_count
+                
+                # Remove empty directory (use executor to avoid blocking)
+                def _check_and_remove_dir(dir_path):
+                    try:
+                        if dir_path.exists() and not any(dir_path.iterdir()):
+                            dir_path.rmdir()
+                            return True
+                    except Exception:
+                        pass
+                    return False
+                
+                if await hass.async_add_executor_job(_check_and_remove_dir, data_dir):
+                    _LOGGER.info("🗑️ Removed empty directory: %s", data_dir.name)
+                    
+            except Exception as e:
+                _LOGGER.warning("⚠️ Could not clean up data files in %s: %s", data_dir.name, e)
+    
+    _LOGGER.info("✅ ELDAT config entry removed - %d devices, %d entities, %d files deleted", 
+                len(devices_to_remove), len(entities_to_remove), total_removed)
