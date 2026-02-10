@@ -64,10 +64,10 @@
           "up": "Auf",
           "down": "Zu",
           "stop": "Stopp",
-          "a": "Zustand A",
-          "b": "Zustand B",
-          "c": "Zustand C",
-          "d": "Zustand D"
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
         }
       },
       "last_button": {
@@ -78,10 +78,10 @@
           "up": "Auf",
           "down": "Zu",
           "stop": "Stopp",
-          "a": "Zustand A",
-          "b": "Zustand B",
-          "c": "Zustand C",
-          "d": "Zustand D"
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
         }
       },
       "state_1": {
@@ -956,10 +956,10 @@
       "d": "Taste D"
     },
     "state_label": {
-      "a": "Zustand A",
-      "b": "Zustand B",
-      "c": "Zustand C",
-      "d": "Zustand D"
+      "a": "A",
+      "b": "B",
+      "c": "C",
+      "d": "D"
     },
     "entity": {
       "state": "Zustand",

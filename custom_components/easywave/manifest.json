@@ -1,7 +1,7 @@
 {
   "domain": "easywave",
   "name": "Easywave",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "documentation": "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs",
   "dependencies": [],
   "codeowners": [

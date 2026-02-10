@@ -64,10 +64,10 @@
           "up": "Monter",
           "down": "Descendre",
           "stop": "Stop",
-          "a": "État A",
-          "b": "État B",
-          "c": "État C",
-          "d": "État D"
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
         }
       },
       "last_button": {
@@ -78,10 +78,10 @@
           "up": "Monter",
           "down": "Descendre",
           "stop": "Stop",
-          "a": "État A",
-          "b": "État B",
-          "c": "État C",
-          "d": "État D"
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
         }
       },
       "state_1": {
@@ -965,10 +965,10 @@
       "d": "Bouton D"
     },
     "state_label": {
-      "a": "État A",
-      "b": "État B",
-      "c": "État C",
-      "d": "État D"
+      "a": "A",
+      "b": "B",
+      "c": "C",
+      "d": "D"
     },
     "entity": {
       "state": "État",

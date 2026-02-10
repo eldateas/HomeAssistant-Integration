@@ -64,10 +64,10 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "State A",
-          "b": "State B",
-          "c": "State C",
-          "d": "State D"
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
         }
       },
       "last_button": {
@@ -78,10 +78,10 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "State A",
-          "b": "State B",
-          "c": "State C",
-          "d": "State D"
+          "a": "A",
+          "b": "B",
+          "c": "C",
+          "d": "D"
         }
       },
       "state_1": {
@@ -965,10 +965,10 @@
       "d": "Button D"
     },
     "state_label": {
-      "a": "State A",
-      "b": "State B",
-      "c": "State C",
-      "d": "State D"
+      "a": "A",
+      "b": "B",
+      "c": "C",
+      "d": "D"
     },
     "entity": {
       "state": "State",
