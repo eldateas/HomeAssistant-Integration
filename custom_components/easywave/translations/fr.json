@@ -30,16 +30,32 @@
         }
       },
       "button_a": {
-        "name": "Bouton A"
+        "name": "Bouton A",
+        "state": {
+          "on": "Appuyé",
+          "off": "Non appuyé"
+        }
       },
       "button_b": {
-        "name": "Bouton B"
+        "name": "Bouton B",
+        "state": {
+          "on": "Appuyé",
+          "off": "Non appuyé"
+        }
       },
       "button_c": {
-        "name": "Bouton C"
+        "name": "Bouton C",
+        "state": {
+          "on": "Appuyé",
+          "off": "Non appuyé"
+        }
       },
       "button_d": {
-        "name": "Bouton D"
+        "name": "Bouton D",
+        "state": {
+          "on": "Appuyé",
+          "off": "Non appuyé"
+        }
       },
       "battery_warning": {
         "name": "Avertissement batterie"
@@ -64,10 +80,10 @@
           "up": "Monter",
           "down": "Descendre",
           "stop": "Stop",
-          "a": "A",
-          "b": "B",
-          "c": "C",
-          "d": "D"
+          "a": "Bouton A",
+          "b": "Bouton B",
+          "c": "Bouton C",
+          "d": "Bouton D"
         }
       },
       "last_button": {
@@ -78,10 +94,11 @@
           "up": "Monter",
           "down": "Descendre",
           "stop": "Stop",
-          "a": "A",
-          "b": "B",
-          "c": "C",
-          "d": "D"
+          "released": "Non appuyé",
+          "a": "Bouton A",
+          "b": "Bouton B",
+          "c": "Bouton C",
+          "d": "Bouton D"
         }
       },
       "state_1": {
@@ -120,6 +137,34 @@
           "down": "Descendre"
         }
       },
+      "button_a": {
+        "name": "Bouton A",
+        "state": {
+          "pressed": "Appuyé",
+          "released": "Non appuyé"
+        }
+      },
+      "button_b": {
+        "name": "Bouton B",
+        "state": {
+          "pressed": "Appuyé",
+          "released": "Non appuyé"
+        }
+      },
+      "button_c": {
+        "name": "Bouton C",
+        "state": {
+          "pressed": "Appuyé",
+          "released": "Non appuyé"
+        }
+      },
+      "button_d": {
+        "name": "Bouton D",
+        "state": {
+          "pressed": "Appuyé",
+          "released": "Non appuyé"
+        }
+      },
       "temperature": {
         "name": "Température"
       },
@@ -138,16 +183,16 @@
     },
     "button": {
       "state_a": {
-        "name": "État A"
+        "name": "Code touche A"
       },
       "state_b": {
-        "name": "État B"
+        "name": "Code touche B"
       },
       "state_c": {
-        "name": "État C"
+        "name": "Code touche C"
       },
       "state_d": {
-        "name": "État D"
+        "name": "Code touche D"
       },
       "toggle": {
         "name": "Basculer"
@@ -334,6 +379,8 @@
         "description": "L'émetteur sera appris avec les paramètres suivants :\n\n• **Mode de fonctionnement :** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Nombre de boutons :** {button_count_text}\n\nVeuillez appuyer sur un bouton de l'émetteur sélectionné à l'étape suivante.",
         "menu_options": {
           "device_transmitter_learn_start": "▶️ Apprendre l'émetteur",
+          "device_transmitter_button_count": "⬅️ Retour",
+          "device_transmitter_2button_button_count": "⬅️ Retour",
           "device_transmitter_config": "⬅️ Retour"
         }
       },
@@ -477,18 +524,34 @@
         "title": "Mode de fonctionnement",
         "description": "Quel mode de fonctionnement souhaitez-vous utiliser ?",
         "menu_options": {
-          "device_receiver_mode_impulse": "⚪ IMPULSION (1 bouton)",
-          "device_receiver_mode_on_off": "⚪ ON/OFF (2 boutons)",
-          "device_receiver_mode_up_down": "⚪ MONTER/DESCENDRE (2 boutons)",
-          "device_receiver_mode_up_stop_down": "⚪ MONTER/STOP/DESCENDRE (3 boutons)",
-          "device_receiver_mode_heating": "⚪ ON/OFF (Chauffage)",
-          "device_receiver_mode_universal": "⚪ UNIVERSEL (4 boutons)",
+          "device_receiver_mode_impulse": "⚪ Impulsion (1 touche)",
+          "device_receiver_mode_on_off": "⚪ MARCHE/ARRÊT (2 touches)",
+          "device_receiver_mode_up_down": "⚪ OUVERT/FERMÉ (2 touches)",
+          "device_receiver_mode_up_stop_down": "⚪ OUVERT/STOP/FERMÉ (3 touches)",
+          "device_receiver_mode_heating": "⚪ Chauffage",
+          "device_receiver_mode_universal": "⚪ Universel (4 touches)",
           "device_type_select": "⬅️ Retour"
         }
       },
       "device_receiver_description": {
         "title": "Apprendre le récepteur",
         "description": "Veuillez mettre votre récepteur en mode de programmation pour **{operating_mode}** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour savoir comment sélectionner le bon mode de programmation, veuillez consulter le manuel du récepteur.\n\nVeuillez cliquer sur \"Suivant\" une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Suivant",
+          "device_receiver_type": "⬅️ Retour"
+        }
+      },
+      "device_receiver_description_heating": {
+        "title": "Apprendre le récepteur",
+        "description": "Veuillez mettre votre récepteur de chauffage en mode de programmation **MARCHE / ARRÊT** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour savoir comment sélectionner le bon mode de programmation, veuillez consulter le manuel du récepteur.\n\nVeuillez cliquer sur \"Suivant\" une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Suivant",
+          "device_receiver_type": "⬅️ Retour"
+        }
+      },
+      "device_receiver_description_universal": {
+        "title": "Apprendre le récepteur",
+        "description": "Veuillez mettre votre récepteur en mode de programmation maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour savoir comment sélectionner le bon mode de programmation, veuillez consulter le manuel du récepteur.\n\nVeuillez cliquer sur \"Suivant\" une fois que le récepteur est en mode de programmation ou que la LED clignote.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Suivant",
           "device_receiver_type": "⬅️ Retour"
@@ -507,7 +570,7 @@
       },
       "device_receiver_verify": {
         "title": "Apprentissage réussi",
-        "description": "Home Assistant a été appris avec succès dans le récepteur !\n\nAssurez-vous que le mode de programmation du récepteur est terminé, la LED ne devrait plus clignoter.\n\nAttribuez un nom au nouvel appareil :",
+        "description": "Le récepteur de type **{receiver_type}** a été appris avec succès !\n\nAssurez-vous que le mode de programmation du récepteur est terminé, la LED ne devrait plus clignoter.\n\nAttribuez un nom au nouvel appareil :",
         "data": {
           "device_name": "Nom de l'appareil",
           "area_id": "Zone (optionnel) :"
@@ -729,8 +792,8 @@
     "trigger_type": {
       "button_press": "changé à l'état \"{subtype}\"",
       "button_release": "{subtype} relâché",
-      "channel_on": "{subtype} passé à Activé",
-      "channel_off": "{subtype} passé à Désactivé"
+      "channel_on": "{subtype} appuyé",
+      "channel_off": "{subtype} relâché"
     },
     "trigger_subtype": {
       "A": "Bouton A",
@@ -929,14 +992,6 @@
           "description": "L'ID d'appareil Home Assistant de l'appareil à activer"
         }
       }
-    },
-    "cleanup_ghost_devices": {
-      "name": "Nettoyer les appareils fantômes",
-      "description": "Rechercher et signaler les appareils inutilisés ou inactifs (appareils fantômes)"
-    },
-    "cleanup_orphaned_entities": {
-      "name": "Supprimer les entités orphelines",
-      "description": "Supprimer toutes les entités orphelines des appareils déjà supprimés de Home Assistant"
     }
   },
   "common": {
@@ -997,7 +1052,9 @@
       "rx11_disconnected_title": "⚠️ Connexion RX11 perdue",
       "rx11_disconnected_message": "Le transceiver USB RX11 n'est pas connecté. Tentative de reconnexion automatique...",
       "rx11_reconnected_title": "✅ Connexion RX11 rétablie",
-      "rx11_reconnected_message": "Le transceiver USB RX11 est à nouveau connecté. Tous les appareils sont disponibles."
+      "rx11_reconnected_message": "Le transceiver USB RX11 est à nouveau connecté. Tous les appareils sont disponibles.",
+      "ewneo_unreachable_title": "⚠️ Appareil Easywave neo inaccessible",
+      "ewneo_unreachable_message": "**{device_name}** ne répond pas.\n\nLa commande n'a pas pu être exécutée. Causes possibles :\n• L'appareil est éteint\n• L'appareil est trop loin de la passerelle\n• Interférences radio\n\nL'appareil reste contrôlable. Ce message sera automatiquement supprimé lors d'une communication réussie."
     },
     "device": {
       "unknown": "Inconnu",
@@ -1039,6 +1096,7 @@
       "switch_impulse": "Impulsion",
       "switch_permanent": "Permanent",
       "buttons": "{count} Boutons",
+      "buttons_3_or_4": "3 ou 4 Boutons",
       "receiver_impulse": "Impulsion",
       "receiver_switch_2button": "ON/OFF",
       "receiver_cover_2button": "MONTER/DESCENDRE",

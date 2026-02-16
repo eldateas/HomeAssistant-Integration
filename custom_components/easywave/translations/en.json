@@ -30,16 +30,32 @@
         }
       },
       "button_a": {
-        "name": "Button A"
+        "name": "Button A",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "button_b": {
-        "name": "Button B"
+        "name": "Button B",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "button_c": {
-        "name": "Button C"
+        "name": "Button C",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "button_d": {
-        "name": "Button D"
+        "name": "Button D",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "battery_warning": {
         "name": "Battery Warning"
@@ -64,10 +80,10 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "A",
-          "b": "B",
-          "c": "C",
-          "d": "D"
+          "a": "Button A",
+          "b": "Button B",
+          "c": "Button C",
+          "d": "Button D"
         }
       },
       "last_button": {
@@ -78,10 +94,11 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "A",
-          "b": "B",
-          "c": "C",
-          "d": "D"
+          "released": "Not pressed",
+          "a": "Button A",
+          "b": "Button B",
+          "c": "Button C",
+          "d": "Button D"
         }
       },
       "state_1": {
@@ -120,6 +137,34 @@
           "down": "Down"
         }
       },
+      "button_a": {
+        "name": "Button A",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
+      "button_b": {
+        "name": "Button B",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
+      "button_c": {
+        "name": "Button C",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
+      "button_d": {
+        "name": "Button D",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
       "temperature": {
         "name": "Temperature"
       },
@@ -138,16 +183,16 @@
     },
     "button": {
       "state_a": {
-        "name": "State A"
+        "name": "Button Code A"
       },
       "state_b": {
-        "name": "State B"
+        "name": "Button Code B"
       },
       "state_c": {
-        "name": "State C"
+        "name": "Button Code C"
       },
       "state_d": {
-        "name": "State D"
+        "name": "Button Code D"
       },
       "toggle": {
         "name": "Toggle"
@@ -197,16 +242,44 @@
         }
       },
       "channel_1": {
-        "name": "Channel 1"
+        "name": "Channel 1",
+        "state": {
+          "open": "Open",
+          "opening": "Opening",
+          "closed": "Closed",
+          "closing": "Closing",
+          "stopped": "Stopped"
+        }
       },
       "channel_2": {
-        "name": "Channel 2"
+        "name": "Channel 2",
+        "state": {
+          "open": "Open",
+          "opening": "Opening",
+          "closed": "Closed",
+          "closing": "Closing",
+          "stopped": "Stopped"
+        }
       },
       "channel_3": {
-        "name": "Channel 3"
+        "name": "Channel 3",
+        "state": {
+          "open": "Open",
+          "opening": "Opening",
+          "closed": "Closed",
+          "closing": "Closing",
+          "stopped": "Stopped"
+        }
       },
       "channel_4": {
-        "name": "Channel 4"
+        "name": "Channel 4",
+        "state": {
+          "open": "Open",
+          "opening": "Opening",
+          "closed": "Closed",
+          "closing": "Closing",
+          "stopped": "Stopped"
+        }
       }
     },
     "light": {
@@ -334,6 +407,8 @@
         "description": "The transmitter will be learned with the following settings:\n\n• **Operating Mode:** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Button Count:** {button_count_text}\n\nPlease press a button on the selected transmitter in the next step.",
         "menu_options": {
           "device_transmitter_learn_start": "▶️ Learn Transmitter",
+          "device_transmitter_button_count": "⬅️ Back",
+          "device_transmitter_2button_button_count": "⬅️ Back",
           "device_transmitter_config": "⬅️ Back"
         }
       },
@@ -411,9 +486,10 @@
       },
       "device_sensor_already_exists": {
         "title": "Device Already Exists",
-        "description": "**This Easywave neo sensor has already been learned!**\n\nThe sensor is already used as **{device_name}** in Home Assistant.\nPlease repeat the process and use a sensor that has not been learned yet.",
+        "description": "**This Easywave neo sensor has already been learned!**\n\nThe sensor is already used as **{device_name}** in Home Assistant.\n\nThe device data has been automatically updated.",
         "menu_options": {
-          "device_sensor_learn_start": "🔄 Learn Sensor"
+          "device_sensor_learn_start": "🔄 Learn new sensor",
+          "device_sensor_description": "⬅️ Back"
         }
       },
       "_comment_ewneo_receiver_flow": "===== EWNEO-RECEIVER LEARNING FLOW (Easywave neo Receiver Learning Process - Bidirectional) =====",
@@ -433,9 +509,10 @@
       },
       "device_ewneo_receiver_already_exists": {
         "title": "Device Already Exists",
-        "description": "**This Easywave neo receiver has already been learned!**\n\nThe receiver is already used as **{device_name}** in Home Assistant.\n\n🔄 **The device has been updated:**\n• Old Easywave neo Index: {old_index}\n• New Easywave neo Index: {new_index}\n\nPlease repeat the process and use a receiver that has not been learned yet.",
+        "description": "**This Easywave neo receiver has already been learned!**\n\nThe receiver is already used as **{device_name}** in Home Assistant.\n\nThe device data has been automatically updated.",
         "menu_options": {
-          "device_ewneo_receiver_programming_mode": "🔄 Learn Receiver"
+          "device_ewneo_receiver_programming_mode": "🔄 Learn new receiver",
+          "device_ewneo_receiver_back": "⬅️ Back"
         }
       },
       "device_ewneo_receiver_programming_mode": {
@@ -479,8 +556,8 @@
         "menu_options": {
           "device_receiver_mode_impulse": "⚪ IMPULSE (1-Button)",
           "device_receiver_mode_on_off": "⚪ ON/OFF (2-Button)",
-          "device_receiver_mode_up_down": "⚪ UP/DOWN (2-Button)",
-          "device_receiver_mode_up_stop_down": "⚪ UP/STOP/DOWN (3-Button)",
+          "device_receiver_mode_up_down": "⚪ OPEN/CLOSE (2-Button)",
+          "device_receiver_mode_up_stop_down": "⚪ OPEN/STOP/CLOSE (3-Button)",
           "device_receiver_mode_heating": "⚪ ON/OFF (Heating)",
           "device_receiver_mode_universal": "⚪ UNIVERSAL (4-Button)",
           "device_type_select": "⬅️ Back"
@@ -489,6 +566,22 @@
       "device_receiver_description": {
         "title": "Learn Receiver",
         "description": "Please put your receiver into programming mode for **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's manual.\n\nPlease click \"Next\" once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Next",
+          "device_receiver_type": "⬅️ Back"
+        }
+      },
+      "device_receiver_description_heating": {
+        "title": "Learn Receiver",
+        "description": "Please put your heating receiver into programming mode **ON / OFF** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's manual.\n\nPlease click \"Next\" once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Next",
+          "device_receiver_type": "⬅️ Back"
+        }
+      },
+      "device_receiver_description_universal": {
+        "title": "Learn Receiver",
+        "description": "Please put your receiver into programming mode now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's manual.\n\nPlease click \"Next\" once the receiver is in the programming mode or the LED is flashing.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Next",
           "device_receiver_type": "⬅️ Back"
@@ -507,7 +600,7 @@
       },
       "device_receiver_verify": {
         "title": "Learning Successful",
-        "description": "Home Assistant was successfully learned into the receiver!\n\nMake sure the programming mode on the receiver has ended, the LED should no longer be flashing.\n\nAssign a name for the new device:",
+        "description": "The receiver of type **{receiver_type}** was successfully learned!\n\nMake sure the programming mode on the receiver has ended, the LED should no longer be flashing.\n\nAssign a name for the new device:",
         "data": {
           "device_name": "Device Name",
           "area_id": "Area (optional):"
@@ -729,8 +822,8 @@
     "trigger_type": {
       "button_press": "changed to state \"{subtype}\"",
       "button_release": "{subtype} released",
-      "channel_on": "{subtype} switched to On",
-      "channel_off": "{subtype} switched to Off"
+      "channel_on": "{subtype} pressed",
+      "channel_off": "{subtype} released"
     },
     "trigger_subtype": {
       "A": "Button A",
@@ -929,14 +1022,6 @@
           "description": "The Home Assistant Device ID of the device to enable"
         }
       }
-    },
-    "cleanup_ghost_devices": {
-      "name": "Clean Up Ghost Devices",
-      "description": "Search for and report unused or inactive devices (ghost devices)"
-    },
-    "cleanup_orphaned_entities": {
-      "name": "Remove Orphaned Entities",
-      "description": "Remove all orphaned entities from already deleted devices from Home Assistant"
     }
   },
   "common": {
@@ -997,7 +1082,9 @@
       "rx11_disconnected_title": "⚠️ RX11 Connection Lost",
       "rx11_disconnected_message": "RX11 USB transceiver is not connected. Attempting automatic reconnection...",
       "rx11_reconnected_title": "✅ RX11 Connection Restored",
-      "rx11_reconnected_message": "RX11 USB transceiver is connected again. All devices are available."
+      "rx11_reconnected_message": "RX11 USB transceiver is connected again. All devices are available.",
+      "ewneo_unreachable_title": "⚠️ Easywave neo Device Unreachable",
+      "ewneo_unreachable_message": "**{device_name}** is not responding.\n\nThe command could not be executed. Possible causes:\n• Device is turned off\n• Device is too far from the gateway\n• Radio interference\n\nThe device remains controllable. This notification will be automatically dismissed when communication is restored."
     },
     "device": {
       "unknown": "Unknown",
@@ -1039,6 +1126,7 @@
       "switch_impulse": "Impulse",
       "switch_permanent": "Permanent",
       "buttons": "{count} Buttons",
+      "buttons_3_or_4": "3 or 4 Buttons",
       "receiver_impulse": "Impulse",
       "receiver_switch_2button": "ON/OFF",
       "receiver_cover_2button": "UP/DOWN",

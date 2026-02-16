@@ -168,6 +168,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         migration_report["migrated_devices"],
                         len(migration_report.get("recreated_entities", [])))
         
+        # Log cleanup results
+        duplicates = migration_report.get("duplicate_entities_removed", 0)
+        legacy_battery = migration_report.get("legacy_battery_sensors_removed", 0)
+        orphaned = migration_report.get("orphaned_entities_removed", 0)
+        if duplicates > 0 or legacy_battery > 0 or orphaned > 0:
+            _LOGGER.info("🧹 Entity cleanup: %d duplicates, %d legacy battery sensors, %d orphaned entities removed",
+                        duplicates, legacy_battery, orphaned)
+        
         # Setup coordinator
         if not await coordinator.async_setup():
             raise ConfigEntryNotReady("Waiting for ELDAT device connection")
@@ -191,6 +199,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Give a moment for device restoration to complete
     import asyncio
     await asyncio.sleep(0.5)
+    
+    # Step 3.5: Clear EWB filter BEFORE platforms setup to prevent ERR_FILTER_OUT_OF_MEM
+    if coordinator.transceiver and coordinator.transceiver.is_connected:
+        if hasattr(coordinator.transceiver, 'rx11_ewb_clear_filter'):
+            try:
+                clear_result = await coordinator.transceiver.rx11_ewb_clear_filter()
+                if clear_result:
+                    _LOGGER.info("✅ EWB-Filter erfolgreich geleert vor Platform-Setup")
+                else:
+                    _LOGGER.warning("⚠️ EWB-Filter konnte nicht geleert werden")
+            except Exception as e:
+                _LOGGER.error("❌ Exception beim Leeren des EWB-Filters: %s", e)
     
     # Step 4: Setup platforms
     _LOGGER.debug("Setting up platforms...")

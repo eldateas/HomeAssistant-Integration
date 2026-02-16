@@ -140,7 +140,7 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
                 channel=button_idx,
                 name=get_button_label(button_idx),  # "Taste A" / "Button A"
                 device_class="button",
-                icon="mdi:gesture-tap-button"
+                icon="mdi:radiobox-blank"
             ))
         
         # Create battery status binary sensor
@@ -150,7 +150,9 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
             device_class="battery",
             icon="mdi:battery"
         )
-        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning"
+        # Use registration_id suffix for unique entity on re-learning
+        reg_id_suffix = self._get_registration_id_suffix()
+        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning{reg_id_suffix}"
         battery_warning_spec["sensor_type"] = "battery_warning"
         specs["binary_sensor"].append(battery_warning_spec)
         

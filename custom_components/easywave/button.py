@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional, Callable
 
 from homeassistant.components.button import ButtonEntity
@@ -141,7 +142,7 @@ async def async_setup_entry(
             _LOGGER.debug("Skipped action button creation for EWneo device %s - uses switch entities only", 
                         serial_number)
         elif skip_action_buttons:
-            _LOGGER.debug("Skipped action button creation for Easywave Receiver %s (heating/cooling) - using toggle switches instead", 
+            _LOGGER.debug("Skipped action button creation for Easywave Receiver %s (heating/cooling) - using switch entity instead", 
                         serial_number)
         else:
             # Create additional legacy button entities for bidirectional device types
@@ -206,13 +207,12 @@ async def async_setup_entry(
         new_buttons = []
         
         # For Easywave Receivers, create additional configured button entities with press detection
-        # Skip heating/cooling receivers as they use toggle switches instead
         if device_type == "ew_receiver":
             receiver_kind = device_info.get("receiver_kind", "switch")
             
-            # Skip button creation for heating/cooling receivers - they use toggle switches
+            # Skip button creation for heating/cooling receivers - they use switch entities
             if receiver_kind in ["heating", "cooling", "heating_cooling"]:
-                _LOGGER.debug("Skipping button creation for Easywave Receiver %s (%s) - using toggle switches instead", 
+                _LOGGER.debug("Skipping button creation for Easywave Receiver %s (%s) - using switch entity instead", 
                             serial_number, receiver_kind)
             else:
                 # Get button entities from entity_specs (dynamically generated)
@@ -417,6 +417,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         # Double-click detection for unified long press (like EWReceiverLongPressButton)
         self._press_start_time: Optional[float] = None
         self._long_press_task: Optional[asyncio.Task] = None
+        self._last_pressed_time: Optional[datetime] = None
         
         _LOGGER.debug("✅ Easywave Receiver UI Button created: %s (Channel: %d, Action: %s, Type: %s, Supports Long Press: %s)", 
                      self._attr_name, self._channel, self._action, self._action_type, self._supports_long_press)
@@ -434,13 +435,17 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
     def extra_state_attributes(self) -> Dict[str, Any]:
         """Return additional state attributes."""
         attrs = {
+            "serial_number": self._serial_number,
             "channel": self._channel,
             "button_code": self._button_code,
             "action": self._action,
             "action_type": self._action_type,
-            "receiver_kind": self._receiver_kind,
             "supports_long_press": self._supports_long_press,
         }
+        
+        # Add last pressed timestamp if available (lokale Zeit)
+        if self._last_pressed_time:
+            attrs["last_pressed"] = self._last_pressed_time.strftime("%d.%m.%Y %H:%M:%S")
         
         if self._supports_long_press:
             attrs["longpress_active"] = self._is_long_press_active
@@ -483,6 +488,9 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         """Handle button press - execute the configured action type or handle double-click detection."""
         _LOGGER.info("🔘 Easywave Receiver UI Button pressed: %s (Type: %s, Supports Long Press: %s)", 
                     self._attr_name, self._action_type, self._supports_long_press)
+        
+        # Update last pressed timestamp
+        self._last_pressed_time = datetime.now()
         
         try:
             # If this button supports long press via config, use double-click detection
@@ -950,6 +958,9 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
         else:
             self._attr_icon = self._get_icon_for_button_type()
         
+        # Track last pressed time for UI display
+        self._last_pressed_time: Optional[datetime] = None
+        
         # Helper for logging - use translation_key or name
         entity_label = getattr(self, '_attr_translation_key', None) or getattr(self, '_attr_name', None) or "Button"
         _LOGGER.debug("✅ Konfigurierter Button erstellt: %s (button_code: %d, icon: %s)", 
@@ -973,11 +984,15 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
     def extra_state_attributes(self) -> Dict[str, Any]:
         """Return additional state attributes."""
         attrs = {
+            "serial_number": self._serial_number,
             "button_type": self._button_type,
             "channel": self._channel,
             "button_code": self._button_code,
-            "receiver_kind": self._receiver_kind,
         }
+        
+        # Add last pressed timestamp if available (lokale Zeit)
+        if hasattr(self, '_last_pressed_time') and self._last_pressed_time:
+            attrs["last_pressed"] = self._last_pressed_time.strftime("%d.%m.%Y %H:%M:%S")
         
         return attrs
 
@@ -1006,6 +1021,9 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle button press - simple immediate execution."""
         _LOGGER.info("🔘 Button pressed: %s", self._entity_label)
+        
+        # Update last pressed timestamp
+        self._last_pressed_time = datetime.now()
         
         # Execute button press immediately without any timeout
         await self._execute_simple_press()

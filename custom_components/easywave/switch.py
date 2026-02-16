@@ -437,6 +437,15 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_switch_{self._channel}")
         self._attr_device_class = SwitchDeviceClass.SWITCH
         
+        # Store icons for state-based icon changes (like EW receivers)
+        self._icon_on = entity_spec.get("icon_on", "mdi:light-switch")
+        self._icon_off = entity_spec.get("icon_off", "mdi:light-switch-off")
+        self._base_icon = entity_spec.get("icon", "mdi:light-switch")
+        
+        # Remove _attr_icon set by parent class so dynamic icon property works
+        if hasattr(self, '_attr_icon'):
+            del self._attr_icon
+        
         _LOGGER.info("✅ EWneo switch entity initialized: %s (%s)", self._translation_key or self._static_name or f"Channel {self._channel + 1}", self._attr_unique_id)
 
     @property
@@ -483,6 +492,14 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         return self._gateway_serial_cache
     
     @property
+    def icon(self) -> str:
+        """Return icon based on current state (like EW receivers)."""
+        if self._is_on:
+            return self._icon_on
+        else:
+            return self._icon_off
+    
+    @property
     def is_on(self) -> bool:
         """Return true if switch is on."""
         return self._is_on
@@ -491,10 +508,18 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra state attributes."""
         attrs = {
+            "serial_number": self._serial_number,
             "reachable": self._reachable,
         }
         if self._last_seen:
-            attrs["last_seen"] = self._last_seen.isoformat()
+            attrs["last_seen"] = self._last_seen.strftime("%d.%m.%Y %H:%M:%S")
+        
+        # Add EWneo index from device info
+        device_data = self.coordinator.devices.get(self._serial_number, {})
+        ewneo_index = device_data.get("ewneo_index")
+        if ewneo_index is not None:
+            attrs["ewneo_index"] = ewneo_index
+        
         return attrs
     
     @property
@@ -559,55 +584,72 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
     
     async def _query_initial_state(self) -> None:
         """Query initial state from device using EWB_QUERY_STATE."""
-        try:
-            # Skip if a command has already been sent (prevents race condition)
-            if self._initial_state_queried:
-                _LOGGER.debug("⏭️ Skipping initial state query for EWneo switch %s CH%d (command already sent)", 
-                            self._serial_number, self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1)
-                return
-            
-            _LOGGER.info("🔍 Querying initial state for EWneo switch %s CH%d", 
+        max_retries = 2
+        
+        # Skip if a command has already been sent (prevents race condition)
+        if self._initial_state_queried:
+            _LOGGER.debug("⏭️ Skipping initial state query for EWneo switch %s CH%d (command already sent)", 
                         self._serial_number, self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1)
-            
-            # Query with mode 0 (on/off state)
-            result = await self.coordinator.transceiver.rx11_ewb_query_state(
-                self._gateway_serial, self._serial_number, mode=0
-            )
-            
-            if result:
-                recent_mode, recent_state_bytes = result
-                _LOGGER.debug("EWneo switch %s: Query state successful, mode=%d, state=%s", 
-                             self._serial_number, recent_mode, 
-                             [f"0x{b:02X}" for b in recent_state_bytes])
+            return
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                _LOGGER.info("🔍 Querying initial state for EWneo switch %s CH%d (attempt %d/%d)", 
+                            self._serial_number, self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1,
+                            attempt, max_retries)
                 
-                # Parse the state
-                parsed_state = self.coordinator._parse_ewneo_state(
-                    self._device_type_code, recent_state_bytes, "ewneo_switch", self._serial_number
+                # Query with mode 0 (on/off state)
+                result = await self.coordinator.transceiver.rx11_ewb_query_state(
+                    self._gateway_serial, self._serial_number, mode=0
                 )
                 
-                if parsed_state and parsed_state.get("type") == "switch":
-                    # For dual/quad switches, extract the channel-specific state
-                    if self._device_type_code in [0x06, 0x07]:
-                        channel_key = f"channel_{self._channel + 1}"
-                        channel_state = parsed_state.get(channel_key, {})
-                        self._is_on = channel_state.get("on", False)
-                        _LOGGER.info("✅ EWneo dual/quad switch %s CH%d: Initial state is %s", 
-                                    self._serial_number, self._channel + 1, "ON" if self._is_on else "OFF")
-                    else:
-                        # Single switch
-                        self._is_on = parsed_state.get("on", False)
-                        _LOGGER.info("✅ EWneo switch %s: Initial state is %s", 
-                                    self._serial_number, "ON" if self._is_on else "OFF")
+                if result:
+                    recent_mode, recent_state_bytes = result
+                    _LOGGER.debug("EWneo switch %s: Query state successful, mode=%d, state=%s", 
+                                 self._serial_number, recent_mode, 
+                                 [f"0x{b:02X}" for b in recent_state_bytes])
                     
-                    self._initial_state_queried = True
-                    self.async_write_ha_state()
+                    # Parse the state
+                    parsed_state = self.coordinator._parse_ewneo_state(
+                        self._device_type_code, recent_state_bytes, "ewneo_switch", self._serial_number
+                    )
+                    
+                    if parsed_state and parsed_state.get("type") == "switch":
+                        # For dual/quad switches, extract the channel-specific state
+                        if self._device_type_code in [0x06, 0x07]:
+                            channel_key = f"channel_{self._channel + 1}"
+                            channel_state = parsed_state.get(channel_key, {})
+                            self._is_on = channel_state.get("on", False)
+                            _LOGGER.info("✅ EWneo dual/quad switch %s CH%d: Initial state is %s", 
+                                        self._serial_number, self._channel + 1, "ON" if self._is_on else "OFF")
+                        else:
+                            # Single switch
+                            self._is_on = parsed_state.get("on", False)
+                            _LOGGER.info("✅ EWneo switch %s: Initial state is %s", 
+                                        self._serial_number, "ON" if self._is_on else "OFF")
+                        
+                        self._initial_state_queried = True
+                        self.async_write_ha_state()
+                        return  # Success - exit retry loop
+                    else:
+                        _LOGGER.warning("⚠️ Could not parse initial state for EWneo switch %s (attempt %d/%d)", 
+                                       self._serial_number, attempt, max_retries)
+                        # Mark as unreachable and report failure for persistent notification
+                        self._reachable = False
+                        await self.coordinator.report_ewneo_communication_failure(self._serial_number)
                 else:
-                    _LOGGER.warning("⚠️ Could not parse initial state for EWneo switch %s", self._serial_number)
-            else:
-                _LOGGER.warning("⚠️ Failed to query initial state for EWneo switch %s", self._serial_number)
-                
-        except Exception as e:
-            _LOGGER.error("Error querying initial state for EWneo switch %s: %s", self._serial_number, e)
+                    _LOGGER.warning("⚠️ Failed to query initial state for EWneo switch %s (attempt %d/%d)", 
+                                   self._serial_number, attempt, max_retries)
+                    # Mark as unreachable and report failure for persistent notification
+                    self._reachable = False
+                    await self.coordinator.report_ewneo_communication_failure(self._serial_number)
+                    
+            except Exception as e:
+                _LOGGER.error("Error querying initial state for EWneo switch %s (attempt %d/%d): %s", 
+                             self._serial_number, attempt, max_retries, e)
+                # Mark as unreachable and report failure for persistent notification
+                self._reachable = False
+                await self.coordinator.report_ewneo_communication_failure(self._serial_number)
     
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator.
@@ -837,27 +879,10 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                         # Update Home Assistant state
                         self.async_write_ha_state()
                         
-                        # Get friendly device name for notification
-                        device_name = None
-                        if hasattr(self, 'device_info') and self.device_info:
-                            device_name = self.device_info.get("name")
-                        friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                        # Report failure to coordinator (handles counting and notification after 2 failures)
+                        await self.coordinator.report_ewneo_communication_failure(self._serial_number)
                         
-                        # Send persistent notification to user
-                        await self.hass.services.async_call(
-                            "persistent_notification",
-                            "create",
-                            {
-                                "notification_id": f"eldat_device_unreachable_{self._serial_number}",
-                                "title": "⚠️ Gerät nicht erreichbar",
-                                "message": f"'{friendly_name}' antwortet nicht (Timeout). "
-                                           f"Der Befehl wurde nicht ausgeführt. "
-                                           f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
-                            },
-                            blocking=False,
-                        )
-                        
-                        _LOGGER.warning("⚠️ EWneo switch %s nicht erreichbar (Timeout) - Zustand zurückgesetzt", self._serial_number[-8:])
+                        _LOGGER.debug("⚠️ EWneo switch %s communication failure reported - Zustand zurückgesetzt", self._serial_number[-8:])
                         return False
                     
                     elif error_type == "ERR_INVALID_SERIAL":
@@ -930,13 +955,8 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                     self._reachable = True
                     self._last_seen = datetime.now()
                     
-                    # Dismiss any previous unreachable notification
-                    await self.hass.services.async_call(
-                        "persistent_notification",
-                        "dismiss",
-                        {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
-                        blocking=False,
-                    )
+                    # Report success to coordinator (resets failure counter, dismisses notification)
+                    await self.coordinator.report_ewneo_communication_success(self._serial_number)
                         
                     # Update Home Assistant state
                     _LOGGER.debug("🟢 EWneo switch %s CH%d: State AFTER update: %s",
@@ -963,11 +983,10 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         timer_duration = kwargs.get("timer_duration")
         success = await self._send_ewb_change_state(True, timer_duration)
         if not success:
-            # Get device name from device_info, use entity name as fallback
-            device_name = self.device_info.get("name") if self.device_info else None
-            device_prefix = translate("device.device_prefix", lang)
-            friendly_name = device_name or self.name or f"{device_prefix} {self._serial_number[-8:]}"
-            raise ServiceValidationError(translate("error.command_failed", lang).format(device=friendly_name))
+            # Report failure - coordinator handles persistent notification after threshold
+            await self.coordinator.report_ewneo_communication_failure(self._serial_number)
+            # Don't raise error - just log and return (state remains unchanged)
+            _LOGGER.warning("EWneo switch %s: Turn on failed - device not responding", self._serial_number[-8:])
     
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the EWneo switch off."""
@@ -979,11 +998,10 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         
         success = await self._send_ewb_change_state(False)
         if not success:
-            # Get device name from device_info, use entity name as fallback
-            device_name = self.device_info.get("name") if self.device_info else None
-            device_prefix = translate("device.device_prefix", lang)
-            friendly_name = device_name or self.name or f"{device_prefix} {self._serial_number[-8:]}"
-            raise ServiceValidationError(translate("error.command_failed", lang).format(device=friendly_name))
+            # Report failure - coordinator handles persistent notification after threshold
+            await self.coordinator.report_ewneo_communication_failure(self._serial_number)
+            # Don't raise error - just log and return (state remains unchanged)
+            _LOGGER.warning("EWneo switch %s: Turn off failed - device not responding", self._serial_number[-8:])
     
 
 
@@ -1050,6 +1068,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
         else:
             # Stateless for other receiver types
             self._is_on = None
+            self._last_command_time = None
+            self._last_command_code = None
 
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_configured_switch_{self._channel}_{int(time.time())}")
         
@@ -1084,7 +1104,9 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
             del self._attr_icon
         
         # Assumed state: If True, HA shows action buttons instead of toggle
-        self._assumed_state = entity_spec.get("assumed_state", not self._is_heating_cooling)
+        # For heating_cooling: Show both EIN/AUS buttons (like switch_2button)
+        # so both states can be triggered at any time
+        self._assumed_state = entity_spec.get("assumed_state", True)
 
     @property
     def assumed_state(self) -> bool:
@@ -1347,6 +1369,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                     else:
                         # Update state to show last action (even for assumed_state switches)
                         self._is_on = True
+                        self._last_command_time = datetime.now()
+                        self._last_command_code = "A"
                         self.async_write_ha_state()
                     
         except Exception:
@@ -1381,6 +1405,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                     else:
                         # Update state to show last action (even for assumed_state switches)
                         self._is_on = False
+                        self._last_command_time = datetime.now()
+                        self._last_command_code = "B"
                         self.async_write_ha_state()
         except Exception:
             _LOGGER.exception("Error turning off configured switch %s", self._attr_unique_id)
@@ -1495,22 +1521,41 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                         button = self._button_config.get("off", 1)
                     else:
                         button = 1
-                        
-                        command = bytes([button])
-                        success = await self.coordinator.send_command(
-                            self._serial_number, 
-                            command,
-                            action="repeat"
-                        )
-                        
-                        if success:
-                            _LOGGER.info("✅ Successfully repeated command for Easywave Receiver heating/cooling %s", 
-                                       self._serial_number)
-                            # Schedule next repeat
-                            self._schedule_repeat_timer()
-                        else:
-                            _LOGGER.warning("❌ Failed to repeat command for Easywave Receiver heating/cooling %s", 
-                                          self._serial_number)
+                
+                command = bytes([button])
+                success = await self.coordinator.send_command(
+                    self._serial_number, 
+                    command,
+                    action="repeat"
+                )
+                
+                if success:
+                    # Update last_command_time for the repeat
+                    self._last_command_time = datetime.now()
+                    # Save updated time to coordinator
+                    try:
+                        state_data = {
+                            "is_on": self._is_on,
+                            "last_command_time": self._last_command_time.isoformat(),
+                            "last_command_code": self._last_command_code,
+                            "device_type": "heating_cooling",
+                            "operating_mode": self._operating_mode,
+                            "updated_at": datetime.now().isoformat()
+                        }
+                        self.coordinator.set_device_state(self._serial_number, state_data)
+                    except Exception as e:
+                        _LOGGER.error("Failed to save repeat state: %s", e)
+                    
+                    # Update HA state to reflect new last_triggered time
+                    self.async_write_ha_state()
+                    
+                    _LOGGER.info("✅ Successfully repeated command for Easywave Receiver heating/cooling %s", 
+                               self._serial_number)
+                    # Schedule next repeat
+                    self._schedule_repeat_timer()
+                else:
+                    _LOGGER.warning("❌ Failed to repeat command for Easywave Receiver heating/cooling %s", 
+                                  self._serial_number)
                             
             except asyncio.CancelledError:
                 _LOGGER.debug("⏰ Repeat timer cancelled for Easywave Receiver heating/cooling %s", 
@@ -1531,6 +1576,34 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
             self._repeat_timer.cancel()
             _LOGGER.debug("⏰ Cancelled repeat timer for Easywave Receiver heating/cooling %s", self._serial_number)
         self._repeat_timer = None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra state attributes for EW receiver switches."""
+        attrs = {
+            "serial_number": self._serial_number,
+        }
+        
+        if self._is_heating_cooling:
+            attrs["supports_4h_repetition"] = self._supports_4h_repetition
+        
+        # Add last command timestamp if available (lokale Zeit für bessere Lesbarkeit)
+        if self._last_command_time:
+            attrs["last_command_time"] = self._last_command_time.strftime("%d.%m.%Y %H:%M:%S")
+            
+            # Calculate time until next repeat for heating/cooling
+            if self._is_heating_cooling and self._last_command_code:
+                from datetime import timedelta
+                next_repeat_time = self._last_command_time + timedelta(seconds=self._repeat_interval)
+                time_until_repeat = (next_repeat_time - datetime.now()).total_seconds()
+                if time_until_repeat > 0:
+                    attrs["next_repeat_time"] = next_repeat_time.strftime("%d.%m.%Y %H:%M:%S")
+            
+        # Add last command code
+        if self._last_command_code:
+            attrs["last_command"] = "ON" if self._last_command_code == "A" else "OFF"
+            
+        return attrs
 
 
 class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
@@ -1995,26 +2068,28 @@ class EldatSwitch(EldatEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
-        attrs = {}
+        attrs = {
+            "serial_number": self._serial_number,
+            "channel": self._channel,
+        }
         
         # Add heating/cooling specific attributes
         if self._is_heating_cooling:
             attrs.update({
                 "last_command_code": self._last_command_code,
                 "repeat_interval_hours": self._repeat_interval / 3600,
-                "channel": self._channel,
             })
             
             if self._last_command_time:
-                attrs["last_telegram_sent"] = self._last_command_time.isoformat()
+                # Lokale Zeit für bessere Lesbarkeit
+                attrs["last_command_time"] = self._last_command_time.strftime("%d.%m.%Y %H:%M:%S")
                 
                 # Calculate time until next repeat
                 if self._last_command_code:
                     next_repeat_time = self._last_command_time + timedelta(seconds=self._repeat_interval)
                     time_until_repeat = (next_repeat_time - datetime.now()).total_seconds()
                     if time_until_repeat > 0:
-                        attrs["next_repeat_in_seconds"] = round(time_until_repeat)
-                        attrs["next_repeat_time"] = next_repeat_time.isoformat()
+                        attrs["next_repeat_time"] = next_repeat_time.strftime("%d.%m.%Y %H:%M:%S")
         
         return attrs
 

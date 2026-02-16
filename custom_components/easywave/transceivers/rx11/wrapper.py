@@ -810,6 +810,10 @@ class RX11Wrapper:
         """Alias for rx11_ewb_sensor_add_filter."""
         return await self.rx11_ewb_sensor_add_filter(gateway_serial)
     
+    async def rx11_ewb_clear_filter(self) -> bool:
+        """Alias for rx11_ewb_sensor_clear_filter."""
+        return await self.rx11_ewb_sensor_clear_filter()
+    
     async def _get_all_gateway_serials(self) -> list[str]:
         """Get all gateway serial numbers from registered EWneo devices.
         
@@ -987,13 +991,27 @@ class RX11Wrapper:
             return {}
 
     async def rx11_ewb_sensor_add_filter(self, gateway_serial: str) -> bool:
-        """Add gateway to EWB filter."""
+        """Add gateway to EWB filter.
+        
+        Returns True if filter was added successfully OR if filter already exists.
+        """
         try:
             gateway_bytes = bytes.fromhex(gateway_serial)
             result = await asyncio.get_event_loop().run_in_executor(
                 None, self._module.ewb_add_nfilter_request, gateway_bytes
             )
-            return result == ErrorCode.SUCCESS
+            # SUCCESS = filter added
+            # ERR_SERIAL_FILTER = filter already exists (also OK)
+            if result == ErrorCode.SUCCESS:
+                _LOGGER.debug("EWB filter added for gateway %s", gateway_serial[-8:])
+                return True
+            elif result == ErrorCode.ERR_SERIAL_FILTER:
+                _LOGGER.debug("EWB filter already exists for gateway %s", gateway_serial[-8:])
+                return True
+            else:
+                _LOGGER.warning("EWB add filter returned unexpected code %d (0x%02X) for gateway %s", 
+                               result, result, gateway_serial[-8:])
+                return False
         except Exception as e:
             _LOGGER.error("Exception adding EWB filter: %s", e)
             return False

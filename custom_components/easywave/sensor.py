@@ -508,7 +508,8 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                        serial_number[-8:], len(sensor_specs), sensor_specs)
         
         for spec in sensor_specs:
-            if spec.get("sensor_type") == "transmitter_state":
+            sensor_type = spec.get("sensor_type")
+            if sensor_type == "transmitter_state":
                 sensors.append(EldatTransmitterStateSensor(
                     coordinator=coordinator,
                     serial_number=serial_number,
@@ -516,8 +517,18 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                     entity_spec=spec,
                 ))
                 _LOGGER.warning("✅ Created transmitter state sensor for Easywave Transmitter %s", serial_number[-8:])
-            elif spec.get("device_class") == "enum":
-                # Create Last Button sensor for grouped mode
+            elif sensor_type == "transmitter_button":
+                # Create individual button sensor for single mode (1-Tast-Bedienung Einzelmodus)
+                sensors.append(EldatTransmitterButtonEnumSensor(
+                    coordinator=coordinator,
+                    serial_number=serial_number,
+                    device_info=device_info,
+                    entity_spec=spec,
+                ))
+                _LOGGER.warning("✅ Created button enum sensor for Easywave Transmitter %s button %s", 
+                              serial_number[-8:], spec.get("button", "?"))
+            elif spec.get("device_class") == "enum" and sensor_type is None:
+                # Create Last Button sensor for grouped mode (only if no sensor_type is set)
                 sensors.append(EldatLastButtonSensor(
                     coordinator=coordinator,
                     serial_number=serial_number,
@@ -965,8 +976,10 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         self._entity_spec = entity_spec
         self._switch_mode = entity_spec.get("switch_mode", "impulse")
         self._options = entity_spec.get("options", ["A", "B", "C", "D"])
-        # Find "Off" state in options (supports all languages)
-        self._unknown_value = next((opt for opt in self._options if opt in get_all_off_values()), None)
+        # Find reset state in options: "released" for impulse mode, or legacy "off" values
+        self._unknown_value = next((opt for opt in self._options if opt == "released"), None)
+        if self._unknown_value is None:
+            self._unknown_value = next((opt for opt in self._options if opt in get_all_off_values()), None)
         
         self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_last_button")
         self._attr_has_entity_name = True
@@ -982,6 +995,8 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         self._attr_options = self._options
         
         self._current_button = None
+        self._last_real_button = None  # Speichert den letzten echten Tastendruck (wird nicht zurückgesetzt)
+        self._last_press_time = None
         self._reset_timer = None
         self._reset_delay_ms = 500  # Reset after 500ms for impulse mode
         
@@ -1005,12 +1020,16 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
     @property
     def icon(self) -> str:
         """Return icon based on current state."""
-        # Map button letters to alpha icons
+        # Map button letters to alpha icons (both uppercase and lowercase)
         button_icons = {
             "A": "mdi:alpha-a-circle-outline",
             "B": "mdi:alpha-b-circle-outline",
             "C": "mdi:alpha-c-circle-outline",
             "D": "mdi:alpha-d-circle-outline",
+            "a": "mdi:alpha-a-circle-outline",
+            "b": "mdi:alpha-b-circle-outline",
+            "c": "mdi:alpha-c-circle-outline",
+            "d": "mdi:alpha-d-circle-outline",
         }
         if self._current_button in button_icons:
             return button_icons[self._current_button]
@@ -1058,7 +1077,15 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
             selected_label = action_label if action_label in self._options else button_name
             
             if selected_label in self._options:
+                # Cancel any pending release timer - a new press arrived
+                if self._reset_timer:
+                    self._reset_timer.cancel()
+                    self._reset_timer = None
+                    _LOGGER.debug("📍 Cancelled pending release timer due to new press")
+                
                 self._current_button = selected_label
+                self._last_real_button = selected_label  # Speichere echten Tastendruck
+                self._last_press_time = datetime.now()
                 self.async_write_ha_state()
                 _LOGGER.warning("📍 Last Button sensor %s: button %s pressed (switch_mode=%s)",
                             self.name, selected_label, self._switch_mode)
@@ -1067,7 +1094,10 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
                         self._serial_number, {"last_button": selected_label}
                     )
             else:
-                _LOGGER.warning("📍 Button '%s' not in options %s", selected_label, self._options)
+                # This warning indicates the sensor has wrong options for the device configuration
+                # User should delete and re-add the device to get correct entity specs
+                _LOGGER.debug("📍 Last Button sensor %s: action_label '%s' / button_name '%s' not in options %s - device may need to be re-added",
+                            self.name, action_label, button_name, self._options)
         
         @callback
         def _handle_button_release(event):
@@ -1111,6 +1141,206 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         
         _LOGGER.info("📍 Last Button sensor %s registered for events", self.name)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        attrs = {
+            "serial_number": self._serial_number,
+        }
+        
+        # Zeige den letzten echten Tastendruck (wird nicht bei "released" zurückgesetzt)
+        if self._last_real_button and self._last_real_button != "released":
+            attrs["last_button"] = self._last_real_button.upper() if len(self._last_real_button) == 1 else self._last_real_button
+        
+        if self._last_press_time:
+            attrs["last_received"] = self._last_press_time.strftime("%d.%m.%Y %H:%M:%S")
+        
+        return attrs
+
+
+class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity):
+    """Enum sensor for individual button state in Easywave Transmitter single mode.
+    
+    Each button gets its own sensor with "pressed"/"released" states (translated to "Betätigt"/"Nicht betätigt").
+    This is used instead of binary_sensor to avoid automatic HA entity triggers.
+    We use "pressed"/"released" instead of "on"/"off" to avoid HA's automatic translation.
+    
+    Supports two switch modes:
+    - "impulse": State is reset after button release
+    - "permanent": State toggles on each button press (persistent)
+    """
+
+    def __init__(
+        self,
+        coordinator: EldatCoordinator,
+        serial_number: str,
+        device_info: Dict[str, Any],
+        entity_spec: Dict[str, Any],
+    ) -> None:
+        """Initialize button enum sensor."""
+        super().__init__(coordinator, serial_number, device_info)
+        
+        self._entity_spec = entity_spec
+        self._button_label = entity_spec.get("button", "A")
+        self._button_index = entity_spec.get("button_index", 0)
+        self._switch_mode = entity_spec.get("switch_mode", "impulse")
+        self._options = entity_spec.get("options", ["pressed", "released"])
+        
+        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_button_{self._button_index}")
+        self._attr_has_entity_name = True
+        
+        # Store translation_key for HA automatic state translation
+        self._translation_key = entity_spec.get("translation_key")
+        self._attr_translation_key = self._translation_key
+        
+        self._attr_icon = entity_spec.get("icon", "mdi:radiobox-marked")
+        self._attr_device_class = SensorDeviceClass.ENUM
+        self._attr_options = self._options
+        
+        self._current_state = "released"  # Default: nicht betätigt
+        self._last_press_time = None
+        self._reset_timer = None
+        self._reset_delay_ms = 500  # Reset after 500ms for impulse mode
+        
+        _LOGGER.info("📍 Button enum sensor initialized: %s (button=%s, switch_mode=%s)", 
+                    self._translation_key or f"Button {self._button_label}", 
+                    self._button_label, self._switch_mode)
+
+    @property
+    def available(self) -> bool:
+        """Return True - sensor is always available."""
+        return True
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current button state."""
+        return self._current_state
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on current state."""
+        if self._current_state == "pressed":
+            return "mdi:radiobox-marked"
+        return "mdi:radiobox-blank"
+
+    async def async_added_to_hass(self) -> None:
+        """Register for button press events when entity is added to hass."""
+        await super().async_added_to_hass()
+        
+        # Restore previous state for permanent mode
+        if self._switch_mode != "impulse":
+            persistent = self.coordinator.get_device_state(self._serial_number) or {}
+            state_key = f"button_{self._button_index}_state"
+            if state_key in persistent and persistent[state_key] in self._options:
+                self._current_state = persistent[state_key]
+                _LOGGER.info("📍 Restored button state: %s for %s (persistent)", 
+                           self._current_state, self.name)
+            elif (last_state := await self.async_get_last_state()) is not None:
+                if last_state.state in self._options:
+                    self._current_state = last_state.state
+                    _LOGGER.info("📍 Restored button state: %s for %s", 
+                               self._current_state, self.name)
+
+        @callback
+        def _handle_button_press(event):
+            """Handle button press - update state."""
+            event_serial = event.data.get("serial_number", "") or event.data.get("device_id", "")
+            
+            # Check if this event is for our device
+            my_short_serial = self._serial_number[-8:]
+            event_short_serial = event_serial[-8:] if len(event_serial) >= 8 else event_serial
+            
+            if my_short_serial != event_short_serial:
+                return
+            
+            # Check if this is our button
+            button_name = event.data.get("button_name", event.data.get("subtype", ""))
+            if button_name != self._button_label:
+                return
+            
+            # Update state
+            self._last_press_time = datetime.now()
+            
+            # Cancel any pending release timer - a new press arrived
+            if self._reset_timer:
+                self._reset_timer.cancel()
+                self._reset_timer = None
+                _LOGGER.debug("📍 Button %s: Cancelled pending release timer due to new press", self._button_label)
+            
+            if self._switch_mode == "permanent":
+                # Toggle state for permanent mode
+                self._current_state = "released" if self._current_state == "pressed" else "pressed"
+                self.coordinator.set_device_state(
+                    self._serial_number, {f"button_{self._button_index}_state": self._current_state}
+                )
+            else:
+                # Set to "pressed" for impulse mode
+                self._current_state = "pressed"
+            
+            self.async_write_ha_state()
+            _LOGGER.warning("📍 Button %s pressed: state=%s (switch_mode=%s)",
+                        self._button_label, self._current_state, self._switch_mode)
+
+        @callback
+        def _handle_button_release(event):
+            """Handle button release - reset state for impulse mode."""
+            if self._switch_mode != "impulse":
+                return
+            
+            event_serial = event.data.get("serial_number", "") or event.data.get("device_id", "")
+            
+            # Check if this event is for our device
+            my_short_serial = self._serial_number[-8:]
+            event_short_serial = event_serial[-8:] if len(event_serial) >= 8 else event_serial
+            
+            if my_short_serial != event_short_serial:
+                return
+            
+            # Check if this is our button
+            button_name = event.data.get("button_name", event.data.get("subtype", ""))
+            if button_name != self._button_label:
+                return
+            
+            # Cancel any existing reset timer
+            if self._reset_timer:
+                self._reset_timer.cancel()
+            
+            # Reset after short delay
+            async def _reset_state():
+                await asyncio.sleep(self._reset_delay_ms / 1000.0)
+                self._current_state = "released"
+                self.async_write_ha_state()
+                _LOGGER.debug("📍 Button %s released: state reset (impulse mode)", self._button_label)
+            
+            self._reset_timer = asyncio.create_task(_reset_state())
+        
+        # Listen for button press events
+        self.async_on_remove(
+            self.hass.bus.async_listen("eldat_button_press", _handle_button_press)
+        )
+        
+        # Listen for button release events (for impulse mode reset)
+        if self._switch_mode == "impulse":
+            self.async_on_remove(
+                self.hass.bus.async_listen("eldat_button_release", _handle_button_release)
+            )
+        
+        _LOGGER.info("📍 Button enum sensor %s registered for events", self.name)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        attrs = {
+            "serial_number": self._serial_number,
+            "button_name": self._button_label,
+            "last_button": self._button_label,
+        }
+        
+        if self._last_press_time:
+            attrs["last_received"] = self._last_press_time.strftime("%d.%m.%Y %H:%M:%S")
+        
+        return attrs
+
 
 class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
     """State sensor for Easywave Transmitters in 2/3-button modes.
@@ -1147,6 +1377,8 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
         self._attr_options = self._options
 
         self._current_state = None
+        self._last_press_time = None
+        self._last_button = None
         self._icon_on, self._icon_off = self._resolve_state_icons()
 
         _LOGGER.info(
@@ -1211,6 +1443,8 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
                 new_state = self._button_map[event_button]
                 if new_state != self._current_state:
                     self._current_state = new_state
+                    self._last_press_time = datetime.now()
+                    self._last_button = event_button
                     self.async_write_ha_state()
                     _LOGGER.debug("📍 Transmitter state %s -> %s (key=%s)", entity_label, new_state, self._state_key)
                     # Use channel-specific state_key to keep A/B and C/D states independent
@@ -1232,6 +1466,26 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
         if is_stop_state(self._current_state):
             return "mdi:stop-circle"
         return self._attr_icon
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional state attributes."""
+        attrs = {
+            "serial_number": self._serial_number,
+        }
+        
+        if self._current_state:
+            attrs["state_label"] = self._current_state
+        
+        if self._last_press_time:
+            attrs["last_received"] = self._last_press_time.strftime("%d.%m.%Y %H:%M:%S")
+        
+        if self._last_button is not None:
+            # Convert button ID to letter (0=A, 1=B, 2=C, 3=D)
+            button_letters = {0: "A", 1: "B", 2: "C", 3: "D"}
+            attrs["last_button"] = button_letters.get(self._last_button, str(self._last_button))
+        
+        return attrs
 
 
 
@@ -1690,33 +1944,34 @@ class EWneoSensorEntity(EldatEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         """Return extra state attributes."""
-        attributes = super().extra_state_attributes or {}
+        attributes = {}
+        
+        # Add serial_number
+        attributes["serial_number"] = self._serial_number
         
         if self._last_update:
-            attributes["last_update"] = self._last_update.isoformat()
+            # Lokale Zeit für bessere Lesbarkeit
+            attributes["last_received"] = self._last_update.strftime("%d.%m.%Y %H:%M:%S")
         
         attributes["sensor_type"] = self._sensor_type
         
         # Get additional data from device
         try:
             device = self.coordinator.get_device_instance(self._serial_number)
-            if device and hasattr(device, 'get_sensor_data'):
-                sensor_data = device.get_sensor_data()
-                
-                # Add battery info if available
-                if "battery_level" in sensor_data:
-                    attributes["battery_level"] = sensor_data["battery_level"]
-                if "battery_status" in sensor_data:
-                    attributes["battery_status"] = sensor_data["battery_status"]
             
-            # Add "Zuletzt gesehen" timestamp as attribute (instead of separate entity)
-            # This avoids logbook spam while keeping the information available
-            if device and hasattr(device, '_last_telegram_timestamp'):
-                timestamp = device._last_telegram_timestamp
-                if timestamp:
-                    from datetime import datetime
-                    dt = datetime.fromtimestamp(timestamp)
-                    attributes["zuletzt_gesehen"] = dt.strftime("%d.%m.%Y %H:%M:%S")
+            # Add max_telegram_interval formatted only
+            if device and hasattr(device, '_max_telegram_interval'):
+                max_interval = device._max_telegram_interval
+                if max_interval is not None:
+                    # Convert to human readable format
+                    if max_interval >= 3600:
+                        interval_str = f"{int(max_interval) // 3600}h {(int(max_interval) % 3600) // 60}m"
+                    elif max_interval >= 60:
+                        interval_str = f"{int(max_interval) // 60}m {int(max_interval) % 60}s"
+                    else:
+                        interval_str = f"{int(max_interval)}s"
+                    attributes["max_telegram_interval"] = interval_str
+                    
         except Exception as e:
             _LOGGER.debug("Could not get extra attributes for %s: %s", self.entity_id, e)
         

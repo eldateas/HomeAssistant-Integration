@@ -493,14 +493,6 @@ device_enable:
         device:
           integration: eldat_plugin
 
-cleanup_ghost_devices:
-  name: "🧹 Geistergeräte bereinigen"
-  description: Sucht und meldet nicht mehr verwendete oder inaktive Geräte (Geistergeräte)
-
-cleanup_orphaned_entities:
-  name: "🗑️ Verwaiste Entitäten entfernen"
-  description: Entfernt alle verwaisten Entitäten von bereits gelöschten Geräten aus Home Assistant
-
 update_translations:
   name: "🌐 Übersetzungen aktualisieren"
   description: Aktualisiert die Gerätenamen und Modellbeschreibungen basierend auf der aktuellen Sprache. Rufen Sie diesen Service auf, nachdem Sie die Sprache in den Home Assistant Einstellungen geändert haben.

@@ -418,7 +418,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         self._button_id = button_id
         self._entity_spec = entity_spec or {}
         spec_label = self._entity_spec.get("button_label") or self._entity_spec.get("button")
-        self._button_name = spec_label  # Store for fallback
+        # Fallback: Button-Buchstabe aus button_id (0=A, 1=B, 2=C, 3=D)
+        button_letters = {0: "A", 1: "B", 2: "C", 3: "D"}
+        self._button_name = spec_label or button_letters.get(button_id, str(button_id))
         self._switch_mode = self._entity_spec.get("switch_mode", "impulse")  # "impulse" or "permanent"
         self._last_press_time = None
         self._is_on = False
@@ -459,7 +461,7 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         )
         
         # Use icon and device_class from entity_spec if available
-        self._attr_icon = self._entity_spec.get("icon") or device_config.get("icon", "mdi:gesture-tap-button")
+        self._attr_icon = self._entity_spec.get("icon") or device_config.get("icon", "mdi:radiobox-blank")
         device_class_str = self._entity_spec.get("device_class")
         if device_class_str:
             try:
@@ -650,16 +652,22 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                              event_device_id,
                              event_button, is_press, is_release, matches_device)
                 
-                # Handle general release for all buttons (Button A/0 release releases all) - only in impulse mode
-                if (matches_device and 
-                    is_release and event_button == 0 and 
-                    self._button_id != 0 and
-                    self._switch_mode == "impulse"):
-                    # Button A release -> release all other buttons of this transmitter (impulse mode only)
-                    _LOGGER.info("🔄 Button A released on %s - releasing button %s as well (impulse mode)", 
-                               event_serial if event_serial else "Unknown", self._button_name)
-                    self._handle_button_release()
-                    return
+                # RX11 hardware limitation: Release telegram always contains button 0 (A)
+                # We need to release the button that is actually active for this sensor
+                # The actual button info comes from the _active_buttons tracking
+                
+                if matches_device and is_release and self._switch_mode == "impulse":
+                    # Check if THIS button is currently active - if so, release it
+                    active_set = self._active_buttons.get(self._serial_number, set())
+                    if self._button_id in active_set:
+                        _LOGGER.info("🔄 Release received, button %s is active - releasing", self._button_name)
+                        # Don't release immediately - a new Press might follow
+                        # The delayed release logic below handles this
+                        pass  # Fall through to the normal release handling
+                    else:
+                        # This button is not active, ignore the release
+                        _LOGGER.debug("🔄 Release received but button %s not active - ignoring", self._button_name)
+                        return
                 
                 if matches_device and event_button == self._button_id:
                     _LOGGER.info("🎯 Binary sensor %s received matching button event: button=%s, press=%s, release=%s", 
@@ -667,6 +675,10 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
                     
                     if is_press:
                         # Button pressed
+                        # First, implicitly release any OTHER button that was active (button switch)
+                        # This handles: B held -> A pressed -> Release(old) + Press(A) sequence
+                        active_set = self._active_buttons.get(self._serial_number, set())
+                        
                         if self._serial_number not in self._active_buttons:
                             self._active_buttons[self._serial_number] = set()
                         self._active_buttons[self._serial_number].add(self._button_id)
@@ -921,9 +933,9 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
         if self._device_info.get("operating_type") == "1":
             return "mdi:radiobox-marked" if self._is_on else "mdi:radiobox-blank"
         if self._is_holding:
-            return "mdi:gesture-tap-hold"
+            return "mdi:record-circle-outline"
         if self._is_on:
-            return "mdi:gesture-tap-button"
+            return "mdi:radiobox-marked"
         return "mdi:radiobox-blank"
 
     @property
@@ -943,27 +955,22 @@ class EldatTransmitterButtonSensor(EldatEntity, RestoreEntity, BinarySensorEntit
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
+        # Convert button_id to letter for last_button attribute (0=A, 1=B, 2=C, 3=D)
+        button_letters = {0: "A", 1: "B", 2: "C", 3: "D"}
+        
         attrs = {
-            "button_id": self._button_id,
+            "serial_number": self._serial_number,
             "button_name": self._button_name,
-            "is_holding": self._is_holding,
-            "hold_threshold_ms": self._hold_threshold_ms,
-            "battery_low": self._battery_low,
+            "last_button": button_letters.get(self._button_id, str(self._button_id)),
         }
         
         if self._last_press_time:
-            attrs["last_pressed"] = self._last_press_time.isoformat()
-            
-            # Calculate current press duration if actively pressed
-            if self._is_on:
-                current_duration = (datetime.now() - self._last_press_time).total_seconds() * 1000
-                attrs["current_press_duration"] = round(current_duration, 0)
+            # Lokale Zeit für bessere Lesbarkeit
+            attrs["last_received"] = self._last_press_time.strftime("%d.%m.%Y %H:%M:%S")
         
-        # Add battery level if available
-        device_info = self.coordinator.devices.get(self._serial_number, {})
-        battery_level = device_info.get("battery_level")
-        if battery_level is not None:
-            attrs["battery_level"] = battery_level
+        # Add battery low warning if active
+        if self._battery_low:
+            attrs["battery_low"] = True
         
         return attrs
 
@@ -1012,6 +1019,8 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
             self._attr_device_class = None
 
         self._current_state: str | None = None
+        self._last_update_time: datetime | None = None
+        self._last_button: int | None = None
         self._listeners_registered = False
 
     # NOTE: No custom name property - HA uses _attr_translation_key automatically
@@ -1108,6 +1117,8 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
                 if new_state in self._options:
                     old_state = self._current_state
                     self._current_state = new_state
+                    self._last_update_time = datetime.now()
+                    self._last_button = event_button
                     self.coordinator.set_device_state(
                         self._serial_number, {self._state_key: new_state}
                     )
@@ -1126,12 +1137,20 @@ class EldatTransmitterStateBinarySensor(EldatEntity, RestoreEntity, BinarySensor
         """Return extra state attributes with the human-readable state label."""
         attrs = {
             "serial_number": self._serial_number,
-            "operating_type": self._entity_spec.get("operating_type"),
         }
         
         # Add the human-readable state label (state label in current language)
         if self._current_state:
             attrs["state_label"] = self._current_state
+        
+        # Add last received timestamp and button code if available
+        if hasattr(self, '_last_update_time') and self._last_update_time:
+            attrs["last_received"] = self._last_update_time.strftime("%d.%m.%Y %H:%M:%S")
+        
+        if hasattr(self, '_last_button') and self._last_button is not None:
+            # Convert button ID to letter (0=A, 1=B, 2=C, 3=D)
+            button_letters = {0: "A", 1: "B", 2: "C", 3: "D"}
+            attrs["last_button"] = button_letters.get(self._last_button, str(self._last_button))
         
         return attrs
 
@@ -1273,10 +1292,11 @@ class EldatBatteryWarningSensor(EldatEntity, BinarySensorEntity):
     def available(self) -> bool:
         """Return if entity is available.
         
-        EW Transmitter battery warning sensors inherit the RX11 transceiver 
-        connection status via via_device linkage.
+        Battery warning sensors are always available since the battery state
+        is persistent and doesn't change based on transceiver connection.
+        This prevents unnecessary availability changes in the logbook.
         """
-        return self._is_rx11_connected()
+        return True
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to hass."""

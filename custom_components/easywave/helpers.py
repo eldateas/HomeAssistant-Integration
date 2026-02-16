@@ -184,9 +184,13 @@ def build_model_description(device_type: str, device_info: dict, language: str =
     if button_count and device_type == "ew_transmitter" and operating_type == "1":
         details.append(translate("device_info.buttons", language, count=button_count))
     
-    # Add button count for 2-Tast and 3-Tast-Bedienung
-    if button_count and device_type == "ew_transmitter" and operating_type in ["2", "3"]:
+    # Add button count for 2-Tast-Bedienung
+    if button_count and device_type == "ew_transmitter" and operating_type == "2":
         details.append(translate("device_info.buttons", language, count=button_count))
+    
+    # Add button count for 3-Tast-Bedienung (always show "3 oder 4 Tasten")
+    if device_type == "ew_transmitter" and operating_type == "3":
+        details.append(translate("device_info.buttons_3_or_4", language))
     
     # Add receiver_kind info for receivers
     receiver_kind = device_info.get("receiver_kind")

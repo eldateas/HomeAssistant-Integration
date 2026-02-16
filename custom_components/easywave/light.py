@@ -443,6 +443,22 @@ class EldatEWneoLight(EldatEntity, LightEntity):
             
         if entity_spec.get("supports_color", False):
             self._attr_supported_color_modes.add(ColorMode.RGB)
+        
+        # Store icons for state-based icon changes (like EW receivers)
+        self._icon_on = entity_spec.get("icon_on", "mdi:lightbulb-on")
+        self._icon_off = entity_spec.get("icon_off", "mdi:lightbulb-outline")
+        
+        # Remove _attr_icon set by parent class so dynamic icon property works
+        if hasattr(self, '_attr_icon'):
+            del self._attr_icon
+
+    @property
+    def icon(self) -> str:
+        """Return icon based on current state (like EW receivers)."""
+        if self._is_on:
+            return self._icon_on
+        else:
+            return self._icon_off
 
     @property
     def name(self) -> str:
@@ -470,9 +486,19 @@ class EldatEWneoLight(EldatEntity, LightEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra state attributes."""
-        attrs = {"reachable": self._reachable}
+        attrs = {
+            "serial_number": self._serial_number,
+            "reachable": self._reachable,
+        }
         if self._last_seen:
-            attrs["last_seen"] = self._last_seen.isoformat()
+            attrs["last_seen"] = self._last_seen.strftime("%d.%m.%Y %H:%M:%S")
+        
+        # Add EWneo index from device info
+        device_data = self.coordinator.devices.get(self._serial_number, {})
+        ewneo_index = device_data.get("ewneo_index")
+        if ewneo_index is not None:
+            attrs["ewneo_index"] = ewneo_index
+        
         return attrs
     @property
     def available(self) -> bool:
@@ -609,25 +635,10 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                     # (we only update state on success)
                     self.async_write_ha_state()
                     
-                    # Get friendly device name for notification
-                    device_name = self._device_info.get("name") if self._device_info else None
-                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                    # Report failure to coordinator (handles counting and notification after 2 failures)
+                    await self.coordinator.report_ewneo_communication_failure(self._serial_number)
                     
-                    # Send persistent notification to user
-                    await self.hass.services.async_call(
-                        "persistent_notification",
-                        "create",
-                        {
-                            "notification_id": f"eldat_device_unreachable_{self._serial_number}",
-                            "title": "⚠️ Gerät nicht erreichbar",
-                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
-                                       f"Der Befehl wurde nicht ausgeführt. "
-                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
-                        },
-                        blocking=False,
-                    )
-                    
-                    _LOGGER.warning("⚠️ EWneo light %s nicht erreichbar (Timeout)", self._serial_number[-8:])
+                    _LOGGER.debug("⚠️ EWneo light %s communication failure reported", self._serial_number[-8:])
                     return
                 elif error_type:
                     _LOGGER.warning("⚠️ EWneo light %s Fehler: %s", self._serial_number[-8:], error_type)
@@ -645,13 +656,8 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                 self._reachable = True
                 self._last_seen = datetime.now()
                 
-                # Dismiss any previous unreachable notification
-                await self.hass.services.async_call(
-                    "persistent_notification",
-                    "dismiss",
-                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
-                    blocking=False,
-                )
+                # Report success to coordinator (resets failure counter, dismisses notification)
+                await self.coordinator.report_ewneo_communication_success(self._serial_number)
                     
                 _LOGGER.info("EWneo light %s: Turned on successfully", self.unique_id)
             else:
@@ -711,25 +717,10 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                     # (we only update state on success)
                     self.async_write_ha_state()
                     
-                    # Get friendly device name for notification
-                    device_name = self._device_info.get("name") if self._device_info else None
-                    friendly_name = device_name or self.name or f"Gerät {self._serial_number[-8:]}"
+                    # Report failure to coordinator (handles counting and notification after 2 failures)
+                    await self.coordinator.report_ewneo_communication_failure(self._serial_number)
                     
-                    # Send persistent notification to user
-                    await self.hass.services.async_call(
-                        "persistent_notification",
-                        "create",
-                        {
-                            "notification_id": f"eldat_device_unreachable_{self._serial_number}",
-                            "title": "⚠️ Gerät nicht erreichbar",
-                            "message": f"'{friendly_name}' antwortet nicht (Timeout). "
-                                       f"Der Befehl wurde nicht ausgeführt. "
-                                       f"Mögliche Ursachen: Gerät ausgeschaltet, zu weit entfernt oder Funkstörungen.",
-                        },
-                        blocking=False,
-                    )
-                    
-                    _LOGGER.warning("⚠️ EWneo light %s nicht erreichbar (Timeout)", self._serial_number[-8:])
+                    _LOGGER.debug("⚠️ EWneo light %s communication failure reported", self._serial_number[-8:])
                     return
                 elif error_type:
                     _LOGGER.warning("⚠️ EWneo light %s Fehler: %s", self._serial_number[-8:], error_type)
@@ -743,13 +734,8 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                 self._reachable = True
                 self._last_seen = datetime.now()
                 
-                # Dismiss any previous unreachable notification
-                await self.hass.services.async_call(
-                    "persistent_notification",
-                    "dismiss",
-                    {"notification_id": f"eldat_device_unreachable_{self._serial_number}"},
-                    blocking=False,
-                )
+                # Report success to coordinator (resets failure counter, dismisses notification)
+                await self.coordinator.report_ewneo_communication_success(self._serial_number)
                 
                 _LOGGER.info("EWneo light %s: Turned off successfully", self.unique_id)
             else:

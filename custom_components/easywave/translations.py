@@ -25,6 +25,9 @@ DEFAULT_LANGUAGE: Final = "en"
 # Get translations directory path
 _TRANSLATIONS_DIR: Final = Path(__file__).parent / "translations"
 
+# Language cache to avoid repeated expensive lookups
+_language_cache: dict[int, str] = {}  # hass_id -> language
+
 
 def _scan_available_languages() -> set[str]:
     """Scan for available language codes from .json files in translations directory.
@@ -143,92 +146,47 @@ def _get_nested_value(data: dict, key_path: str) -> str | None:
 
 
 def get_language(hass: "HomeAssistant | None" = None, user_id: str | None = None) -> str:
-    """Get the current user's language from Home Assistant.
+    """Get the current language from Home Assistant.
     
-    This function tries to get the language in the following order:
-    1. User-specific language from frontend storage (async loaded data)
-    2. System language from hass.config.language
-    3. DEFAULT_LANGUAGE as fallback
+    Uses caching to avoid repeated expensive lookups.
+    Falls back to hass.config.language or DEFAULT_LANGUAGE.
     
     Returns the language code if a translation file exists for it,
     otherwise falls back to DEFAULT_LANGUAGE.
     """
-    if hass is not None:
-        try:
-            # Try to get user-specific language from frontend storage
-            # The data is stored via HassKey "frontend_storage" containing UserStore objects
-            # Each UserStore has a .data dict with "language" -> {"language": "en", ...}
-            
-            # Access the frontend storage dict
-            frontend_storage = None
-            for key, value in hass.data.items():
-                # Look for the frontend_storage HassKey
-                key_str = str(key) if hasattr(key, '__str__') else ""
-                if 'frontend_storage' in key_str:
-                    frontend_storage = value
-                    _LOGGER.debug("Found frontend_storage with key: %s, type: %s", key_str, type(value))
-                    break
-            
-            if frontend_storage:
-                _LOGGER.debug("Frontend storage contains %d entries", len(frontend_storage))
-                # frontend_storage is dict[str, Future[UserStore]]
-                # We need to iterate through resolved futures
-                for uid, future_or_store in frontend_storage.items():
-                    _LOGGER.debug("Processing user %s, type: %s", uid, type(future_or_store))
-                    try:
-                        # If it's a resolved future, get the result
-                        if hasattr(future_or_store, 'done') and future_or_store.done():
-                            store = future_or_store.result()
-                            _LOGGER.debug("Got store from future for user %s", uid)
-                        elif hasattr(future_or_store, 'data'):
-                            # It's already a UserStore
-                            store = future_or_store
-                            _LOGGER.debug("Direct store for user %s", uid)
-                        else:
-                            _LOGGER.debug("Skipping user %s - not a store or resolved future", uid)
-                            continue
-                        
-                        # Get language from store data
-                        if hasattr(store, 'data') and store.data:
-                            _LOGGER.debug("Store data for user %s: %s", uid, store.data)
-                            lang_data = store.data.get("language", {})
-                            if isinstance(lang_data, dict):
-                                user_lang = lang_data.get("language")
-                            else:
-                                user_lang = lang_data
-                            
-                            if user_lang:
-                                base_lang = user_lang.split("-")[0].split("_")[0].lower()
-                                _LOGGER.debug("Found user language: %s -> base: %s", user_lang, base_lang)
-                                if base_lang in AVAILABLE_LANGUAGES:
-                                    _LOGGER.info("Using user language: %s", base_lang)
-                                    return base_lang
-                    except Exception as e:
-                        _LOGGER.debug("Error processing user %s: %s", uid, e)
-                        continue
-            else:
-                _LOGGER.debug("No frontend_storage found in hass.data. Keys: %s", [str(k) for k in list(hass.data.keys())[:20]])
-            
-            # Fallback to system language
-            lang = hass.config.language
-            _LOGGER.debug("Falling back to system language: %s", lang)
-            if lang:
-                # Extract base language code (e.g., "de-DE" -> "de")
-                base_lang = lang.split("-")[0].split("_")[0].lower()
-                
-                # Check if we have translations for this language
-                if base_lang in AVAILABLE_LANGUAGES:
-                    return base_lang
-                
-                # Try full code if base didn't match
-                if lang.lower() in AVAILABLE_LANGUAGES:
-                    return lang.lower()
-        except (AttributeError, KeyError) as e:
-            _LOGGER.debug("Error getting language: %s", e)
-            pass
+    if hass is None:
+        return DEFAULT_LANGUAGE
     
-    _LOGGER.debug("Using default language: %s", DEFAULT_LANGUAGE)
-    return DEFAULT_LANGUAGE
+    # Check cache first (use id(hass) as key)
+    hass_id = id(hass)
+    if hass_id in _language_cache:
+        return _language_cache[hass_id]
+    
+    # Determine language from hass.config.language (fast and reliable)
+    result_lang = DEFAULT_LANGUAGE
+    
+    try:
+        lang = hass.config.language
+        if lang:
+            # Extract base language code (e.g., "de-DE" -> "de")
+            base_lang = lang.split("-")[0].split("_")[0].lower()
+            
+            # Check if we have translations for this language
+            if base_lang in AVAILABLE_LANGUAGES:
+                result_lang = base_lang
+            elif lang.lower() in AVAILABLE_LANGUAGES:
+                result_lang = lang.lower()
+    except (AttributeError, KeyError):
+        pass
+    
+    # Cache the result
+    _language_cache[hass_id] = result_lang
+    return result_lang
+
+
+def clear_language_cache() -> None:
+    """Clear the language cache. Call this if language settings change."""
+    _language_cache.clear()
 
 
 def translate(key: str, language: str | None = None, hass: "HomeAssistant | None" = None, **kwargs) -> str:
@@ -462,3 +420,8 @@ def t_transmitter(language: str | None = None, hass: "HomeAssistant | None" = No
 def t_sensor_device(language: str | None = None, hass: "HomeAssistant | None" = None) -> str:
     """Get translated 'Sensor' string."""
     return translate("device.sensor", language, hass)
+
+
+def t_unknown(language: str | None = None, hass: "HomeAssistant | None" = None) -> str:
+    """Get translated 'Unknown' / 'Unbekannt' string."""
+    return translate("device.unknown", language, hass)

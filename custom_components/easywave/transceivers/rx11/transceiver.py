@@ -1416,6 +1416,13 @@ class RX11Transceiver(BaseTransceiver):
         _LOGGER.warning("RX11 wrapper not available for EWB management")
         return False
 
+    async def rx11_ewb_clear_filter(self) -> bool:
+        """Clear EWB receive filter."""
+        if self._rx11_wrapper:
+            return await self._rx11_wrapper.rx11_ewb_clear_filter()
+        _LOGGER.warning("RX11 wrapper not available for EWB management")
+        return False
+
     async def rx11_ewb_join_device(self, gateway_serial: str, timeout: float = 2.0) -> Optional[tuple[int, str]]:
         """Join EWB device - single attempt.
         

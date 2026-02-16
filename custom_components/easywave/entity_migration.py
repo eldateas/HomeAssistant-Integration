@@ -357,6 +357,138 @@ class EntityMigrationHelper:
         return removed_count
 
 
+async def cleanup_legacy_battery_sensors(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    managed_devices: Dict[str, Dict[str, Any]]
+) -> int:
+    """Remove legacy battery percentage sensors for EWneo devices.
+    
+    EWneo sensors should only have a battery_warning binary_sensor,
+    not a battery percentage sensor. This removes any legacy battery
+    sensors that may have been created by older code.
+    
+    Returns:
+        Number of legacy sensors removed
+    """
+    entity_registry = er.async_get(hass)
+    removed_count = 0
+    
+    for serial_number, device_info in managed_devices.items():
+        device_type = device_info.get("type", device_info.get("device_type", ""))
+        
+        # Only process EWneo sensor devices
+        if device_type not in ["ewneo_sensor", "ew_sensor"]:
+            continue
+        
+        # Find and remove battery percentage sensor
+        # Pattern: {serial}_battery (without "warning")
+        battery_sensor_id = f"{serial_number}_battery"
+        
+        for entity in entity_registry.entities.values():
+            if entity.config_entry_id != config_entry_id:
+                continue
+            if entity.platform != DOMAIN:
+                continue
+            
+            # Check for exact battery sensor (not battery_warning)
+            if entity.unique_id and entity.unique_id.endswith("_battery"):
+                # Make sure it's not battery_warning
+                if serial_number in entity.unique_id and "warning" not in entity.unique_id:
+                    _LOGGER.info("🔋 Removing legacy battery percentage sensor: %s", entity.entity_id)
+                    try:
+                        entity_registry.async_remove(entity.entity_id)
+                        removed_count += 1
+                    except Exception as e:
+                        _LOGGER.warning("⚠️ Failed to remove legacy battery sensor %s: %s", entity.entity_id, e)
+    
+    if removed_count > 0:
+        _LOGGER.info("🔋 Removed %d legacy battery percentage sensors for EWneo devices", removed_count)
+    
+    return removed_count
+
+
+async def cleanup_duplicate_entities(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    managed_devices: Dict[str, Dict[str, Any]]
+) -> int:
+    """Remove duplicate entities that exist both with and without registration_id suffix.
+    
+    When a device is re-learned with the registration_id system, new entities
+    with a suffix like '_a1b2c3' are created. If old entities without suffix
+    still exist in the registry, this causes duplicates.
+    
+    This function removes the older entities (without suffix) when duplicates exist.
+    
+    Returns:
+        Number of duplicate entities removed
+    """
+    entity_registry = er.async_get(hass)
+    entities_to_remove = []
+    
+    # Get all entities for this config entry
+    all_entities = [
+        entity for entity in entity_registry.entities.values()
+        if entity.config_entry_id == config_entry_id and entity.platform == DOMAIN
+    ]
+    
+    # Group entities by base pattern (serial_number_type)
+    for serial_number, device_info in managed_devices.items():
+        registration_id = device_info.get("registration_id")
+        
+        # Only check devices that have registration_id (new system)
+        if not registration_id:
+            continue
+        
+        # Find entities for this device
+        device_entities = [e for e in all_entities if e.unique_id and serial_number in e.unique_id]
+        
+        # Separate entities with and without registration_id suffix
+        entities_with_suffix = []
+        entities_without_suffix = []
+        
+        for entity in device_entities:
+            unique_id = entity.unique_id
+            # Check if unique_id has a registration_id suffix (ends with _xxxxxx where x is hex)
+            parts = unique_id.rsplit('_', 1)
+            if len(parts) == 2 and len(parts[1]) == 6 and all(c in '0123456789abcdef' for c in parts[1]):
+                entities_with_suffix.append(entity)
+            else:
+                entities_without_suffix.append(entity)
+        
+        # If device has entities with suffix, remove matching entities without suffix
+        if entities_with_suffix and entities_without_suffix:
+            # Build a map of entity types from suffix entities
+            suffix_base_ids = set()
+            for entity in entities_with_suffix:
+                # Get base unique_id without suffix
+                base_id = entity.unique_id.rsplit('_', 1)[0]
+                suffix_base_ids.add(base_id)
+            
+            # Remove entities without suffix that match base IDs
+            for entity in entities_without_suffix:
+                if entity.unique_id in suffix_base_ids:
+                    entities_to_remove.append(entity)
+                    _LOGGER.info("🧹 Marking duplicate entity for removal: %s (old: %s)", 
+                               entity.entity_id, entity.unique_id)
+    
+    # Remove duplicates
+    removed_count = 0
+    for entity in entities_to_remove:
+        try:
+            entity_registry.async_remove(entity.entity_id)
+            removed_count += 1
+            _LOGGER.debug("  - Removed: %s", entity.entity_id)
+        except Exception as e:
+            _LOGGER.warning("⚠️ Failed to remove duplicate entity %s: %s", entity.entity_id, e)
+    
+    if removed_count > 0:
+        _LOGGER.info("🧹 Removed %d duplicate entities (old format without registration_id suffix)", removed_count)
+    
+    return removed_count
+
+
 async def migrate_entities_if_needed(
     hass: HomeAssistant,
     config_entry_id: str,
@@ -379,6 +511,14 @@ async def migrate_entities_if_needed(
     
     # Check and migrate incompatible entities
     report = await helper.check_and_migrate_entities(config_entry_id, managed_devices)
+    
+    # Cleanup duplicate entities (old format without registration_id suffix)
+    duplicates_removed = await cleanup_duplicate_entities(hass, config_entry_id, managed_devices)
+    report["duplicate_entities_removed"] = duplicates_removed
+    
+    # Cleanup legacy battery percentage sensors for EWneo devices
+    legacy_battery_removed = await cleanup_legacy_battery_sensors(hass, config_entry_id, managed_devices)
+    report["legacy_battery_sensors_removed"] = legacy_battery_removed
     
     # Cleanup orphaned entities
     valid_serials = set(managed_devices.keys())

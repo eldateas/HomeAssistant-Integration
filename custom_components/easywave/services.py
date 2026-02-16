@@ -33,9 +33,6 @@ def _get_coordinator(hass: HomeAssistant) -> Optional[EldatCoordinator]:
 SERVICE_RESET_ENTITY_REGISTRY = "reset_entity_registry"
 SERVICE_RELOAD_SENSORS = "reload_sensors"
 SERVICE_FIX_TRANSCEIVER = "fix_transceiver"
-SERVICE_CLEANUP_GHOST_DEVICES = "cleanup_ghost_devices"
-SERVICE_CLEANUP_ORPHANED_ENTITIES = "cleanup_orphaned_entities"
-SERVICE_REPAIR_ORPHANED_DEVICES = "repair_orphaned_devices"
 SERVICE_SAVE_DEVICES_TO_REGISTRY = "save_devices_to_registry"
 SERVICE_UPDATE_TRANSLATIONS = "update_translations"
 
@@ -275,65 +272,6 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         except Exception as e:
             _LOGGER.error("❌ Failed to fix transceiver: %s", e)
     
-    async def handle_cleanup_ghost_devices(call: ServiceCall) -> None:
-        """Handle cleanup ghost devices service call."""
-        try:
-            # Get the coordinator
-            coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
-            
-            # Run ghost device cleanup using unified cleanup system
-            result = await coordinator.async_cleanup_devices(mode="ghost", dry_run=False)
-            
-            if "error" in result:
-                _LOGGER.error("❌ Ghost device cleanup failed: %s", result["error"])
-            else:
-                _LOGGER.info("✅ Ghost device cleanup completed: %d devices removed", 
-                           result.get("ghost_devices_removed", 0))
-                hass.bus.async_fire("eldat_ghost_cleanup_completed", result)
-                
-        except Exception as e:
-            _LOGGER.error("❌ Failed to cleanup ghost devices: %s", e)
-    
-    async def handle_cleanup_orphaned_entities(call: ServiceCall) -> None:
-        """Handle cleanup orphaned entities service call."""
-        try:
-            # Get the coordinator
-            coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
-            
-            # Run orphaned entity cleanup using unified cleanup system
-            result = await coordinator.async_cleanup_devices(mode="orphaned", dry_run=False)
-            
-            if "error" in result:
-                _LOGGER.error("❌ Orphaned entity cleanup failed: %s", result["error"])
-            else:
-                _LOGGER.info("✅ Orphaned entity cleanup completed: cleaned %d entities, %d devices", 
-                           result["cleaned_entities"], result["cleaned_devices"])
-                
-                # Fire event with results
-                hass.bus.async_fire("eldat_orphaned_cleanup_completed", result)
-                
-        except Exception as e:
-            _LOGGER.error("❌ Failed to cleanup orphaned entities: %s", e)
-    
-    async def handle_repair_orphaned_devices(call: ServiceCall) -> None:
-        """Handle repair orphaned devices service call."""
-        try:
-            # Get the coordinator
-            coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
-            
-            # Run orphaned device repair using unified cleanup system
-            result = await coordinator.async_cleanup_devices(mode="missing", dry_run=False)
-            
-            if "error" in result:
-                _LOGGER.error("❌ Orphaned device repair failed: %s", result["error"])
-            else:
-                repaired_count = result.get("devices_repaired", 0)
-                _LOGGER.info("✅ Orphaned device repair completed - %d devices repaired", repaired_count)
-                hass.bus.async_fire("eldat_repair_completed", result)
-                
-        except Exception as e:
-            _LOGGER.error("❌ Failed to repair orphaned devices: %s", e)
-    
     # Register services
     hass.services.async_register(
         DOMAIN,
@@ -353,27 +291,6 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         DOMAIN,
         SERVICE_FIX_TRANSCEIVER,
         handle_fix_transceiver,
-        schema=None,
-    )
-    
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_CLEANUP_GHOST_DEVICES,
-        handle_cleanup_ghost_devices,
-        schema=None,
-    )
-    
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_CLEANUP_ORPHANED_ENTITIES,
-        handle_cleanup_orphaned_entities,
-        schema=None,
-    )
-    
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_REPAIR_ORPHANED_DEVICES,
-        handle_repair_orphaned_devices,
         schema=None,
     )
     
@@ -466,9 +383,8 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         schema=None,
     )
     
-    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s, %s, %s, %s", 
+    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s", 
                 SERVICE_RESET_ENTITY_REGISTRY, SERVICE_RELOAD_SENSORS, SERVICE_FIX_TRANSCEIVER, 
-                SERVICE_CLEANUP_GHOST_DEVICES, SERVICE_CLEANUP_ORPHANED_ENTITIES, SERVICE_REPAIR_ORPHANED_DEVICES,
                 SERVICE_SAVE_DEVICES_TO_REGISTRY, "refresh_entity_specs", SERVICE_UPDATE_TRANSLATIONS)
 
 
@@ -477,10 +393,7 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_RESET_ENTITY_REGISTRY)
     hass.services.async_remove(DOMAIN, SERVICE_RELOAD_SENSORS)
     hass.services.async_remove(DOMAIN, SERVICE_FIX_TRANSCEIVER)
-    hass.services.async_remove(DOMAIN, SERVICE_CLEANUP_GHOST_DEVICES)
-    hass.services.async_remove(DOMAIN, SERVICE_CLEANUP_ORPHANED_ENTITIES)
     hass.services.async_remove(DOMAIN, "refresh_entity_specs")
-    hass.services.async_remove(DOMAIN, SERVICE_REPAIR_ORPHANED_DEVICES)
     hass.services.async_remove(DOMAIN, SERVICE_SAVE_DEVICES_TO_REGISTRY)
     hass.services.async_remove(DOMAIN, SERVICE_UPDATE_TRANSLATIONS)
     _LOGGER.info("🗑️ Unloaded ELDAT services")

@@ -30,16 +30,32 @@
         }
       },
       "button_a": {
-        "name": "Taste A"
+        "name": "Taste A",
+        "state": {
+          "on": "Betätigt",
+          "off": "Nicht betätigt"
+        }
       },
       "button_b": {
-        "name": "Taste B"
+        "name": "Taste B",
+        "state": {
+          "on": "Betätigt",
+          "off": "Nicht betätigt"
+        }
       },
       "button_c": {
-        "name": "Taste C"
+        "name": "Taste C",
+        "state": {
+          "on": "Betätigt",
+          "off": "Nicht betätigt"
+        }
       },
       "button_d": {
-        "name": "Taste D"
+        "name": "Taste D",
+        "state": {
+          "on": "Betätigt",
+          "off": "Nicht betätigt"
+        }
       },
       "battery_warning": {
         "name": "Batteriewarnung"
@@ -64,10 +80,10 @@
           "up": "Auf",
           "down": "Zu",
           "stop": "Stopp",
-          "a": "A",
-          "b": "B",
-          "c": "C",
-          "d": "D"
+          "a": "Taste A",
+          "b": "Taste B",
+          "c": "Taste C",
+          "d": "Taste D"
         }
       },
       "last_button": {
@@ -78,10 +94,11 @@
           "up": "Auf",
           "down": "Zu",
           "stop": "Stopp",
-          "a": "A",
-          "b": "B",
-          "c": "C",
-          "d": "D"
+          "released": "Nicht betätigt",
+          "a": "Taste A",
+          "b": "Taste B",
+          "c": "Taste C",
+          "d": "Taste D"
         }
       },
       "state_1": {
@@ -120,6 +137,34 @@
           "down": "Zu"
         }
       },
+      "button_a": {
+        "name": "Taste A",
+        "state": {
+          "pressed": "Betätigt",
+          "released": "Nicht betätigt"
+        }
+      },
+      "button_b": {
+        "name": "Taste B",
+        "state": {
+          "pressed": "Betätigt",
+          "released": "Nicht betätigt"
+        }
+      },
+      "button_c": {
+        "name": "Taste C",
+        "state": {
+          "pressed": "Betätigt",
+          "released": "Nicht betätigt"
+        }
+      },
+      "button_d": {
+        "name": "Taste D",
+        "state": {
+          "pressed": "Betätigt",
+          "released": "Nicht betätigt"
+        }
+      },
       "temperature": {
         "name": "Temperatur"
       },
@@ -138,16 +183,16 @@
     },
     "button": {
       "state_a": {
-        "name": "Zustand A"
+        "name": "Tastencode A"
       },
       "state_b": {
-        "name": "Zustand B"
+        "name": "Tastencode B"
       },
       "state_c": {
-        "name": "Zustand C"
+        "name": "Tastencode C"
       },
       "state_d": {
-        "name": "Zustand D"
+        "name": "Tastencode D"
       },
       "toggle": {
         "name": "Toggle"
@@ -187,19 +232,54 @@
     },
     "cover": {
       "channel": {
-        "name": "Kanal {channel}"
+        "name": "Kanal {channel}",
+        "state": {
+          "open": "Geöffnet",
+          "closed": "Geschlossen",
+          "opening": "Öffnet",
+          "closing": "Schließt",
+          "stopped": "Gestoppt"
+        }
       },
       "channel_1": {
-        "name": "Kanal 1"
+        "name": "Kanal 1",
+        "state": {
+          "open": "Geöffnet",
+          "closed": "Geschlossen",
+          "opening": "Öffnet",
+          "closing": "Schließt",
+          "stopped": "Gestoppt"
+        }
       },
       "channel_2": {
-        "name": "Kanal 2"
+        "name": "Kanal 2",
+        "state": {
+          "open": "Geöffnet",
+          "closed": "Geschlossen",
+          "opening": "Öffnet",
+          "closing": "Schließt",
+          "stopped": "Gestoppt"
+        }
       },
       "channel_3": {
-        "name": "Kanal 3"
+        "name": "Kanal 3",
+        "state": {
+          "open": "Geöffnet",
+          "closed": "Geschlossen",
+          "opening": "Öffnet",
+          "closing": "Schließt",
+          "stopped": "Gestoppt"
+        }
       },
       "channel_4": {
-        "name": "Kanal 4"
+        "name": "Kanal 4",
+        "state": {
+          "open": "Geöffnet",
+          "closed": "Geschlossen",
+          "opening": "Öffnet",
+          "closing": "Schließt",
+          "stopped": "Gestoppt"
+        }
       }
     },
     "light": {
@@ -327,6 +407,8 @@
         "description": "Der Sender wird mit folgenden Einstellungen eingelernt:\n\n• **Betriebsart:** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Tastenanzahl:** {button_count_text}\n\nBitte betätigen Sie im nächsten Schritt eine Taste des gewählten Senders.",
         "menu_options": {
           "device_transmitter_learn_start": "▶️ Sender einlernen",
+          "device_transmitter_button_count": "⬅️ Zurück",
+          "device_transmitter_2button_button_count": "⬅️ Zurück",
           "device_transmitter_config": "⬅️ Zurück"
         }
       },
@@ -353,7 +435,7 @@
         "title": "Gerät bereits vorhanden",
         "description": "**Dieser Easywave Sender ist bereits eingelernt!**\n\nDer Sendecode wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Sender.",
         "menu_options": {
-          "device_transmitter_learn_start": "🔄 Sender einlernen",
+          "device_transmitter_learn_start": "🔄 weiteren Sender einlernen",
           "device_transmitter_description": "⬅️ Zurück"
         }
       },
@@ -406,7 +488,8 @@
         "title": "Gerät bereits vorhanden",
         "description": "**Dieser Easywave neo Sensor ist bereits eingelernt!**\n\nDer Sensor wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Sensor.",
         "menu_options": {
-          "device_sensor_learn_start": "🔄 Sensor einlernen"
+          "device_sensor_learn_start": "🔄 weiteren Sensor einlernen",
+          "device_sensor_description": "⬅️ Zurück"
         }
       },
       "_comment_ewneo_receiver_flow": "===== EWNEO-RECEIVER LEARNING FLOW (Easywave neo Empfänger Lernprozess - Bidirektional) =====",
@@ -425,9 +508,10 @@
         }
       },      "device_ewneo_receiver_already_exists": {
         "title": "Gerät bereits vorhanden",
-        "description": "**Dieser Easywave neo Empfänger ist bereits eingelernt!**\n\nDer Empfänger wird schon als **{device_name}** in Home Assistant verwendet.\n\n🔄 **Das Gerät wurde aktualisiert:**\n• Alter Easywave neo Index: {old_index}\n• Neuer Easywave neo Index: {new_index}\n\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Empfänger.",
+        "description": "**Dieser Easywave neo Empfänger ist bereits eingelernt!**\n\nDer Empfänger wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Empfänger.",
         "menu_options": {
-          "device_ewneo_receiver_programming_mode": "🔄 Empfänger einlernen"
+          "device_ewneo_receiver_programming_mode": "🔄 weiteren Empfänger einlernen",
+          "device_ewneo_receiver_back": "⬅️ Zurück"
         }
       },
       "device_ewneo_receiver_programming_mode": {
@@ -486,6 +570,22 @@
           "device_receiver_type": "⬅️ Zurück"
         }
       },
+      "device_receiver_description_heating": {
+        "title": "Empfänger einlernen",
+        "description": "Bringen Sie Ihren Empfänger für Heizungssteuerung bitte jetzt in den Programmiermodus **EIN / AUS**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhytmus blinkt.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Weiter",
+          "device_receiver_type": "⬅️ Zurück"
+        }
+      },
+      "device_receiver_description_universal": {
+        "title": "Empfänger einlernen",
+        "description": "Bringen Sie Ihren Empfänger bitte jetzt in den Programmiermodus.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im Programmiermodus befindet bzw. die LED blinkt.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Weiter",
+          "device_receiver_type": "⬅️ Zurück"
+        }
+      },
       "device_receiver_learn_start": {
         "title": "Empfänger einlernen starten"
       },
@@ -499,7 +599,7 @@
       },
       "device_receiver_verify": {
         "title": "Einlernen erfolgreich",
-        "description": "Home Assistant wurde erfolgreich in den Empfänger eingelernt!\n\nStellen Sie sicher, dass der Programmiermodus am Empfänger beendet wurde, die LED darf nicht mehr blinken.\n\nVergeben Sie einen Namen für das neue Gerät:",
+        "description": "Der Empfänger wurde erfolgreich in der Betriebsart **{receiver_type}** eingelernt!\n\nStellen Sie sicher, dass der Programmiermodus am Empfänger beendet wurde, die LED darf nicht mehr blinken.\n\nVergeben Sie einen Namen für das neue Gerät:",
         "data": {
           "device_name": "Gerätename",
           "area_id": "Bereich (optional):"
@@ -719,9 +819,9 @@
   "device_automation": {
     "trigger_type": {
       "button_press": "in Zustand \"{subtype}\" gewechselt",
-      "button_release": "{subtype} losgelassen",
-      "channel_on": "{subtype} auf Ein geschaltet",
-      "channel_off": "{subtype} auf Aus geschaltet"
+      "button_release": "{subtype} nicht betätigt",
+      "channel_on": "{subtype} betätigt",
+      "channel_off": "{subtype} nicht betätigt"
     },
     "trigger_subtype": {
       "A": "Taste A",
@@ -920,14 +1020,6 @@
           "description": "Die Home Assistant Device ID des zu aktivierenden Geräts"
         }
       }
-    },
-    "cleanup_ghost_devices": {
-      "name": "Geistergeräte bereinigen",
-      "description": "Sucht und meldet nicht mehr verwendete oder inaktive Geräte (Geistergeräte)"
-    },
-    "cleanup_orphaned_entities": {
-      "name": "Verwaiste Entitäten entfernen",
-      "description": "Entfernt alle verwaisten Entitäten von bereits gelöschten Geräten aus Home Assistant"
     }
   },
   "common": {
@@ -982,13 +1074,15 @@
       "device_not_responding": "{device}: RX11 antwortet nicht",
       "turn_on_failed": "Fehler beim Einschalten: {error}",
       "turn_off_failed": "Fehler beim Ausschalten: {error}",
-      "cannot_delete_rx11_with_devices": "Der RX11 USB Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind. Bitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, oder entfernen Sie die gesamte Integration unter: Einstellungen → Geräte & Dienste → ELDAT Integration → Löschen"
+      "cannot_delete_rx11_with_devices": "Der RX11 USB Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind. \n\nBitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, oder entfernen Sie die gesamte Integration unter: \nEinstellungen → Geräte & Dienste → ELDAT Integration → Löschen"
     },
     "notification": {
       "rx11_disconnected_title": "⚠️ RX11 Verbindung verloren",
       "rx11_disconnected_message": "Der RX11 USB-Transceiver ist nicht verbunden. Versuche automatische Wiederverbindung...",
       "rx11_reconnected_title": "✅ RX11 Verbindung wiederhergestellt",
-      "rx11_reconnected_message": "Der RX11 USB-Transceiver ist wieder verbunden. Alle Geräte sind verfügbar."
+      "rx11_reconnected_message": "Der RX11 USB-Transceiver ist wieder verbunden. Alle Geräte sind verfügbar.",
+      "ewneo_unreachable_title": "⚠️ Easywave neo Gerät nicht erreichbar",
+      "ewneo_unreachable_message": "**{device_name}** antwortet nicht.\n\nDer Befehl konnte nicht ausgeführt werden. Mögliche Ursachen:\n• Gerät ist ausgeschaltet\n• Gerät ist zu weit vom Gateway entfernt\n• Funkstörungen\n\nDas Gerät bleibt bedienbar. Bei erfolgreicher Kommunikation wird diese Meldung automatisch entfernt."
     },
     "device": {
       "unknown": "Unbekannt",
@@ -1030,6 +1124,7 @@
       "switch_impulse": "Impuls",
       "switch_permanent": "Dauer",
       "buttons": "{count} Tasten",
+      "buttons_3_or_4": "3 oder 4 Tasten",
       "receiver_impulse": "Impuls",
       "receiver_switch_2button": "EIN/AUS",
       "receiver_cover_2button": "AUF/ZU",

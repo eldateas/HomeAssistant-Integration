@@ -30,16 +30,32 @@
         }
       },
       "button_a": {
-        "name": "Button A"
+        "name": "Button A",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "button_b": {
-        "name": "Button B"
+        "name": "Button B",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "button_c": {
-        "name": "Button C"
+        "name": "Button C",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "button_d": {
-        "name": "Button D"
+        "name": "Button D",
+        "state": {
+          "on": "Pressed",
+          "off": "Not pressed"
+        }
       },
       "battery_warning": {
         "name": "Battery Warning"
@@ -64,10 +80,10 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "State A",
-          "b": "State B",
-          "c": "State C",
-          "d": "State D"
+          "a": "Button A",
+          "b": "Button B",
+          "c": "Button C",
+          "d": "Button D"
         }
       },
       "last_button": {
@@ -78,10 +94,11 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "State A",
-          "b": "State B",
-          "c": "State C",
-          "d": "State D"
+          "released": "Not pressed",
+          "a": "Button A",
+          "b": "Button B",
+          "c": "Button C",
+          "d": "Button D"
         }
       },
       "state_1": {
@@ -120,6 +137,34 @@
           "down": "Down"
         }
       },
+      "button_a": {
+        "name": "Button A",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
+      "button_b": {
+        "name": "Button B",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
+      "button_c": {
+        "name": "Button C",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
+      "button_d": {
+        "name": "Button D",
+        "state": {
+          "pressed": "Pressed",
+          "released": "Not pressed"
+        }
+      },
       "temperature": {
         "name": "Temperature"
       },
@@ -138,16 +183,16 @@
     },
     "button": {
       "state_a": {
-        "name": "State A"
+        "name": "Button Code A"
       },
       "state_b": {
-        "name": "State B"
+        "name": "Button Code B"
       },
       "state_c": {
-        "name": "State C"
+        "name": "Button Code C"
       },
       "state_d": {
-        "name": "State D"
+        "name": "Button Code D"
       },
       "toggle": {
         "name": "Toggle"
@@ -334,6 +379,8 @@
         "description": "The transmitter will be learned with the following settings:\n\n• **Operating Mode:** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Button Count:** {button_count_text}\n\nPlease press a button on the selected transmitter in the next step.",
         "menu_options": {
           "device_transmitter_learn_start": "▶️ Learn Transmitter",
+          "device_transmitter_button_count": "⬅️ Back",
+          "device_transmitter_2button_button_count": "⬅️ Back",
           "device_transmitter_config": "⬅️ Back"
         }
       },
@@ -489,6 +536,14 @@
       "device_receiver_description": {
         "title": "Learn Receiver",
         "description": "Please put your receiver into programming mode for **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's manual.\n\nPlease click \"Next\" once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+        "menu_options": {
+          "device_receiver_learn_start": "▶️ Next",
+          "device_receiver_type": "⬅️ Back"
+        }
+      },
+      "device_receiver_description_heating": {
+        "title": "Learn Receiver",
+        "description": "Please put your heating receiver into programming mode **ON / OFF** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's manual.\n\nPlease click \"Next\" once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Next",
           "device_receiver_type": "⬅️ Back"
@@ -729,8 +784,8 @@
     "trigger_type": {
       "button_press": "changed to state \"{subtype}\"",
       "button_release": "{subtype} released",
-      "channel_on": "{subtype} switched to On",
-      "channel_off": "{subtype} switched to Off"
+      "channel_on": "{subtype} pressed",
+      "channel_off": "{subtype} released"
     },
     "trigger_subtype": {
       "A": "Button A",
@@ -1039,6 +1094,7 @@
       "switch_impulse": "Impulse",
       "switch_permanent": "Permanent",
       "buttons": "{count} Buttons",
+      "buttons_3_or_4": "3 or 4 Buttons",
       "receiver_impulse": "Impulse",
       "receiver_switch_2button": "ON/OFF",
       "receiver_cover_2button": "UP/DOWN",

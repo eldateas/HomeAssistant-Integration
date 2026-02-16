@@ -34,6 +34,7 @@ from .translations import (
     get_language,
     t_receiver,
     t_transmitter,
+    t_unknown,
     EWNEO_DEVICE_TYPE_KEYS,
 )
 from .transceivers import TransceiverFactory, TransceiverType
@@ -534,7 +535,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             behavior_line = f"\n• **Verhalten:** {behavior_text}"
         
         # Tastenanzahl
-        button_count_text = f"{button_count} {'Taste' if button_count == 1 else 'Tasten'}"
+        if operating_type == "3":
+            button_count_text = "3 oder 4 Tasten"
+        else:
+            button_count_text = f"{button_count} {'Taste' if button_count == 1 else 'Tasten'}"
         
         # Store description placeholders for use in strings.json
         placeholders = {
@@ -548,9 +552,20 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "docs_url": get_docs_url("device_transmitter_description"),
         }
         
+        # Zurück-Option basierend auf Betriebsart
+        if operating_type == "1":
+            # 1-Tast-Bedienung: Zurück zur Tastenanzahl
+            back_step = "device_transmitter_button_count"
+        elif operating_type == "2":
+            # 2-Tast-Bedienung: Zurück zur 2-Tast Tastenanzahl
+            back_step = "device_transmitter_2button_button_count"
+        else:
+            # 3-Tast-Bedienung: Keine Tastenauswahl, zurück zur Betriebsart
+            back_step = "device_transmitter_config"
+        
         return self.async_show_menu(
             step_id="device_transmitter_description",
-            menu_options=["device_transmitter_learn_start", "device_transmitter_config"],
+            menu_options=["device_transmitter_learn_start", back_step],
             description_placeholders=placeholders
         )
 
@@ -1173,9 +1188,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         rx11_index = self._device_config.get("rx11_index", 0)
         lang = get_language(self.hass)
         self._device_config["receiver_kind"] = "heating_cooling"
-        self._device_config["operating_mode"] = 1
+        self._device_config["operating_mode"] = 2
         self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
-        return await self.async_step_device_receiver_description()
+        return await self.async_step_device_receiver_description_heating()
 
     async def async_step_device_receiver_mode_universal(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle UNIVERSAL (4-Tast) mode selection - creates 4 individual buttons."""
@@ -1184,7 +1199,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_config["receiver_kind"] = "universal_4button"
         self._device_config["operating_mode"] = 4
         self._device_config["name"] = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
-        return await self.async_step_device_receiver_description()
+        return await self.async_step_device_receiver_description_universal()
     
     async def async_step_device_receiver_description(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show receiver learning overview with start/back options."""
@@ -1209,6 +1224,30 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return self.async_show_menu(
             step_id="device_receiver_description",
+            menu_options=["device_receiver_learn_start", "device_receiver_type"],
+            description_placeholders=placeholders
+        )
+
+    async def async_step_device_receiver_description_heating(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show receiver learning overview for heating mode with specific instructions."""
+        placeholders = {
+            "docs_url": get_docs_url("device_receiver_description_heating"),
+        }
+        
+        return self.async_show_menu(
+            step_id="device_receiver_description_heating",
+            menu_options=["device_receiver_learn_start", "device_receiver_type"],
+            description_placeholders=placeholders
+        )
+
+    async def async_step_device_receiver_description_universal(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show receiver learning overview for universal mode with specific instructions."""
+        placeholders = {
+            "docs_url": get_docs_url("device_receiver_description_universal"),
+        }
+        
+        return self.async_show_menu(
+            step_id="device_receiver_description_universal",
             menu_options=["device_receiver_learn_start", "device_receiver_type"],
             description_placeholders=placeholders
         )
@@ -1283,8 +1322,40 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # Show form to enter name and area
         rx11_index = self._device_config.get("rx11_index", 0)
+        receiver_kind = self._device_config.get("receiver_kind", "switch")
         lang = get_language(self.hass)
         default_name = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
+        
+        # Map receiver_kind to readable type description
+        receiver_type_names = {
+            "de": {
+                "impulse": "Impuls (1-Tast)",
+                "switch_2button": "EIN/AUS (2-Tast)",
+                "cover_2button": "AUF/ZU (2-Tast)",
+                "motor_3button": "AUF/STOPP/ZU (3-Tast)",
+                "heating_cooling": "Heizung",
+                "universal_4button": "Universal (4-Tast)",
+            },
+            "en": {
+                "impulse": "Impulse (1-Button)",
+                "switch_2button": "ON/OFF (2-Button)",
+                "cover_2button": "OPEN/CLOSE (2-Button)",
+                "motor_3button": "OPEN/STOP/CLOSE (3-Button)",
+                "heating_cooling": "Heating",
+                "universal_4button": "Universal (4-Button)",
+            },
+            "fr": {
+                "impulse": "Impulsion (1 touche)",
+                "switch_2button": "MARCHE/ARRÊT (2 touches)",
+                "cover_2button": "OUVERT/FERMÉ (2 touches)",
+                "motor_3button": "OUVERT/STOP/FERMÉ (3 touches)",
+                "heating_cooling": "Chauffage",
+                "universal_4button": "Universel (4 touches)",
+            },
+        }
+        
+        type_names = receiver_type_names.get(lang, receiver_type_names["en"])
+        receiver_type = type_names.get(receiver_kind, receiver_kind)
         
         return self.async_show_form(
             step_id="device_receiver_verify",
@@ -1293,6 +1364,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("area_id"): selector.AreaSelector(),
             }),
             description_placeholders={
+                "receiver_type": receiver_type,
                 "docs_url": get_docs_url("device_receiver_verify"),
             },
         )
@@ -1400,8 +1472,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             learn_instructions = "Empfänger in 3-Tast Lernmodus versetzen (Auf + Zu + Stopp)."
         elif receiver_kind == "heating_cooling":
             mode_desc = "EIN / AUS (Heizung)"
-            button_summary = "• Heizungsschalter (Toggle mit 4h Wiederholung)"
-            learn_instructions = "Empfänger in Toggle-Lernmodus versetzen."
+            button_summary = "• Heizungsschalter (EIN/AUS mit 4h Wiederholung)"
+            learn_instructions = "Empfänger in 2-Tast Lernmodus versetzen (Ein + Aus)."
         elif receiver_kind == "universal_4button":
             mode_desc = "UNIVERSAL (4-Tast)"
             button_summary = "• Button A\n• Button B\n• Button C\n• Button D"
@@ -1910,7 +1982,24 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Check if receiver already exists (similar to sensor)
             if receiver_serial in coordinator.devices:
                 existing_device = coordinator.devices[receiver_serial]
-                existing_device_name = existing_device.get("name") or f"Easywave neo {t_receiver(lang)} {receiver_serial}"
+                
+                # Try to get the user-set name from Device Registry first
+                existing_device_name = None
+                try:
+                    from homeassistant.helpers import device_registry as dr
+                    device_reg = dr.async_get(self.hass)
+                    # Find device by identifier
+                    ha_device = device_reg.async_get_device(identifiers={(DOMAIN, receiver_serial)})
+                    if ha_device:
+                        # Use name_by_user if set, otherwise use HA device name
+                        existing_device_name = ha_device.name_by_user or ha_device.name
+                except Exception as e:
+                    _LOGGER.debug("Could not get device name from registry: %s", e)
+                
+                # Fallback to coordinator device name or default
+                if not existing_device_name:
+                    existing_device_name = existing_device.get("name") or f"Easywave neo {t_receiver(lang)} {receiver_serial}"
+                
                 old_ewneo_index = existing_device.get("ewneo_index")
                 old_gateway_serial = existing_device.get("gateway_serial")
                 
@@ -2440,6 +2529,40 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # Wait a bit to ensure cleanup
                     await asyncio.sleep(0.5)
                 
+                # Also check HA's device registry for existing device and purge history
+                from homeassistant.helpers import device_registry as dr
+                import homeassistant.helpers.entity_registry as er
+                dev_reg = dr.async_get(self.hass)
+                ent_reg = er.async_get(self.hass)
+                
+                existing_device = dev_reg.async_get_device(identifiers={(DOMAIN, serial_number)})
+                if existing_device:
+                    _LOGGER.info("🧹 Found existing device in HA registry, purging activity log...")
+                    
+                    # Collect all entity_ids for this device to purge their history
+                    entity_ids_to_purge = []
+                    for entity in er.async_entries_for_device(ent_reg, existing_device.id):
+                        entity_ids_to_purge.append(entity.entity_id)
+                    
+                    if entity_ids_to_purge:
+                        _LOGGER.info("🗑️ Purging history for %d entities: %s", 
+                                    len(entity_ids_to_purge), entity_ids_to_purge)
+                        
+                        # Call recorder.purge_entities service to clear history/logbook
+                        try:
+                            await self.hass.services.async_call(
+                                "recorder",
+                                "purge_entities",
+                                {
+                                    "entity_id": entity_ids_to_purge,
+                                    "keep_days": 0,  # Remove all history
+                                },
+                                blocking=True,
+                            )
+                            _LOGGER.info("✅ Activity log purged for device entities")
+                        except Exception as e:
+                            _LOGGER.warning("⚠️ Could not purge entity history: %s", e)
+                
                 # Determine specific device properties and entities to create
                 entity_info = self._determine_device_entities()
                 
@@ -2492,12 +2615,17 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # Also clear any entity customizations for this device
                     try:
                         for entity in er.async_entries_for_device(entity_registry, existing_device.id):
-                            # Check if entity has a user-customized name
-                            if hasattr(entity, 'name_by_user') and entity.name_by_user is not None:
-                                _LOGGER.debug("  Clearing entity name_by_user for %s", entity.entity_id)
+                            # Check if entity has any user customizations (name, icon, etc.)
+                            has_custom_name = hasattr(entity, 'name_by_user') and entity.name_by_user is not None
+                            has_custom_icon = hasattr(entity, 'icon') and entity.icon is not None
+                            
+                            if has_custom_name or has_custom_icon:
+                                _LOGGER.debug("  Clearing entity customizations for %s (name=%s, icon=%s)", 
+                                            entity.entity_id, has_custom_name, has_custom_icon)
                                 entity_registry.async_update_entity(
                                     entity.entity_id,
                                     name=None,  # Reset to default name
+                                    icon=None,  # Reset to default icon
                                 )
                     except Exception as e:
                         _LOGGER.debug("Could not clear entity customizations: %s", e)
@@ -2575,56 +2703,49 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 # SKIP: register_device_permanently already fired platform-specific events
                 # Firing them again would cause duplicate entity creation
-                _LOGGER.info("✅ Skipping duplicate platform event firing (already done by register_device_permanently)")
+                _LOGGER.debug("Skipping duplicate platform event firing (already done by register_device_permanently)")
                 
-                # Give event handlers sufficient time to process and create entities
-                # Try multiple times with delays to allow async processing
-                _LOGGER.info("⏳ Waiting for entity creation events to be processed...")
-                
+                # Brief wait for event handlers to process and create entities
                 from homeassistant.helpers import entity_registry as er
                 entity_reg = er.async_get(self.hass)
                 expected_entities = len(entity_info.get("entities", []))
                 
-                # Wait and check multiple times
-                max_attempts = 5
+                # Quick check - just 2 attempts with short delays
+                max_attempts = 2
                 for attempt in range(max_attempts):
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(0.1)
                     
                     actual_entities = 0
-                    created_entity_types = []
-                    missing_entity_types = []
-                    
                     for entity_spec in entity_info.get("entities", []):
                         unique_id = entity_spec.get("unique_id")
                         entity_type = entity_spec.get("type", "sensor")
-                        sensor_type = entity_spec.get("sensor_type", entity_spec.get("button_type", "unknown"))
                         
                         if unique_id:
                             entity_id = entity_reg.async_get_entity_id(entity_type, DOMAIN, unique_id)
                             if entity_id:
                                 actual_entities += 1
-                                created_entity_types.append(f"{sensor_type}")
-                            else:
-                                missing_entity_types.append(f"{sensor_type}")
                     
-                    _LOGGER.info("📊 Check %d/%d: %d/%d entities in registry", 
+                    _LOGGER.debug("Entity check %d/%d: %d/%d in registry", 
                                attempt + 1, max_attempts, actual_entities, expected_entities)
                     
                     # If all entities are created, break early
                     if actual_entities >= expected_entities:
-                        _LOGGER.info("✅ All entities created successfully: %s", created_entity_types)
+                        _LOGGER.info("✅ All %d entities created", actual_entities)
                         break
                 else:
-                    # Loop completed without break - not all entities created
-                    _LOGGER.warning("⚠️ Only %d/%d entities created. Missing: %s", 
-                                  actual_entities, expected_entities, missing_entity_types)
-                    _LOGGER.info("💡 Missing entities will appear after Home Assistant restart")
+                    # Loop completed without break - entities will appear after HA processes events
+                    _LOGGER.debug("Entities will appear after event processing")
                 
-                # Force a coordinator refresh to update states
+                # Force a coordinator refresh to update states and trigger Frontend update
                 if coordinator:
-                    await asyncio.sleep(0.2)
-                    _LOGGER.info("🔄 Forcing coordinator refresh...")
                     await coordinator.async_request_refresh()
+                    
+                    # Signal Home Assistant that entity registry has changed
+                    # This triggers frontend updates without browser reload
+                    self.hass.bus.async_fire("entity_registry_updated", {
+                        "action": "create",
+                        "entity_id": serial_number,
+                    })
         
         # Determine if entities were created
         entity_count = len(entity_info.get("entities", [])) if 'entity_info' in locals() else 0

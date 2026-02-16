@@ -85,8 +85,18 @@ class EldatSelect(SelectEntity):
         self._attr_name = entity_spec.get("name", f"{device_info.get('name', 'Transmitter')} State")
         self._attr_icon = entity_spec.get("icon", "mdi:form-select")
         
-        # Device info for device registry
-        device_name = device_info.get("name", f"Easywave Transmitter {serial_number}")
+        # Device info for device registry - check if device exists to preserve user-defined names
+        from homeassistant.helpers import device_registry as dr
+        device_registry = dr.async_get(coordinator.hass)
+        existing_device = device_registry.async_get_device(identifiers={(DOMAIN, serial_number)})
+        
+        if existing_device and existing_device.name:
+            # Use existing name to preserve name_by_user
+            device_name = existing_device.name
+        else:
+            # New device - use default name
+            device_name = device_info.get("name", f"Easywave Transmitter {serial_number}")
+        
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, serial_number)},
             name=device_name,

@@ -88,8 +88,23 @@ class EldatEntity(CoordinatorEntity):
         # Build model description with current data (language-aware)
         model_description = build_model_description(device_type, current_device_info, lang)
         
-        # Generate device name - use short, simple names for EWneo devices
-        if device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
+        # Check if device already exists in registry
+        # If the device exists and has a name_by_user, keep the original default name
+        # so that HA continues to use the user-defined override
+        existing_default_name = None
+        if self.hass:
+            from homeassistant.helpers import device_registry as dr
+            device_registry = dr.async_get(self.hass)
+            existing_device = device_registry.async_get_device(identifiers={(DOMAIN, self._serial_number)})
+            if existing_device:
+                # Device exists - use the existing default name to preserve name_by_user
+                existing_default_name = existing_device.name
+        
+        # Generate device name (default name for new devices, or use existing default)
+        if existing_default_name:
+            # Use existing default name - this preserves name_by_user
+            device_name = existing_default_name
+        elif device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
             # EWneo bidirectional devices: use ewneo_index (EWB_GET_FD_SERIAL index)
             ewneo_index = current_device_info.get("ewneo_index")
             receiver_label = t_receiver(lang)
@@ -129,21 +144,21 @@ class EldatEntity(CoordinatorEntity):
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
         """Return additional state attributes."""
+        # Get current device info from coordinator (always up-to-date)
+        current_device_info = (
+            self.coordinator._registered_devices.get(self._serial_number) or 
+            self.coordinator.devices.get(self._serial_number) or 
+            self._device_info
+        )
+        
         attributes = {
             "serial_number": self._serial_number,
-            "device_type": self._device_info.get("type", "unknown"),
-            "integration": DOMAIN,
         }
         
-        # Add device-specific attributes
-        if "channels" in self._device_info:
-            attributes["channels"] = self._device_info["channels"]
-        
-        if "detected_via" in self._device_info:
-            attributes["detected_via"] = self._device_info["detected_via"]
-        
-        if "info_type" in self._device_info:
-            attributes["info_type"] = self._device_info["info_type"]
+        # Add EWneo index if available (for bidirectional EWneo devices)
+        ewneo_index = current_device_info.get("ewneo_index")
+        if ewneo_index is not None:
+            attributes["ewneo_index"] = ewneo_index
         
         return attributes
 

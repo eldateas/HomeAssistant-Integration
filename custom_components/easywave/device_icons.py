@@ -15,7 +15,7 @@ DEVICE_ICONS = {
         "motor": "mdi:window-shutter",
         "heating_cooling": "mdi:thermostat",
     },
-    "ew_transmitter": "mdi:gesture-tap-button",
+    "ew_transmitter": "mdi:radiobox-blank",
     "ewneo_sensor": {
         "temperature": "mdi:thermometer",
         "humidity": "mdi:water-percent",
