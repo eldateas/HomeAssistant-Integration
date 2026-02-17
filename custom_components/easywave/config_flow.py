@@ -173,11 +173,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         manufacturer = first_device.get("manufacturer", "")
         product_name = first_device.get("name", "RX11 Device")
         
-        # Build default device name from USB info
-        if manufacturer and not product_name.startswith(manufacturer):
-            default_device_name = f"{manufacturer} {product_name}"
-        else:
-            default_device_name = product_name
+        # Device name without manufacturer prefix - use product name directly
+        default_device_name = product_name
 
         if user_input is not None:
             # Use default device name - user can customize in HA dialog
@@ -187,7 +184,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(device_path)
             self._abort_if_unique_id_configured()
             return self.async_create_entry(
-                title=device_name,
+                title="Easywave Gateway",
                 data={
                     CONF_TRANSCEIVER_TYPE: TransceiverType.RX11.value,
                     CONF_DEVICE_PATH: device_path,
@@ -201,11 +198,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Show form without device name input
         data_schema = vol.Schema({})
 
-        # Build device info for description
-        if manufacturer and not product_name.startswith(manufacturer):
-            device_label = f"{manufacturer} {product_name}"
-        else:
-            device_label = product_name
+        # Device label for description - use product name without manufacturer
+        device_label = product_name
 
         description_placeholders = {
             "device_name": device_label,

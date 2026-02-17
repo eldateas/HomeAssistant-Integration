@@ -36,6 +36,94 @@ from .device_icons import get_entity_config_for_device
 _LOGGER = logging.getLogger(__name__)
 
 
+async def _cleanup_duplicate_binary_sensor_entities(
+    hass: HomeAssistant, 
+    config_entry_id: str, 
+    coordinator
+) -> int:
+    """Remove old binary_sensor entities without registration_id suffix when device has registration_id.
+    
+    When a device is re-learned with the registration_id system, new entities with a suffix 
+    are created. This function removes ALL old entities (without suffix) for that device,
+    regardless of whether matching new entities exist yet.
+    
+    Returns:
+        Number of entities removed
+    """
+    import re
+    import hashlib
+    
+    entity_registry = er.async_get(hass)
+    removed_count = 0
+    
+    # Get all binary_sensor entities for this config entry
+    all_entities = [
+        entity for entity in entity_registry.entities.values()
+        if entity.config_entry_id == config_entry_id 
+        and entity.platform == DOMAIN 
+        and entity.domain == "binary_sensor"
+    ]
+    
+    if not all_entities:
+        return 0
+    
+    # Get registered devices with registration_id
+    registered_devices = coordinator.get_all_registered_devices()
+    
+    for serial_number, device_info in registered_devices.items():
+        extra_data = device_info.get("extra_data", {})
+        registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
+        
+        if not registration_id:
+            continue
+        
+        # Calculate expected suffix for this device
+        hash_hex = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
+        expected_suffix = f"_{hash_hex}"
+        
+        # Find entities for this device
+        device_entities = [e for e in all_entities if e.unique_id and serial_number in e.unique_id]
+        
+        # Pattern to detect ANY registration_id suffix (6 hex chars at the end)
+        suffix_pattern = re.compile(r'^(.+)_([0-9a-f]{6})$')
+        
+        # Remove ALL entities that don't have the expected suffix
+        for entity in device_entities:
+            unique_id = entity.unique_id
+            
+            # Check if entity has the expected suffix
+            if unique_id.endswith(expected_suffix):
+                continue  # This is a valid new entity
+            
+            # Check if entity has ANY suffix (might be from old registration)
+            match = suffix_pattern.match(unique_id)
+            if match:
+                suffix = f"_{match.group(2)}"
+                if suffix != expected_suffix:
+                    # This entity has a DIFFERENT suffix - it's from an old registration
+                    try:
+                        entity_registry.async_remove(entity.entity_id)
+                        removed_count += 1
+                        _LOGGER.info("🧹 Removed old binary_sensor entity with wrong suffix: %s (had %s, expected %s)", 
+                                   entity.entity_id, suffix, expected_suffix)
+                    except Exception as e:
+                        _LOGGER.warning("⚠️ Failed to remove old entity %s: %s", entity.entity_id, e)
+            else:
+                # This entity has NO suffix - it's an old entity format
+                try:
+                    entity_registry.async_remove(entity.entity_id)
+                    removed_count += 1
+                    _LOGGER.info("🧹 Removed old binary_sensor entity without suffix: %s (device has registration_id)", 
+                               entity.entity_id)
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Failed to remove old entity %s: %s", entity.entity_id, e)
+    
+    if removed_count > 0:
+        _LOGGER.info("🧹 Cleaned up %d old binary_sensor entities", removed_count)
+    
+    return removed_count
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -46,6 +134,9 @@ async def async_setup_entry(
     
     coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
     ha_entity_registry = er.async_get(hass)
+    
+    # Cleanup duplicate binary_sensor entities (old format without registration_id suffix)
+    await _cleanup_duplicate_binary_sensor_entities(hass, config_entry.entry_id, coordinator)
     
     # Setup binary sensors for all devices
     _LOGGER.info("📊 Setting up binary sensors")
@@ -1212,15 +1303,11 @@ class EWneoBatterySensor(EldatEntity, BinarySensorEntity):
     def available(self) -> bool:
         """Return if entity is available.
         
-        EWneo battery sensors inherit the RX11 transceiver connection status 
-        via via_device linkage. Additionally, they check if the device exists.
+        EWneo battery sensors are always available so users can see the battery 
+        warning state even when the gateway is temporarily disconnected.
+        The sensor will show the last known state.
         """
-        # Base: RX11 must be connected
-        if not self._is_rx11_connected():
-            return False
-        
-        # Additionally check if device exists
-        return self._serial_number in self.coordinator.devices
+        return True
 
     @property
     def icon(self) -> str:

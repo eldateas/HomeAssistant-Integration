@@ -1,6 +1,7 @@
 """Entity specs mixin for automatic entity specification generation."""
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List
 
 
@@ -20,6 +21,21 @@ class EntitySpecsMixin:
         
         # Wird von konkreten Device-Klassen überschrieben
         return specs
+    
+    def _get_registration_id_suffix(self) -> str:
+        """Get registration ID suffix for unique_id generation.
+        
+        Returns a suffix like '_a1b2c3' based on registration_id,
+        or empty string for backwards compatibility with existing devices.
+        """
+        registration_id = self.properties.get("registration_id", "")
+        if not registration_id:
+            return ""
+        
+        # Create a short hash from the registration_id
+        hash_input = str(registration_id).encode('utf-8')
+        hash_hex = hashlib.md5(hash_input).hexdigest()[:6]
+        return f"_{hash_hex}"
     
     def _create_base_entity_spec(self, entity_type: str, channel: int = 0, **kwargs) -> Dict[str, Any]:
         """Create a base entity specification."""

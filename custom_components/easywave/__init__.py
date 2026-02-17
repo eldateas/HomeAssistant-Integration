@@ -191,6 +191,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Store coordinator in hass data (DOMAIN dict already initialized at top of function)
     hass.data[DOMAIN][entry.entry_id] = coordinator
     
+    # Step 2.5: Purge activity log for RX11 gateway sensor to start fresh
+    gateway_entity_id = f"sensor.rx11_usb_transceiver_{entry.entry_id[:8]}_gateway_status"
+    # Also try common naming patterns
+    gateway_entity_ids = [
+        gateway_entity_id,
+        f"sensor.rx11_usb_transceiver_verbindungsstatus",
+        f"sensor.rx11_usb_transceiver_connection_status",
+        f"sensor.easywave_gateway_verbindungsstatus",
+        f"sensor.easywave_gateway_connection_status",
+    ]
+    try:
+        await hass.services.async_call(
+            "recorder",
+            "purge_entities",
+            {
+                "entity_id": gateway_entity_ids,
+                "keep_days": 0,
+            },
+            blocking=False,
+        )
+        _LOGGER.debug("🧹 Purged activity log for gateway sensor")
+    except Exception as e:
+        _LOGGER.debug("Could not purge gateway sensor history (this is normal on first setup): %s", e)
+    
     # Step 3: Restore ONLY registered devices BEFORE setting up platforms
     _LOGGER.debug("Restoring only registered devices...")
     await coordinator.restore_registered_devices_only()
@@ -369,45 +393,12 @@ async def async_remove_config_entry_device(
     )
     
     if is_rx11_gateway:
-        # Check if there are other devices besides the RX11
-        device_registry = dr.async_get(hass)
-        other_devices = []
-        
-        for device in device_registry.devices.values():
-            # Check if device belongs to this config entry
-            if config_entry.entry_id not in device.config_entries:
-                continue
-            # Skip the RX11 gateway itself
-            if device.id == device_entry.id:
-                continue
-            # This is another device
-            other_devices.append(device)
-        
-        if other_devices:
-            # There are other devices - show warning message
-            device_names = [d.name or translate("device.unknown", hass=hass) for d in other_devices[:5]]
-            device_list = ", ".join(device_names)
-            if len(other_devices) > 5:
-                device_list += f" und {len(other_devices) - 5} weitere"
-            
-            _LOGGER.info("ℹ️ User tried to delete RX11 transceiver with %d other devices present", len(other_devices))
-            raise HomeAssistantError(
-                translate("error.cannot_delete_rx11_with_devices", hass=hass)
-            )
-        else:
-            # No other devices - remove the entire integration
-            _LOGGER.info("🗑️ No other devices present - removing entire ELDAT integration")
-            
-            # Schedule the config entry removal (can't do it synchronously here)
-            async def remove_integration():
-                await asyncio.sleep(0.5)  # Small delay to let the current operation complete
-                await hass.config_entries.async_remove(config_entry.entry_id)
-                _LOGGER.info("✅ ELDAT integration removed successfully")
-            
-            hass.async_create_task(remove_integration())
-            
-            # Return True to allow the device removal to proceed
-            return True
+        # RX11 gateway device cannot be deleted via the UI menu
+        # Users must remove the entire integration to remove the RX11
+        _LOGGER.info("ℹ️ User tried to delete RX11 transceiver - this is not allowed via UI")
+        raise HomeAssistantError(
+            translate("error.cannot_delete_rx11", hass=hass)
+        )
     
     try:
         # Use coordinator's removal method for proper cleanup

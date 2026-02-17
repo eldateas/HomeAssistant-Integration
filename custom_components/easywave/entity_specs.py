@@ -41,7 +41,12 @@ def _get_registration_id(device_info: Dict[str, Any]) -> str:
     """
     # Only use explicit registration_id field - NOT registered_at!
     # This ensures existing devices keep their original unique_ids
+    # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
     registration_id = device_info.get("registration_id", "")
+    if not registration_id:
+        extra_data = device_info.get("extra_data", {})
+        registration_id = extra_data.get("registration_id", "")
+    
     if not registration_id:
         return ""
     
@@ -59,6 +64,9 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     
     Returns a dictionary with entity platform names as keys and lists of entity specs as values.
     """
+    # Get extra_data for nested properties (managed_devices.json stores type in extra_data)
+    extra_data = device_info.get("extra_data", {})
+    
     # Try to get specs from device class if available
     device_class_specs = _try_get_specs_from_device_class(serial_number, device_info)
     if device_class_specs:
@@ -67,8 +75,8 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     
     # Check if this is an EWneo device based on device_type_code (EWB devices)
     # This is the primary indicator for EWneo/EWB devices
-    if "device_type_code" in device_info:
-        device_type_code = device_info.get("device_type_code", 0)
+    device_type_code = device_info.get("device_type_code") or extra_data.get("device_type_code", 0)
+    if device_type_code:
         if device_type_code in [0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B]:
             # EWneo/EWB device types (switches, dimmers, motors, transceivers)
             _LOGGER.debug("Creating EWneo entities for device %s with type_code 0x%02X", 
@@ -76,10 +84,11 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
             return _create_ewneo_entities_legacy(serial_number, device_info)
     
     # Legacy fallback based on type string
-    device_type = device_info.get("type", "unknown")
+    # Check both top-level and extra_data
+    device_type = device_info.get("type") or extra_data.get("type", "unknown")
     
     _LOGGER.info("🔍 create_entity_specs_for_device: serial=%s, type=%s, receiver_kind=%s", 
-                serial_number, device_type, device_info.get("receiver_kind"))
+                serial_number, device_type, device_info.get("receiver_kind") or extra_data.get("receiver_kind"))
     
     if device_type == "ew_receiver":
         result = _create_ew_receiver_entities_legacy(serial_number, device_info)
@@ -90,7 +99,7 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
         return _create_ew_transmitter_entities_legacy(serial_number, device_info)
     elif device_type in ["ew_sensor", "ewneo_sensor"]:
         return _create_ew_sensor_entities_legacy(serial_number, device_info)
-    elif device_type == "ewneo_receiver" or device_info.get("neo_device"):
+    elif device_type == "ewneo_receiver" or device_info.get("neo_device") or extra_data.get("neo_device"):
         return _create_ewneo_entities_legacy(serial_number, device_info)
     elif device_type in ("sec_receiver", "sec_transmitter"):
         return _create_sec_entities_legacy(serial_number, device_info)
@@ -111,38 +120,46 @@ def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, 
             # Prepare kwargs for device instantiation
             init_kwargs = {"name": device_info.get("name")}
             
+            # Get extra_data for nested properties
+            extra_data = device_info.get("extra_data", {})
+            
             # Pass registration_id for unique entity IDs on re-learning
-            if "registration_id" in device_info:
-                init_kwargs["registration_id"] = device_info["registration_id"]
+            # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
+            registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
+            if registration_id:
+                init_kwargs["registration_id"] = registration_id
             
             # For EWneoSensor, pass sensor_types
             if device_type in ["ewneo_sensor", "ew_sensor"]:
-                sensor_types = device_info.get("sensor_types", [])
+                # Check both top-level and extra_data
+                sensor_types = device_info.get("sensor_types") or extra_data.get("sensor_types", [])
                 # If no sensor_types stored, use default which includes temperature and humidity
                 # Most EWneo sensors support both, so better to include both by default
                 if not sensor_types:
                     sensor_types = ["temperature", "humidity"]
                     _LOGGER.debug("🔍 _try_get_specs_from_device_class: No sensor_types in device_info, using default %s", sensor_types)
                 init_kwargs["sensor_types"] = sensor_types
-                _LOGGER.debug("🔍 _try_get_specs_from_device_class: Creating EWneoSensor with sensor_types=%s", sensor_types)
+                _LOGGER.debug("🔍 _try_get_specs_from_device_class: Creating EWneoSensor with sensor_types=%s, registration_id=%s", 
+                             sensor_types, registration_id)
+            
+            # For EW Transmitter, pass button_count
+            if device_type == "ew_transmitter":
+                button_count = device_info.get("button_count", 4)
+                init_kwargs["button_count"] = button_count
+                _LOGGER.debug("🔍 _try_get_specs_from_device_class: Creating Transmitter with button_count=%s", button_count)
             
             # Instantiate device temporarily to get specs
             device_instance = device_class(serial_number, **init_kwargs)
             specs = device_instance.get_entity_specs()
             
-            _LOGGER.warning("🔍 Device class returned specs: %s", {k: len(v) for k, v in specs.items() if v})
+            _LOGGER.debug("Device class returned specs: %s", {k: len(v) for k, v in specs.items() if v})
             
-            # For Easywave Transmitter: merge with legacy specs for buttons, but keep battery_warning from device class
+            # For Easywave Transmitter: use legacy specs which now include battery_warning
+            # The Device class specs are used for telegram processing, but legacy specs 
+            # are used for entity creation to ensure all Transmitter configurations are supported
             if device_type == "ew_transmitter":
                 legacy_specs = _create_ew_transmitter_entities_legacy(serial_number, device_info)
-                # Merge: Use legacy specs for buttons, but add battery_warning from device class
-                if "binary_sensor" in specs and specs["binary_sensor"]:
-                    # Only add battery_warning binary sensors from device class
-                    battery_warnings = [s for s in specs["binary_sensor"] if s.get("sensor_type") == "battery_warning"]
-                    if battery_warnings and "binary_sensor" not in legacy_specs:
-                        legacy_specs["binary_sensor"] = []
-                    legacy_specs["binary_sensor"].extend(battery_warnings)
-                _LOGGER.debug("✅ Using merged entity specs for Easywave Transmitter %s (legacy + battery_warning)", serial_number)
+                _LOGGER.debug("✅ Using legacy entity specs for Easywave Transmitter %s (includes battery_warning)", serial_number)
                 return legacy_specs
             
             _LOGGER.debug("✅ Using entity specs from device class for %s", serial_number)
@@ -546,7 +563,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
         # A=Auf, B=Zu, C/D=Stopp (beide Tasten triggern denselben Zustand)
         state_options = get_state_options_keys("3")  # ["up", "down", "stop"] - translated by HA
         button_map = get_button_map_keys("3")
-        _LOGGER.warning("🔧 Creating 3-button sensor for %s with options: %s", serial_number[-8:], state_options)
+        _LOGGER.debug("Creating 3-button sensor for %s with options: %s", serial_number[-8:], state_options)
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "transmitter_state",
@@ -560,7 +577,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
             "operating_type": operating_type,
             "usage_type": "cover",
         })
-        _LOGGER.warning("✅ 3-button sensor spec created for %s", serial_number[-8:])
+        _LOGGER.debug("3-button sensor spec created for %s", serial_number[-8:])
     
     else:
         # Fallback: Create binary sensor for each button
@@ -579,6 +596,18 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 "icon": "mdi:gesture-tap-button"
             })
     
+    # Battery warning binary sensor - always add for transmitters
+    # Transmitters report battery status via telegram info_type 0
+    entities["binary_sensor"].append({
+        "type": "binary_sensor",
+        "sensor_type": "battery_warning",
+        "translation_key": "battery_warning",  # HA looks up entity.binary_sensor.battery_warning.name
+        "unique_id": f"{serial_number}_battery_warning{reg_id}",
+        "device_class": "battery",
+        "icon": "mdi:battery",
+        "has_entity_name": True
+    })
+    
     _LOGGER.info("✅ Easywave Transmitter entities created: binary_sensor=%d, sensor=%d, switch=%d, cover=%d",
                 len(entities.get("binary_sensor", [])), 
                 len(entities.get("sensor", [])),
@@ -595,24 +624,29 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     """
     entities = _empty_entity_dict()
     # Get registration ID for unique entity creation on re-learning
+    # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
+    extra_data = device_info.get("extra_data", {})
     reg_id = _get_registration_id(device_info)
+    if not reg_id:
+        reg_id = _get_registration_id(extra_data)
+    registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
     
     # Check if this is an EWneo-Sensoren (new format)
-    device_type = device_info.get("type", "unknown")
-    _LOGGER.warning("🔍 _create_entity_specs_for_ewneo_sensor: device_type=%s", device_type)
+    device_type = device_info.get("type") or extra_data.get("type", "unknown")
+    _LOGGER.debug("Creating EWneo sensor specs: device_type=%s, registration_id=%s", device_type, registration_id)
     
     if device_type == "ewneo_sensor":
         # Try to create entity specs using the new EWneoSensor class
         try:
             from .transceivers.rx11.devices.ewneo_sensors import EWneoSensor, NEO_TYPE_SENSOR_MAP
             
-            # Determine sensor types from device_info
-            sensor_types = device_info.get('sensor_types', [])
-            _LOGGER.warning("🔍 sensor_types from device_info: %s", sensor_types)
+            # Determine sensor types from device_info (check both top-level and extra_data)
+            sensor_types = device_info.get('sensor_types') or extra_data.get('sensor_types', [])
+            _LOGGER.debug("sensor_types from device_info: %s", sensor_types)
             
             # If no sensor_types, try to convert from neo_types
             if not sensor_types:
-                neo_types = device_info.get('neo_types', [])
+                neo_types = device_info.get('neo_types') or extra_data.get('neo_types', [])
                 if neo_types:
                     sensor_types = []
                     for neo_type in neo_types:
@@ -622,7 +656,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
             
             # If still no sensor_types, check for single neo_type
             if not sensor_types:
-                neo_type = device_info.get('neo_type')
+                neo_type = device_info.get('neo_type') or extra_data.get('neo_type')
                 if neo_type:
                     sensor_type = NEO_TYPE_SENSOR_MAP.get(neo_type)
                     if sensor_type:
@@ -633,23 +667,27 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
                 sensor_types = ['temperature']
                 _LOGGER.warning("⚠️ No sensor types found for %s, defaulting to temperature", serial_number)
             
-            _LOGGER.warning("🔍 Creating EWneoSensor with sensor_types: %s", sensor_types)
+            _LOGGER.debug("Creating EWneoSensor with sensor_types: %s, registration_id: %s", sensor_types, registration_id)
             
             # Create temporary device instance to get entity specs
-            device_instance = EWneoSensor(
-                serial_number,
-                name=device_info.get('name', f'EWneo-Sensoren {serial_number}'),
-                sensor_types=sensor_types
-            )
+            # Pass registration_id for unique_id suffix
+            init_kwargs = {
+                "name": device_info.get('name', f'EWneo-Sensoren {serial_number}'),
+                "sensor_types": sensor_types
+            }
+            if registration_id:
+                init_kwargs["registration_id"] = registration_id
+                
+            device_instance = EWneoSensor(serial_number, **init_kwargs)
             
             # Get specs from device
             specs = device_instance.get_entity_specs()
-            _LOGGER.warning("✅ EWneoSensor.get_entity_specs() returned: %s", 
+            _LOGGER.debug("EWneoSensor.get_entity_specs() returned: %s", 
                           {k: len(v) for k, v in specs.items() if v})
             for platform, entities in specs.items():
                 if entities:
                     for entity in entities:
-                        _LOGGER.warning("  📋 %s: sensor_type=%s, name=%s", 
+                        _LOGGER.debug("  %s: sensor_type=%s, name=%s", 
                                       platform, entity.get("sensor_type"), entity.get("name"))
             return specs
             

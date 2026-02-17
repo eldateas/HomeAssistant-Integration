@@ -63,6 +63,7 @@
     },
     "sensor": {
       "gateway_status": {
+        "name": "Verbindungsstatus",
         "state": {
           "connected": "Verbunden",
           "disconnected": "Getrennt",
@@ -305,7 +306,7 @@
       "_comment_initial_setup": "===== INITIAL SETUP FLOW (Transceiver Einrichtung) =====",
       "user": {
         "title": "RX11 USB Transceiver einrichten",
-        "description": "{found_devices} ELDAT Geräte gefunden: {device_list}.\n\n{status}\n\nWählen Sie ein Gerät aus der Liste oder verwenden Sie andere Optionen.",
+        "description": "{found_devices} Easywave Geräte gefunden: {device_list}.\n\n{status}\n\nWählen Sie ein Gerät aus der Liste oder verwenden Sie andere Optionen.",
         "data": {
           "device_path": "USB-Gerät",
           "device_name": "Name der Integration"
@@ -320,8 +321,8 @@
         "description": "Erkanntes Gerät:\n**{device_name}**\n\nAnschluss: {device_path}"
       },
       "device": {
-        "title": "Neues ELDAT Gerät hinzufügen",
-        "description": "Fügen Sie ein neues ELDAT Gerät über den RX11 Transceiver hinzu."
+        "title": "Neues Easywave Gerät hinzufügen",
+        "description": "Fügen Sie ein neues Easywave Gerät über den RX11 Transceiver hinzu."
       },
       "_comment_device_selection": "===== DEVICE TYPE SELECTION FLOW (Gerätetyp Auswahl) =====",
       "device_type_select": {
@@ -353,6 +354,11 @@
           "device_transmitter_2button": "⚪ 2-Tast-Bedienung",
           "device_transmitter_3button": "⚪ 3-Tast-Bedienung",
           "device_type_select": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_transmitter_1button": "Jede Taste eines Senders kann eine Funktion auslösen. Jeder Taste eines Kanals wird hierfür ein separates Objekt oder ein separater Zustand eines Objektes zugeordnet.",
+          "device_transmitter_2button": "Es wird jeweils 2 zusammenhängenden Tasten eines Kanals eine Funktion zugeordnet. (EIN/AUS oder AUF/ZU) Für jede Funktion wird hierbei ein separates Objekt erstellt.",
+          "device_transmitter_3button": "Alle 3 bzw. 4 Tasten eines Kanals werden automatisch einem einzelnen Objekt, in der Betriebsart \"3-Tast-Bedienung\", zugeordnet. Dieses Objekt hat 3 Zustände: AUF/STOPP/ZU."
         }
       },
       "device_transmitter_grouping": {
@@ -362,6 +368,10 @@
           "device_transmitter_grouping_single": "⚪ Einzeln schalten",
           "device_transmitter_grouping_group": "⚪ Als Gruppe schalten",
           "device_transmitter_config": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_transmitter_grouping_single": "Für jede Taste des gewählten Kanals wird ein eigenes Objekt erzeugt. Jedes Objekt repräsentiert einen der maximal 4 verfügbaren Tastencodes (A,B,C,D).",
+          "device_transmitter_grouping_group": "Es wird ein Objekt für alle Tasten des gewählten Kanals erzeugt. Jeder der maximal 4 verfügbaren Tastencodes (A,B,C,D) repräsentiert hierbei einen Zustand dieses Objektes."
         }
       },
       "device_transmitter_switch_mode": {
@@ -371,6 +381,10 @@
           "device_transmitter_switch_impulse": "⚪ Impuls",
           "device_transmitter_switch_permanent": "⚪ Dauer",
           "device_transmitter_grouping": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_transmitter_switch_impulse": "Der Schaltzustand eines Objektes wird 1 Sekunde nach loslassen der jeweiligen Sendertaste wieder zurückgesetzt.",
+          "device_transmitter_switch_permanent": "Der Schaltzustand der einzelnen Objekte wechselt bei jeder Betätigung der jeweiligen Sendertaste."
         }
       },
       "device_transmitter_button_count": {
@@ -382,6 +396,12 @@
           "device_transmitter_buttons_3": "⚪ 3 Tasten",
           "device_transmitter_buttons_4": "⚪ 4 Tasten",
           "device_transmitter_switch_mode": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_transmitter_buttons_1": "Der einzulernende Sender / Kanal hat nur 1 Taste mit dem Tastencode A.",
+          "device_transmitter_buttons_2": "Der einzulernende Sender / Kanal hat 2 Tasten mit den Tastencodes A und B.",
+          "device_transmitter_buttons_3": "Der einzulernende Sender / Kanal hat 3 Tasten mit den Tastencodes A, B und C.",
+          "device_transmitter_buttons_4": "Der einzulernende Sender / Kanal hat 4 Tasten mit den Tastencodes A, B, C und D."
         }
       },
       "device_transmitter_2button_usage": {
@@ -391,6 +411,10 @@
           "device_transmitter_2button_switch": "⚪ EIN/AUS",
           "device_transmitter_2button_cover": "⚪ AUF/ZU",
           "device_transmitter_config": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_transmitter_2button_switch": "Die Zustände der Objekte lauten EIN/AUS.",
+          "device_transmitter_2button_cover": "Die Zustände der Objekte lauten AUF/ZU."
         }
       },
       "device_transmitter_2button_button_count": {
@@ -400,6 +424,10 @@
           "device_transmitter_2button_2": "⚪ 2 Tasten",
           "device_transmitter_2button_4": "⚪ 4 Tasten",
           "device_transmitter_2button_usage": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_transmitter_2button_2": "Der einzulernende Sender / Kanal hat 2 Tasten mit den Tastencodes A und B.",
+          "device_transmitter_2button_4": "Der einzulernende Sender / Kanal hat 4 Tasten mit den Tastencodes A, B,C und D."
         }
       },
       "device_transmitter_description": {
@@ -560,6 +588,14 @@
           "device_receiver_mode_heating": "⚪ EIN/AUS (Heizung)",
           "device_receiver_mode_universal": "⚪ UNIVERSAL (4-Tast)",
           "device_type_select": "⬅️ Zurück"
+        },
+        "menu_option_descriptions": {
+          "device_receiver_mode_impulse": "Es wird ein kurzer Schaltimpuls von 1s ausgelöst.",
+          "device_receiver_mode_on_off": "Der Relaisausgang des Empfängers wird gezielt EIN oder AUS geschalten.",
+          "device_receiver_mode_up_down": "Der Relaisausgang des Empfängers wird gezielt nach AUF oder ZU geschaltet.",
+          "device_receiver_mode_up_stop_down": "Es werden gezielte Befehle für das Verfahren oder Stoppen von Rohrmotoren versendet.",
+          "device_receiver_mode_heating": "Der Relaisausgang des Empfängers wird gezielt EIN oder AUS geschalten. Der letzte Zustand wird alle 4h erneut gesendet.",
+          "device_receiver_mode_universal": "Es können Schaltimpulse für alle 4 verwendbaren Sendecodes ausgelöst werden."
         }
       },
       "device_receiver_description": {
@@ -673,7 +709,7 @@
       "_comment_manual_advanced": "===== MANUAL & ADVANCED OPTIONS (Manuelle & Erweiterte Optionen) =====",
       "show_all_devices": {
         "title": "Alle USB-Geräte anzeigen",
-        "description": "Gefunden: {total_devices} USB-Geräte ({eldat_devices} ELDAT-Geräte).\n\n{warning}",
+        "description": "Gefunden: {total_devices} USB-Geräte ({eldat_devices} Easywave-Geräte).\n\n{warning}",
         "data": {
           "device_path": "USB-Gerät auswählen",
           "device_name": "Name der Integration"
@@ -723,7 +759,7 @@
       "unknown": "Unbekannter Fehler aufgetreten"
     },
     "abort": {
-      "not_eldat_device": "Kein ELDAT-Gerät",
+      "not_eldat_device": "Kein Easywave-Gerät",
       "already_configured": "Gerät ist bereits konfiguriert",
       "device_already_exists": "Dieser Sender ist bereits eingelernt und kann nicht überschrieben werden.",
       "invalid_discovery_info": "Ungültige Discovery-Informationen",
@@ -754,8 +790,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "ELDAT Optionen",
-        "description": "Konfigurieren Sie die ELDAT Integration.\n\nGefundene Geräte: {device_count}\nLernmodus: {learning_status}",
+        "title": "Easywave Optionen",
+        "description": "Konfigurieren Sie die Easywave Integration.\n\nGefundene Geräte: {device_count}\nLernmodus: {learning_status}",
         "data": {
           "scan_interval": "Scan-Intervall (Sekunden)",
           "auto_discovery": "Automatische Geräteerkennung",
@@ -821,19 +857,23 @@
       "button_press": "in Zustand \"{subtype}\" gewechselt",
       "button_release": "{subtype} nicht betätigt",
       "channel_on": "{subtype} betätigt",
-      "channel_off": "{subtype} nicht betätigt"
+      "channel_off": "{subtype} nicht betätigt",
+      "gateway_connected": "Gateway verbunden",
+      "gateway_disconnected": "Gateway getrennt"
     },
     "trigger_subtype": {
       "A": "Taste A",
       "B": "Taste B",
       "C": "Taste C",
-      "D": "Taste D"
+      "D": "Taste D",
+      "connected": "Verbunden",
+      "disconnected": "Getrennt"
     }
   },
   "services": {
     "add_device": {
       "name": "Gerät hinzufügen",
-      "description": "Fügt manuell ein Gerät zur ELDAT Integration hinzu",
+      "description": "Fügt manuell ein Gerät zur Easywave Integration hinzu",
       "fields": {
         "serial_number": {
           "name": "Seriennummer",
@@ -975,7 +1015,7 @@
     },
     "device_remove": {
       "name": "Gerät entfernen",
-      "description": "Entfernt ein ELDAT-Gerät vollständig aus Home Assistant",
+      "description": "Entfernt ein Easywave-Gerät vollständig aus Home Assistant",
       "fields": {
         "device_id": {
           "name": "Geräte-ID",
@@ -1074,7 +1114,8 @@
       "device_not_responding": "{device}: RX11 antwortet nicht",
       "turn_on_failed": "Fehler beim Einschalten: {error}",
       "turn_off_failed": "Fehler beim Ausschalten: {error}",
-      "cannot_delete_rx11_with_devices": "Der RX11 USB Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind. \n\nBitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, oder entfernen Sie die gesamte Integration unter: \nEinstellungen → Geräte & Dienste → ELDAT Integration → Löschen"
+      "cannot_delete_rx11_with_devices": "Der RX11 USB Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind. \n\nBitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, oder entfernen Sie die gesamte Integration über das Drei-Punkte-Menü vom Integrationseintrag",
+      "cannot_delete_rx11": "Der RX11 USB Transceiver kann nicht über das Gerätemenü gelöscht werden.\n\nUm den RX11 zu entfernen, löschen Sie bitte die gesamte Easywave-Integration über das Drei-Punkte-Menü des Integrationseintrags."
     },
     "notification": {
       "rx11_disconnected_title": "⚠️ RX11 Verbindung verloren",

@@ -9,7 +9,7 @@ DOMAIN: Final = "easywave"
 INTEGRATION_NAME: Final = "Home Assistant Integration for ELDAT devices"
 
 # Documentation URL Base
-DOCS_URL_BASE: Final = "https://github.com/your-repo/easywave/blob/main/docs/"
+DOCS_URL_BASE: Final = "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs"
 
 # USB Device Information
 ELDAT_VID: Final = 0x155A  # Vendor ID
@@ -276,6 +276,11 @@ EVENT_TELEGRAM_RECEIVED: Final = "eldat_telegram_received"
 EVENT_SENSOR_UPDATE: Final = "eldat_sensor_update"
 EVENT_SENSOR_ADDED: Final = "eldat_sensor_added"
 EVENT_FORCE_CREATE: Final = "eldat_force_create"
+
+# Gateway Connection Events
+EVENT_GATEWAY_CONNECTED: Final = "eldat_gateway_connected"
+EVENT_GATEWAY_DISCONNECTED: Final = "eldat_gateway_disconnected"
+EVENT_GATEWAY_STATUS_CHANGED: Final = "eldat_gateway_status_changed"
 
 # Button Events (basierend auf RX11 EWB_RCV Grundfunktionen)
 # Nur diese drei Events werden gefeuert:

@@ -522,6 +522,33 @@ class EldatCoordinator(DataUpdateCoordinator):
                             if original_entities != device_info.get("entities", []):
                                 devices_updated = True
                         
+                        # Migration: EWneo sensors with registration_id need entity specs with suffix
+                        if device_info.get("type") in ["ewneo_sensor", "ew_sensor"]:
+                            registration_id = device_info.get("registration_id", "")
+                            entities = device_info.get("entities", [])
+                            # Check if any entity already has the suffix
+                            needs_regeneration = False
+                            if registration_id and entities:
+                                # Generate expected suffix
+                                import hashlib
+                                hash_hex = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
+                                expected_suffix = f"_{hash_hex}"
+                                # Check if any entity has this suffix
+                                has_suffix = any(
+                                    entity.get("unique_id", "").endswith(expected_suffix)
+                                    for entity in entities
+                                )
+                                if not has_suffix:
+                                    needs_regeneration = True
+                                    _LOGGER.info("🔄 EWneo sensor %s needs entity regeneration (registration_id present but no suffix in unique_ids)", 
+                                               serial_number[-8:])
+                            
+                            if needs_regeneration:
+                                device_info = await self._regenerate_entity_specs(
+                                    serial_number, device_info
+                                )
+                                loaded_devices[serial_number] = device_info
+                                devices_updated = True
                     
                     self._registered_devices = loaded_devices
                     
@@ -608,33 +635,120 @@ class EldatCoordinator(DataUpdateCoordinator):
     async def _cleanup_old_entities_for_device(self, serial_number: str) -> None:
         """Clean up old entities for a device that is being re-learned.
         
-        This removes all entities whose unique_id starts with the serial_number,
+        This removes all entities whose unique_id contains the serial_number,
         ensuring that re-learning creates fresh entities without old logbook entries.
+        Also clears old sensor values and state history.
         """
         try:
             from homeassistant.helpers import entity_registry as er
             
             entity_registry = er.async_get(self.hass)
             
-            # Find all entities for this device
+            # Find all entities for this device (check if serial is anywhere in unique_id)
             entities_to_remove = []
             for entity_id, entry in entity_registry.entities.items():
-                if entry.unique_id and entry.unique_id.startswith(serial_number):
+                if entry.unique_id and serial_number in entry.unique_id:
                     # Check if this entity belongs to our domain
                     if entry.platform == DOMAIN:
-                        entities_to_remove.append(entity_id)
+                        entities_to_remove.append((entity_id, entry.unique_id))
             
             if entities_to_remove:
                 _LOGGER.info("🧹 Removing %d old entities for device %s before re-learning", 
                            len(entities_to_remove), serial_number[-8:])
-                for entity_id in entities_to_remove:
+                
+                # Collect entity_ids for history purge
+                entity_ids_for_purge = []
+                
+                for entity_id, unique_id in entities_to_remove:
+                    entity_ids_for_purge.append(entity_id)
                     entity_registry.async_remove(entity_id)
-                    _LOGGER.debug("  - Removed: %s", entity_id)
+                    _LOGGER.debug("  - Removed entity: %s (unique_id: %s)", entity_id, unique_id[-20:])
+                
+                # Try to purge history/recorder data for these entities
+                await self._purge_entity_history(entity_ids_for_purge)
             else:
                 _LOGGER.debug("🧹 No old entities to remove for device %s", serial_number[-8:])
+            
+            # Clear old sensor values from coordinator.devices
+            if serial_number in self.devices:
+                old_device = self.devices[serial_number]
+                # Clear measurement values but keep basic info
+                for key in ["temperature", "humidity", "battery_level", "last_telegram", 
+                           "last_seen", "sensor_values", "last_reading"]:
+                    if key in old_device:
+                        del old_device[key]
+                _LOGGER.debug("🧹 Cleared old sensor values from devices dict for %s", serial_number[-8:])
+            
+            # Clear old values from _registered_devices
+            if serial_number in self._registered_devices:
+                old_reg = self._registered_devices[serial_number]
+                for key in ["temperature", "humidity", "battery_level", "last_telegram",
+                           "last_seen", "sensor_values", "last_reading", "entities"]:
+                    if key in old_reg:
+                        del old_reg[key]
+                _LOGGER.debug("🧹 Cleared old values from registered_devices for %s", serial_number[-8:])
+            
+            # Clear old values from DeviceManager (managed_devices.json)
+            if self.device_manager.is_whitelisted(serial_number):
+                dm_device = self.device_manager.get_device(serial_number)
+                if dm_device:
+                    # Clear measurement values from device
+                    keys_to_clear = ["temperature", "humidity", "battery_level", "last_telegram",
+                                    "last_seen", "sensor_values", "last_reading"]
+                    changed = False
+                    for key in keys_to_clear:
+                        if hasattr(dm_device, key) and getattr(dm_device, key) is not None:
+                            setattr(dm_device, key, None)
+                            changed = True
+                    
+                    # Also clear from extra_data
+                    if dm_device.extra_data:
+                        for key in keys_to_clear + ["entities"]:
+                            if key in dm_device.extra_data:
+                                del dm_device.extra_data[key]
+                                changed = True
+                    
+                    if changed:
+                        await self.device_manager.save()
+                        _LOGGER.debug("🧹 Cleared old values from DeviceManager for %s", serial_number[-8:])
                 
         except Exception as e:
             _LOGGER.warning("⚠️ Failed to cleanup old entities for %s: %s", serial_number[-8:], e)
+
+    async def _purge_entity_history(self, entity_ids: list) -> None:
+        """Purge history/recorder data for specific entities.
+        
+        This ensures old logbook entries and state history are removed
+        when a device is re-learned.
+        """
+        if not entity_ids:
+            return
+            
+        try:
+            # Check if recorder is available
+            if "recorder" not in self.hass.data:
+                _LOGGER.warning("⚠️ Recorder not available, cannot purge history")
+                return
+            
+            _LOGGER.info("🧹 Purging history for %d entities: %s", len(entity_ids), entity_ids)
+            
+            # Use recorder's purge_entities service
+            # This removes all historical data for these entities
+            # Use blocking=True to ensure purge completes before continuing
+            await self.hass.services.async_call(
+                "recorder",
+                "purge_entities",
+                {
+                    "entity_id": entity_ids,
+                    "keep_days": 0,  # Remove ALL history
+                },
+                blocking=True,  # Wait for completion
+            )
+            _LOGGER.info("✅ History purge completed for %d entities", len(entity_ids))
+            
+        except Exception as e:
+            # Log as warning so we can see if it fails
+            _LOGGER.warning("⚠️ Could not purge entity history: %s", e)
 
     def _ensure_default_sender_name(self, device_info: Dict[str, Any]) -> None:
         """Assign default Easywave Sender #N name when no custom name is set.
@@ -906,13 +1020,27 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Clean up old entities from previous registrations of the same device
             # This ensures re-learning creates fresh entities without old logbook entries
             await self._cleanup_old_entities_for_device(serial_number)
+            
+            # IMPORTANT: Clear old measurement values from device_info itself
+            # These may have been carried over from the learning telegram or old data
+            measurement_keys = ["temperature", "humidity", "battery_level", "last_telegram",
+                               "last_seen", "sensor_values", "last_reading"]
+            for key in measurement_keys:
+                if key in device_info:
+                    del device_info[key]
+            _LOGGER.debug("🧹 Cleared old measurement values from device_info for %s", serial_number[-8:])
 
             # Assign default names if needed
             self._ensure_default_sender_name(device_info)
             self._ensure_default_ewneo_sensor_name(device_info)
 
-            # Regenerate entity specs for Easywave Transmitters to ensure correct platforms
-            if device_info.get("type") == "ew_transmitter":
+            # Regenerate entity specs for all devices to ensure:
+            # 1. Correct platforms are assigned
+            # 2. registration_id suffix is added to unique_ids (prevents duplicate entities)
+            device_type = device_info.get("type")
+            if device_type in ["ew_transmitter", "ewneo_sensor", "ew_sensor"]:
+                _LOGGER.debug("🔄 Regenerating entity specs for %s (type=%s, registration_id=%s)", 
+                             serial_number[-8:], device_type, device_info.get("registration_id"))
                 device_info = await self._regenerate_entity_specs(serial_number, device_info)
             
             # Store in registered devices list
@@ -1437,13 +1565,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                 self.devices[serial_number] = device_info
                 self._known_devices.add(serial_number)
                 
-                # Check if device has Home Assistant entities
-                ha_device_id = device_info.get("homeassistant_device_id")
-                ha_entities = device_info.get("homeassistant_entities", [])
-                
-                if not ha_device_id or not ha_entities:
-                    orphaned_devices.append(serial_number)
-                    _LOGGER.warning("⚠️ Device %s is orphaned (no HA entities) - will repair", serial_number[-8:])
+                # Note: homeassistant_device_id and homeassistant_entities are populated
+                # during entity creation by HA's entity platform, not during device registration.
+                # This is normal - entities will be created by platform setup.
                 
                 restored_count += 1
                 _LOGGER.debug("✅ Restored registered device: %s (%s)", 
@@ -1459,12 +1583,82 @@ class EldatCoordinator(DataUpdateCoordinator):
             await self._save_registered_devices()
             _LOGGER.info("🧹 Cleaned up %d devices not in whitelist from registered_devices", len(removed_devices))
         
+        # Clean up orphaned devices from HA Device Registry that are not in whitelist
+        await self._cleanup_orphaned_ha_devices()
+        
         _LOGGER.info("✅ Restored %d/%d registered devices - ignoring all others", 
                    restored_count, len(self._registered_devices))
         
         # Events will be fired by fire_pending_device_events() after platform setup
         # No need to store pending events - fire_pending_device_events uses self.devices directly
         # and tracks already-fired events to prevent duplicates
+
+    async def _cleanup_orphaned_ha_devices(self) -> None:
+        """Clean up devices from HA Device Registry that are not in our whitelist.
+        
+        This handles the case where a device was deleted but the HA Device Registry
+        still has the device entry (e.g., from previous sessions).
+        """
+        try:
+            import homeassistant.helpers.device_registry as dr
+            import homeassistant.helpers.entity_registry as er
+            
+            device_registry = dr.async_get(self.hass)
+            entity_registry = er.async_get(self.hass)
+            
+            devices_to_remove = []
+            
+            # Find all devices belonging to this integration
+            for device in device_registry.devices.values():
+                # Check if device belongs to this config entry
+                if self.config_entry.entry_id not in device.config_entries:
+                    continue
+                
+                # Skip the RX11 gateway device
+                is_gateway = any(
+                    "_gateway" in str(ident[1]).lower() or "gateway" in str(ident[1]).lower()
+                    for ident in device.identifiers
+                    if ident[0] == DOMAIN
+                )
+                if is_gateway:
+                    continue
+                
+                # Extract serial number from device identifiers
+                serial_number = None
+                for identifier in device.identifiers:
+                    if identifier[0] == DOMAIN:
+                        serial_number = identifier[1]
+                        break
+                
+                if not serial_number:
+                    continue
+                
+                # Check if this device should exist (is in whitelist)
+                if not self.device_manager.is_whitelisted(serial_number):
+                    devices_to_remove.append((device, serial_number))
+                    _LOGGER.warning("🧹 Found orphaned HA device: %s (%s) - not in whitelist", 
+                                   device.name, serial_number[-8:])
+            
+            # Remove orphaned devices
+            for device, serial_number in devices_to_remove:
+                try:
+                    # First remove all entities for this device
+                    entities = er.async_entries_for_device(entity_registry, device.id)
+                    for entity in entities:
+                        _LOGGER.debug("  Removing orphaned entity: %s", entity.entity_id)
+                        entity_registry.async_remove(entity.entity_id)
+                    
+                    # Then remove the device
+                    _LOGGER.info("🗑️ Removing orphaned HA device: %s (%s)", device.name, serial_number[-8:])
+                    device_registry.async_remove_device(device.id)
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Failed to remove orphaned device %s: %s", serial_number[-8:], e)
+            
+            if devices_to_remove:
+                _LOGGER.info("✅ Cleaned up %d orphaned devices from HA Device Registry", len(devices_to_remove))
+                
+        except Exception as e:
+            _LOGGER.error("❌ Error cleaning up orphaned HA devices: %s", e)
 
     async def fire_pending_device_events(self) -> None:
         """Fire device events after platforms are set up (only once per device).
@@ -2083,7 +2277,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                         await self._fire_battery_event(serial_number, telegram_data, "battery_ok")
                     
             elif is_ewneo_device:
-                _LOGGER.warning("🔄 Processing EWneo device telegram %s as state update", serial_number[-8:])
+                _LOGGER.debug("Processing EWneo device telegram %s as state update", serial_number[-8:])
             
             # Check if device is registered for management
             is_registered = self.is_device_registered(serial_number)
@@ -2096,7 +2290,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("📡 Ignoring telegram from unregistered device %s (not in setup mode)", 
                                 serial_number[-8:])
                     return
-                _LOGGER.warning("🎓 Processing telegram for potential registration of device %s", 
+                _LOGGER.debug("Processing telegram for potential registration of device %s", 
                            serial_number[-8:])
             
             # Update device info if known device - MUST use FULL serial (32 chars)
@@ -2119,7 +2313,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     if "battery_level" in telegram_data:
                         self.devices[serial_number]["battery_level"] = telegram_data["battery_level"]
-                        _LOGGER.warning("🔋 Battery updated in devices dict: %d%%", telegram_data["battery_level"])
+                        _LOGGER.debug("Battery updated in devices dict: %d%%", telegram_data["battery_level"])
                     
                     # Update device instance for timestamp tracking and availability monitoring
                     device_instance = self.get_device_instance(serial_number)
@@ -2129,7 +2323,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             else:
                 # Device not in self.devices, but is registered - add it now!
                 if is_registered and serial_number in self._registered_devices:
-                    _LOGGER.warning("📝 Adding registered device to devices dict: %s...%s", 
+                    _LOGGER.debug("Adding registered device to devices dict: %s...%s", 
                                   serial_number[:8], serial_number[-8:])
                     self.devices[serial_number] = self._registered_devices[serial_number].copy()
                     self.devices[serial_number]["last_seen"] = time.time()
@@ -2142,7 +2336,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                         self.devices[serial_number]["humidity"] = telegram_data["humidity"]
                     if "battery_level" in telegram_data:
                         self.devices[serial_number]["battery_level"] = telegram_data["battery_level"]
-                        _LOGGER.warning("🔋 Battery set in newly added device: %d%%", telegram_data["battery_level"])
+                        _LOGGER.debug("Battery set in newly added device: %d%%", telegram_data["battery_level"])
                     
                     # Update device instance for timestamp tracking
                     device_type = self.devices[serial_number].get("type")
@@ -2157,7 +2351,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Fire specific entity events for sensors (temperature, humidity, battery) if registered
             if is_registered and telegram_data.get("type") in ["ewneo_sensor", "ew_sensor"]:
-                _LOGGER.warning("🌡️ Firing sensor-specific events for registered sensor %s", serial_number[-8:])
+                _LOGGER.debug("Firing sensor-specific events for registered sensor %s", serial_number[-8:])
                 await self._fire_specific_entity_events(serial_number, telegram_data)
             
             # ALWAYS fire telegram event with FULL serial (even if not in devices dict)
@@ -2171,7 +2365,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Fire device updated event if device exists in registry
             if serial_number in self.devices:
-                _LOGGER.warning("📢 Firing EVENT_DEVICE_UPDATED with full serial: %s", serial_number[:8]+"..."+serial_number[-8:])
+                _LOGGER.debug("Firing EVENT_DEVICE_UPDATED with full serial: %s", serial_number[:8]+"..."+serial_number[-8:])
                 
                 # Extract battery_level from telegram_data if present
                 event_data = {
@@ -2194,7 +2388,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Notify listeners directly for faster updates (instead of full refresh)
                 _LOGGER.debug("🔔 Notifying coordinator listeners...")
                 self.async_set_updated_data(self.devices)
-                _LOGGER.warning("✅ Telegram handling complete")
+                _LOGGER.debug("Telegram handling complete")
             else:
                 # Unknown device - ignore (no auto-discovery)
                 device_type = telegram_data.get("type", "unknown")
@@ -2402,7 +2596,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
             elif event_type == "battery_ok":
                 self.hass.bus.async_fire("eldat_battery_ok", event_data)
-                _LOGGER.warning("🔋 Battery OK event: %s (transmitter-wide)", serial_number[-8:])
+                _LOGGER.info("🔋 Battery OK event: %s (transmitter-wide)", serial_number[-8:])
             
         except Exception as e:
             _LOGGER.error("Error firing battery event for %s: %s", serial_number[-8:], e)
@@ -3047,8 +3241,10 @@ class EldatCoordinator(DataUpdateCoordinator):
             if ewneo_index is not None:
                 self.mark_ewb_index_free(ewneo_index)
                 _LOGGER.info("♻️ Freed EWB index %d for reuse (Device: %s)", ewneo_index, device_name)
-            else:
+            elif not is_ewneo_sensor:
+                # Only warn for non-sensor EWneo devices - sensors don't use EWB indices
                 _LOGGER.warning("⚠️ No EWB index to free for device %s", device_name)
+            # For sensors, no warning needed - they don't have EWB indices
             
             # Summary
             if ewb_remove_success:
@@ -3333,11 +3529,16 @@ class EldatCoordinator(DataUpdateCoordinator):
                                    serial_number[-8:], old_type, correct_type, device_type_code)
                         device_info["type"] = correct_type
             
-            _LOGGER.debug("About to regenerate entity specs for %s (type=%s, receiver_kind=%s, operating_mode=%s)", 
+            # IMPORTANT: Remove old entities to force fresh generation
+            # This ensures entities with registration_id suffix are created
+            if "entities" in device_info:
+                old_entities = device_info.pop("entities")
+                _LOGGER.debug("Removed %d old entities for %s before regeneration", len(old_entities), serial_number[-8:])
+            
+            _LOGGER.debug("About to regenerate entity specs for %s (type=%s, registration_id=%s)", 
                         serial_number, 
                         device_info.get("type"),
-                        device_info.get("receiver_kind"),
-                        device_info.get("operating_mode"))
+                        device_info.get("registration_id"))
                         
             entity_specs = create_entity_specs_for_device(serial_number, device_info)
             _LOGGER.debug("Entity specs result: %s platforms, entity_specs=%s", 
@@ -3355,6 +3556,13 @@ class EldatCoordinator(DataUpdateCoordinator):
                     # REPLACE old entity specs completely with newly generated ones
                     device_info["entities"] = all_entities
                     device_info["platforms"] = platforms
+                    
+                    # Log unique_ids for debugging
+                    for entity in all_entities:
+                        _LOGGER.debug("  → Entity: %s (unique_id: %s)", 
+                                     entity.get("sensor_type") or entity.get("type"), 
+                                     entity.get("unique_id", "N/A")[-20:])
+                    
                     _LOGGER.info("✅ Regenerated %d entity specs for device %s with updated naming", 
                                len(all_entities), serial_number)
                 else:
@@ -3570,6 +3778,11 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Remove entities first
             _LOGGER.info("🗑️  Removing %d entities for device %s", len(entities_to_remove), serial_number[-8:])
+            
+            # Purge history for these entities BEFORE removing them
+            if entities_to_remove:
+                await self._purge_entity_history(entities_to_remove)
+            
             for entity_id in entities_to_remove:
                 try:
                     # Get unique_id BEFORE removing the entity

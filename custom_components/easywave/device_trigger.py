@@ -24,7 +24,12 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    EVENT_GATEWAY_CONNECTED,
+    EVENT_GATEWAY_DISCONNECTED,
+    EVENT_GATEWAY_STATUS_CHANGED,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,10 +40,14 @@ TRIGGER_TYPE_BUTTON_RELEASE = "button_release"    # Taste losgelassen (vom RX11)
 TRIGGER_TYPE_CHANNEL_ON = "channel_on"            # Kanal eingeschaltet (1-Tast Dauer)
 TRIGGER_TYPE_CHANNEL_OFF = "channel_off"          # Kanal ausgeschaltet (1-Tast Dauer)
 
-# Schema for triggers
+# Gateway connection status triggers
+TRIGGER_TYPE_GATEWAY_CONNECTED = "gateway_connected"
+TRIGGER_TYPE_GATEWAY_DISCONNECTED = "gateway_disconnected"
+
+# Schema for transmitter button triggers
 CONF_SUBTYPE = "subtype"
 
-TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
+TRANSMITTER_TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
     {
         vol.Required(CONF_TYPE): vol.In(
             [
@@ -51,6 +60,22 @@ TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
         vol.Required(CONF_SUBTYPE): str,
     }
 )
+
+# Schema for gateway triggers (no subtype needed)
+GATEWAY_TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
+    {
+        vol.Required(CONF_TYPE): vol.In(
+            [
+                TRIGGER_TYPE_GATEWAY_CONNECTED,
+                TRIGGER_TYPE_GATEWAY_DISCONNECTED,
+            ]
+        ),
+        vol.Optional(CONF_SUBTYPE): str,
+    }
+)
+
+# Combined schema for validation
+TRIGGER_SCHEMA = vol.Any(TRANSMITTER_TRIGGER_SCHEMA, GATEWAY_TRIGGER_SCHEMA)
 
 
 def _get_device_info_for_serial(hass: HomeAssistant, serial_number: str) -> dict[str, Any] | None:
@@ -198,9 +223,24 @@ async def async_get_triggers(
     if not serial_number:
         return []
     
-    # Skip gateway device - it's not a transmitter and has no triggers
+    # Gateway device gets connection status triggers
     if serial_number.endswith("_gateway"):
-        return []
+        return [
+            {
+                CONF_PLATFORM: "device",
+                CONF_DOMAIN: DOMAIN,
+                CONF_DEVICE_ID: device_id,
+                CONF_TYPE: TRIGGER_TYPE_GATEWAY_CONNECTED,
+                CONF_SUBTYPE: "connected",
+            },
+            {
+                CONF_PLATFORM: "device",
+                CONF_DOMAIN: DOMAIN,
+                CONF_DEVICE_ID: device_id,
+                CONF_TYPE: TRIGGER_TYPE_GATEWAY_DISCONNECTED,
+                CONF_SUBTYPE: "disconnected",
+            },
+        ]
     
     device_info = _get_device_info_for_serial(hass, serial_number)
     if not device_info:
@@ -308,7 +348,29 @@ async def async_attach_trigger(
         return lambda: None
     
     trigger_type = config[CONF_TYPE]
-    subtype_label = config[CONF_SUBTYPE]
+    subtype_label = config.get(CONF_SUBTYPE, "")
+    
+    # Handle gateway connection triggers
+    if trigger_type in (TRIGGER_TYPE_GATEWAY_CONNECTED, TRIGGER_TYPE_GATEWAY_DISCONNECTED):
+        event_type = EVENT_GATEWAY_CONNECTED if trigger_type == TRIGGER_TYPE_GATEWAY_CONNECTED else EVENT_GATEWAY_DISCONNECTED
+        
+        event_config = event_trigger.TRIGGER_SCHEMA(
+            {
+                event_trigger.CONF_PLATFORM: "event",
+                event_trigger.CONF_EVENT_TYPE: event_type,
+            }
+        )
+        
+        _LOGGER.info(
+            "Attaching gateway trigger: type=%s, event=%s",
+            trigger_type, event_type
+        )
+        
+        return await event_trigger.async_attach_trigger(
+            hass, event_config, action, trigger_info
+        )
+    
+    # Handle transmitter button triggers
     device_info = _get_device_info_for_serial(hass, serial_number)
     trigger_map = dict(_get_transmitter_trigger_map(device_info, serial_number))
     button_name = trigger_map.get(subtype_label, subtype_label)
