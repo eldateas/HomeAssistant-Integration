@@ -477,6 +477,7 @@ class RxModule:
         self._serial: Optional[serial.Serial] = None
         self._connected = False
         self._shutdown_requested = False
+        self._is_reconnecting = False  # Flag to track if we're in a reconnect sequence
         
         # Request queues
         self._tx_req_queued: list[Optional[Request]] = [None] * self.MAX_REQUEST_QUEUED
@@ -505,8 +506,11 @@ class RxModule:
         self._cancel_tolerance_until: float = 0.0  # timestamp until which to tolerate unknown handles
         
         # Startup tolerance - ignore decode errors during initial connection phase
+        # After initial connect: 2 seconds
+        # After reconnect: 10 seconds (more garbage data on the line)
         self._startup_tolerance_until: float = 0.0  # timestamp until which to tolerate decode errors
-        self._startup_tolerance_duration: float = 2.0  # seconds to tolerate startup noise
+        self._startup_tolerance_duration: float = 2.0  # seconds to tolerate startup noise on initial connect
+        self._reconnect_startup_tolerance_duration: float = 10.0  # longer tolerance after reconnect
         
         # RX state
         self._rx_sop = False
@@ -624,8 +628,17 @@ class RxModule:
             # Reset RX state
             self._reset_rx_state()
             
-            # Set startup tolerance period - ignore decode errors during this time
-            self._startup_tolerance_until = time.time() + self._startup_tolerance_duration
+            # Aggressive buffer clearing to remove any garbage from previous connection
+            # This is especially important after a USB disconnect/reconnect
+            self._serial.reset_input_buffer()
+            self._serial.reset_output_buffer()
+            # Note: Second buffer clear is done in wrapper.py after connect() to avoid blocking event loop
+            
+            # Set startup tolerance period based on whether this is initial connect or reconnect
+            # Use longer tolerance after reconnect because there's more garbage on the line
+            tolerance_duration = (self._reconnect_startup_tolerance_duration if self._is_reconnecting 
+                                 else self._startup_tolerance_duration)
+            self._startup_tolerance_until = time.time() + tolerance_duration
             
             # Reset health state
             with self._protocol_lock:
@@ -635,10 +648,6 @@ class RxModule:
                 self._last_error = None
                 self._last_successful_communication = time.time()
                 self._reconnect_attempts = 0
-            
-            # Clear any existing data
-            self._serial.reset_input_buffer()
-            self._serial.reset_output_buffer()
             
             # Start serial handler thread
             self._serial_handler_thread = threading.Thread(
@@ -725,6 +734,9 @@ class RxModule:
         """
         
         _LOGGER.warning("Connection lost - attempting reconnect...")
+        # Set flag to use extended startup tolerance after reconnect
+        self._is_reconnecting = True
+        
         # Notify disconnect callback
         self._notify_disconnect()
         self.cancel_all_io_request()
@@ -734,14 +746,15 @@ class RxModule:
             try:
                 self._serial.close()
 
-                # Reset buffers before closing
+                # Reset buffers before closing to clear any pending data
                 self._serial.reset_input_buffer()
                 self._serial.reset_output_buffer()
             except Exception:
                 pass
             
-            # Allow time for serial port to be released by OS
-            time.sleep(0.1)
+            # Allow time for serial port to be released by OS and any pending hardware
+            # to flush completely
+            time.sleep(0.2)
             self._serial = None
         
         # Reset connection state
@@ -774,11 +787,15 @@ class RxModule:
                 self.port = new_port
                 
                 if self.connect():
+                    # Clear reconnect flag after successful connect
+                    self._is_reconnecting = False
                     _LOGGER.info("✅ Reconnect successful on new port %s!", self.port)
                     # Notify reconnect callback to restart receive loops
                     self._notify_reconnect()
                     return True
         
+        # Clear flag after failed reconnect attempts (will retry with flag set again)
+        self._is_reconnecting = False
         return False
     
     def _check_connection_health(self):
@@ -1206,18 +1223,23 @@ class RxModule:
                 _LOGGER.warning("Failed to decode packet (len=%d, hex=%s)", 
                               len(raw_buffer), raw_buffer.hex()[:80])
             
-            # Important: If we have a request waiting in the sent queue, we must handle it
-            # to prevent deadlock. This can happen during startup noise or corrupt packets.
-            # But only if we're NOT in startup tolerance period (during startup, no requests should be pending)
-            if not in_startup and self._tx_req_sent_size > 0:
+            # CRITICAL: Don't automatically consume sent requests for decode errors!
+            # If we do, we'll lose sync - the next valid ICP will be assigned to the wrong request.
+            # Only dequeue if:
+            # 1. We're OUTSIDE startup period (real error, not garbage)
+            # 2. We have NO pending requests (indicates we haven't gotten any ICPs yet, so corruption is clear)
+            # 3. We have requests in the sent queue
+            if not in_startup and self._tx_req_sent_size > 0 and len(self._req_pending) == 0:
+                # Log the desynchronization
+                _LOGGER.error(
+                    "RED FLAG: Received corrupt packet with pending requests queued. "
+                    "This indicates packet loss (len=%d). Failing oldest sent request to recover sync.",
+                    len(raw_buffer)
+                )
                 req = self._dequeue_sent()
                 if req:
-                    _LOGGER.warning("Clearing request '%s' due to undecoded packet to prevent deadlock", req.req_str)
-                    # Complete request with error
-                    req.error = "Failed to decode response packet"
-                    req.done = True
-                    # Signal the event so waiting code can continue
-                    req.icp = ICP(handle=0, result=ErrorCode.ERR_INVALID_REQUEST)
+                    # Fail the request
+                    req.icp = ICP(handle=0, result=ErrorCode.ERR_FAILSTATE)
                     req.signal()
             return
         

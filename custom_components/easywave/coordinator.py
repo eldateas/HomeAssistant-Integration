@@ -38,7 +38,10 @@ from .transceivers import TransceiverFactory, TransceiverType, BaseTransceiver
 from .device_config import DeviceConfigManager
 from .device_manager import DeviceManager, ManagedDevice, DeviceAvailability, DeviceType
 from .device_migration import migrate_to_device_manager
+from .device_lifecycle import DeviceLifecycleManager, DeviceLifecycleStateEnum
+from .state_manager import StateManager
 from .entity_specs import create_entity_specs_for_device
+from .helpers_unique_id import make_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,9 +68,14 @@ class EldatCoordinator(DataUpdateCoordinator):
         # Use new DeviceManager from DeviceConfigManager
         self.device_manager = self.device_config_manager.device_manager
         
+        # Initialize Device Lifecycle Manager for structured lifecycle management
+        self.device_lifecycle_manager = DeviceLifecycleManager(hass)
+        
         # Central registered device management - only these devices will be managed
         self._registered_devices: Dict[str, Dict[str, Any]] = {}
         self._registered_devices_file = f"{hass.config.config_dir}/eldat/registered_devices.json"
+        # STRUCTURAL SAFEGUARD: Track entity counts from last save to detect mass entity loss
+        self._last_saved_entity_counts: Dict[str, int] = {}
         
         # EWB Index Tracking - Persistent storage of used EWB indices
         self._used_ewb_indices: Dict[int, Dict[str, Any]] = {}  # {index: {gateway_serial, device_serial, device_name, created_at}}
@@ -84,10 +92,11 @@ class EldatCoordinator(DataUpdateCoordinator):
         # EWneo sensor naming index (EWneo-Sensor #N)
         self._next_ewneo_sensor_index: int = 1
         
-        # Device registration will happen during async_setup
-        
-        # Global entity tracking to prevent duplicates across all platforms
-        self.created_entity_unique_ids: Set[str] = set()
+        # Entity persistence manager for dashboard entities
+        self.state_manager = StateManager(
+            hass, 
+            config_entry.entry_id
+        )
         
         # Device backup system for restoration
         self._device_backup: Dict[str, Dict[str, Any]] = {}
@@ -394,6 +403,29 @@ class EldatCoordinator(DataUpdateCoordinator):
                         self._next_free_ewb_index = self._find_next_free_ewb_index() if self._used_ewb_indices else 0
                         _LOGGER.info("📋 Loaded %d used EWB indices from registered_devices.json (next free: %d)", 
                                    len(self._used_ewb_indices), self._next_free_ewb_index)
+                        
+                        # Also restore indices from device list if not already tracked
+                        # This handles migration from old storage format
+                        devices = data.get('devices', {})
+                        for serial, device_info in devices.items():
+                            if device_info.get('neo_device') and 'ewneo_index' in device_info:
+                                ewneo_index = device_info['ewneo_index']
+                                # Only add if not already tracked (avoid duplicates)
+                                if ewneo_index not in self._used_ewb_indices:
+                                    gateway_serial = device_info.get('gateway_serial')
+                                    self._used_ewb_indices[ewneo_index] = {
+                                        'gateway_serial': gateway_serial,
+                                        'device_serial': serial,
+                                        'device_name': device_info.get('name', f'EWneo Device {serial[-8:]}'),
+                                        'created_at': device_info.get('registered_at', datetime.now().isoformat())
+                                    }
+                                    _LOGGER.info("🔄 Restored EWB index %d from device list: %s (gateway: %s)", 
+                                               ewneo_index, serial[-8:], gateway_serial[-8:] if gateway_serial else "N/A")
+                        
+                        if self._used_ewb_indices:
+                            self._next_free_ewb_index = self._find_next_free_ewb_index()
+                            _LOGGER.info("📍 After restoration: %d used EWB indices, next free: %d", 
+                                       len(self._used_ewb_indices), self._next_free_ewb_index)
                         return
             
             # Migration: Load from old separate file if it exists
@@ -442,7 +474,29 @@ class EldatCoordinator(DataUpdateCoordinator):
                         self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index() if self._used_ew_receiver_indices else 0
                         _LOGGER.info("📋 Loaded %d used Easywave Receiver indices from registered_devices.json (next free: %d)", 
                                    len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
-                        return
+                    
+                    # Also restore indices from device list if not already tracked
+                    # This handles migration from old storage format
+                    devices = data.get('devices', {})
+                    for serial, device_info in devices.items():
+                        if device_info.get('type') == 'ew_receiver' and 'rx11_index' in device_info:
+                            rx11_index = device_info['rx11_index']
+                            # Only add if not already tracked (avoid duplicates)
+                            if rx11_index not in self._used_ew_receiver_indices:
+                                self._used_ew_receiver_indices[rx11_index] = {
+                                    'receiver_serial': device_info.get('serial_number', serial),
+                                    'device_serial': serial,
+                                    'device_name': device_info.get('name', f'Easywave Receiver {serial[-8:]}'),
+                                    'created_at': device_info.get('registered_at', datetime.now().isoformat())
+                                }
+                                _LOGGER.info("🔄 Restored EW Receiver index %d from device list: %s", 
+                                           rx11_index, serial[-8:])
+                    
+                    if self._used_ew_receiver_indices:
+                        self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
+                        _LOGGER.info("📍 After restoration: %d used indices, next free: %d", 
+                                   len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
+                    return
             
             # Migration: Load from old separate file if it exists
             if os.path.exists(self._ew_receiver_indices_file):
@@ -552,6 +606,12 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     self._registered_devices = loaded_devices
                     
+                    # Initialize entity count tracking from loaded state
+                    self._last_saved_entity_counts = {
+                        serial: len(info.get("entities", []))
+                        for serial, info in loaded_devices.items()
+                    }
+                    
                     # Rebuild used_ewb_indices from device data to fix inconsistencies
                     # This ensures all EWneo devices are properly tracked
                     indices_from_devices = {}
@@ -635,19 +695,22 @@ class EldatCoordinator(DataUpdateCoordinator):
     async def _cleanup_old_entities_for_device(self, serial_number: str) -> None:
         """Clean up old entities for a device that is being re-learned.
         
-        This removes all entities whose unique_id contains the serial_number,
+        This removes all entities whose unique_id starts with the serial_number,
         ensuring that re-learning creates fresh entities without old logbook entries.
         Also clears old sensor values and state history.
+        
+        Uses startswith() instead of substring matching to prevent
+        accidental removal of entities from other devices.
         """
         try:
             from homeassistant.helpers import entity_registry as er
             
             entity_registry = er.async_get(self.hass)
             
-            # Find all entities for this device (check if serial is anywhere in unique_id)
+            # Find all entities for this device (use startswith to avoid false-matches)
             entities_to_remove = []
             for entity_id, entry in entity_registry.entities.items():
-                if entry.unique_id and serial_number in entry.unique_id:
+                if entry.unique_id and entry.unique_id.startswith(serial_number):
                     # Check if this entity belongs to our domain
                     if entry.platform == DOMAIN:
                         entities_to_remove.append((entity_id, entry.unique_id))
@@ -662,6 +725,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                 for entity_id, unique_id in entities_to_remove:
                     entity_ids_for_purge.append(entity_id)
                     entity_registry.async_remove(entity_id)
+                    # Also clear from entity creation tracking so re-learned entities
+                    # are not skipped as "already created"
+                    self.state_manager.unmark_entity_deleted(unique_id)
                     _LOGGER.debug("  - Removed entity: %s (unique_id: %s)", entity_id, unique_id[-20:])
                 
                 # Try to purge history/recorder data for these entities
@@ -846,6 +912,14 @@ class EldatCoordinator(DataUpdateCoordinator):
             old_id = device_info.pop('config_entry_id')
             _LOGGER.debug("Cleaned old config_entry_id %s from device info", old_id[-8:] if old_id else "None")
         
+        # Remove disabled flag to allow re-activated devices to come back online
+        # This ensures that if a device was disabled, deleted, and re-learned,
+        # it will not stay disabled after re-registration
+        if 'disabled' in device_info:
+            was_disabled = device_info.pop('disabled')
+            if was_disabled:
+                _LOGGER.debug("Cleaned disabled flag from device info - device will be enabled on re-registration")
+        
         # Entferne auch andere problematische Felder, die nicht persistiert werden sollten
         problematic_fields = ['via_device', 'config_subentry_id']
         for field in problematic_fields:
@@ -882,12 +956,41 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.error("❌ Error during index file cleanup: %s", e)
     
     async def _save_registered_devices(self) -> None:
-        """Save registered devices to persistent storage."""
+        """Save registered devices to persistent storage.
+        
+        STRUCTURAL SAFEGUARD: Before writing, validates that no device has 
+        unexpectedly lost its entities compared to the last saved state.
+        If widespread entity loss is detected, the save is aborted to prevent
+        persisting corrupted data.
+        """
         import json
         import aiofiles
         import os
         try:
             os.makedirs(os.path.dirname(self._registered_devices_file), exist_ok=True)
+            
+            # ═══ ENTITY INTEGRITY CHECK ═══
+            # Compare current entity counts with last-saved state to detect mass entity loss.
+            # If many devices have lost entities, something went wrong — abort saving.
+            if hasattr(self, '_last_saved_entity_counts') and self._last_saved_entity_counts:
+                devices_with_loss = 0
+                for serial, device_info in self._registered_devices.items():
+                    old_count = self._last_saved_entity_counts.get(serial, 0)
+                    new_count = len(device_info.get("entities", []))
+                    # A device that previously had entities but now has none is suspicious
+                    if old_count > 0 and new_count == 0:
+                        devices_with_loss += 1
+                        _LOGGER.warning("⚠️ ENTITY LOSS DETECTED: Device %s had %d entities, now has 0", 
+                                       serial[-8:], old_count)
+                
+                MAX_ACCEPTABLE_LOSS = 3  # Allow up to 3 devices losing entities (re-learning, deletion)
+                if devices_with_loss > MAX_ACCEPTABLE_LOSS:
+                    _LOGGER.error(
+                        "🛑 SAVE ABORTED: %d devices lost ALL entities — this indicates a bug! "
+                        "Refusing to persist corrupted data. Last saved state is preserved.",
+                        devices_with_loss
+                    )
+                    return
             
             # Deep copy devices and convert sets to lists for JSON serialization
             serializable_devices = {}
@@ -926,6 +1029,12 @@ class EldatCoordinator(DataUpdateCoordinator):
             content = json.dumps(data, indent=2, ensure_ascii=False)
             async with aiofiles.open(self._registered_devices_file, 'w', encoding='utf-8') as f:
                 await f.write(content)
+            
+            # Update entity count tracking after successful save
+            self._last_saved_entity_counts = {
+                serial: len(info.get("entities", []))
+                for serial, info in self._registered_devices.items()
+            }
                 
             _LOGGER.info("💾 Saved %d registered devices to storage", len(self._registered_devices))
         except Exception as e:
@@ -1006,29 +1115,62 @@ class EldatCoordinator(DataUpdateCoordinator):
         return None
     
     async def register_device_permanently(self, serial_number: str, device_info: Dict[str, Any]) -> bool:
-        """Register a device for permanent management."""
+        """Register a device for permanent management.
+        
+        KONSISTENZ-SAFEGUARD: Überschreibe NICHT die registration_id bei Neustarts!
+        Ein bereits registriertes Gerät soll die gleiche registration_id behalten,
+        damit die Entity-IDs und Unique-IDs über Neustarts hinweg stabil bleiben.
+        """
         try:
+            # LOG the exact input before any processing
+            _LOGGER.debug("📋 register_device_permanently: serial=%s, detected_button_type=%s",
+                           serial_number[-8:], device_info.get("detected_button_type"))
+            
+            # WICHTIG: Nur neue registration_id setzen wenn Gerät NOCH NICHT bekannt ist
+            # Bei Neustarts wird das Gerät bereits in _registered_devices geladen,
+            # also wird diese Stelle nicht erreicht
+            if serial_number not in self._registered_devices:
+                # Neues Gerät - setze neue registration_id
+                device_info['registration_id'] = str(int(datetime.now().timestamp() * 1000))
+                _LOGGER.debug("📝 Assigned new registration_id to device %s", serial_number[-8:])
+            else:
+                # Bekanntes Gerät beim Neustart - BEHALTE alte registration_id
+                existing_info = self._registered_devices[serial_number]
+                if existing_info.get('registration_id'):
+                    device_info['registration_id'] = existing_info['registration_id']
+                    _LOGGER.debug("📝 Preserved registration_id for device %s (%s) on startup", 
+                                 serial_number[-8:], device_info['registration_id'][:6])
+                else:
+                    # Fallback: wenn keine registration_id existiert, erstelle neue
+                    device_info['registration_id'] = str(int(datetime.now().timestamp() * 1000))
+                    _LOGGER.warning("⚠️ Generated new registration_id for device %s (had no previous ID)", 
+                                   serial_number[-8:])
+            
             # Add metadata
             device_info['registered_at'] = datetime.now().isoformat()
-            # Generate unique registration_id for new entities (ensures fresh unique_ids on re-learning)
-            # Uses timestamp in milliseconds for uniqueness
-            device_info['registration_id'] = str(int(datetime.now().timestamp() * 1000))
             device_info.setdefault('serial_number', serial_number)
             # NICHT speichern: config_entry_id wird beim Entity-Setup automatisch gesetzt
             # device_info['config_entry_id'] = self.config_entry.entry_id
 
-            # Clean up old entities from previous registrations of the same device
-            # This ensures re-learning creates fresh entities without old logbook entries
-            await self._cleanup_old_entities_for_device(serial_number)
+            # WICHTIG: Nur cleanup bei echtem Re-Learning (nicht bei Neustart)
+            # Bei Neustart ist device_info bereits in _registered_devices geladen
+            # Bei Re-Learning wird es nicht geladen (oder kommt von Discovery)
+            is_new_device = serial_number not in self._registered_devices
+            is_relearned_device = serial_number in self._registered_devices and device_info.get('re_learn', False)
+            
+            if is_new_device or is_relearned_device:
+                # Cleanup old entities from previous registrations
+                # This ensures re-learning creates fresh entities without old logbook entries
+                await self._cleanup_old_entities_for_device(serial_number)
             
             # IMPORTANT: Clear old measurement values from device_info itself
             # These may have been carried over from the learning telegram or old data
             measurement_keys = ["temperature", "humidity", "battery_level", "last_telegram",
-                               "last_seen", "sensor_values", "last_reading"]
+                               "last_seen", "sensor_values", "last_reading", "disabled"]
             for key in measurement_keys:
                 if key in device_info:
                     del device_info[key]
-            _LOGGER.debug("🧹 Cleared old measurement values from device_info for %s", serial_number[-8:])
+            _LOGGER.debug("🧹 Cleared old measurement values and disabled flag from device_info for %s", serial_number[-8:])
 
             # Assign default names if needed
             self._ensure_default_sender_name(device_info)
@@ -1038,9 +1180,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             # 1. Correct platforms are assigned
             # 2. registration_id suffix is added to unique_ids (prevents duplicate entities)
             device_type = device_info.get("type")
-            if device_type in ["ew_transmitter", "ewneo_sensor", "ew_sensor"]:
-                _LOGGER.debug("🔄 Regenerating entity specs for %s (type=%s, registration_id=%s)", 
-                             serial_number[-8:], device_type, device_info.get("registration_id"))
+            if device_type in ["ew_transmitter", "ewneo_sensor", "ew_sensor", "ew_receiver"]:
+                _LOGGER.debug("Regenerating entity specs for %s (type=%s, detected_button_type=%s)", 
+                             serial_number[-8:], device_type, device_info.get("detected_button_type"))
                 device_info = await self._regenerate_entity_specs(serial_number, device_info)
             
             # Store in registered devices list
@@ -1375,6 +1517,47 @@ class EldatCoordinator(DataUpdateCoordinator):
         """Get all used Easywave Receiver indices with their device information."""
         return self._used_ew_receiver_indices.copy()
     
+    async def _sync_device_manager_from_registered(self) -> None:
+        """Ensure DeviceManager whitelist matches _registered_devices.
+        
+        _registered_devices (registered_devices.json) is the authoritative source.
+        Any device in _registered_devices that is missing from DeviceManager is added.
+        Any device in DeviceManager that is NOT in _registered_devices is removed.
+        This prevents the two stores from drifting apart and causing data loss.
+        """
+        synced_count = 0
+        removed_count = 0
+        
+        registered_serials = set(self._registered_devices.keys())
+        dm_serials = set(self.device_manager.get_all_devices().keys())
+        
+        # Add devices that are in _registered_devices but missing from DeviceManager
+        missing_from_dm = registered_serials - dm_serials
+        for serial in missing_from_dm:
+            device_info = self._registered_devices[serial]
+            self.device_manager.add_device(
+                serial_number=serial,
+                device_type=device_info.get("device_type", device_info.get("type", "unknown")),
+                name=device_info.get("name", f"Device {serial}"),
+                rx11_index=device_info.get("rx11_index"),
+                area=device_info.get("area"),
+            )
+            synced_count += 1
+        
+        # Remove devices that are in DeviceManager but NOT in _registered_devices
+        orphaned_in_dm = dm_serials - registered_serials
+        for serial in orphaned_in_dm:
+            self.device_manager.remove_device(serial)
+            removed_count += 1
+        
+        if synced_count > 0 or removed_count > 0:
+            await self.device_manager.save()
+            _LOGGER.info("🔄 DeviceManager sync: added %d, removed %d (now matches _registered_devices)", 
+                        synced_count, removed_count)
+        else:
+            _LOGGER.debug("DeviceManager already in sync with _registered_devices (%d devices)", 
+                         len(registered_serials))
+
     async def _sync_ewb_indices_with_wrapper(self) -> None:
         """Synchronize EWB index tracking between coordinator and transceiver wrapper."""
         if not hasattr(self.transceiver, '_rx11_wrapper') or not self.transceiver._rx11_wrapper:
@@ -1438,88 +1621,70 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
         _LOGGER.info("🔄 Synchronized %d Easywave Receiver indices from coordinator to wrapper and device_manager", len(self._used_ew_receiver_indices))
 
-    async def unregister_device_permanently(self, serial_number: str) -> bool:
-        """Permanently remove device from all systems including DeviceManager."""
+    async def _unregister_device_internal(self, serial_number: str) -> bool:
+        """Internal: Permanently remove device from all systems.
+        
+        This is the core removal logic handling:
+        1. Get device info for cleanup references
+        2. Remove from HA registries (entities + device)
+        3. Remove from _registered_devices (authoritative source)
+        4. Remove from legacy dicts (self.devices, _known_devices)
+        5. Remove from DeviceManager whitelist
+        6. Device-specific cleanup (RX11, EWneo, etc.)
+        7. Save all persistent stores
+        
+        Note: For public removal, use async_remove_device() instead.
+        """
         try:
             # Get device info before removal for cleanup
             device_info = self._registered_devices.get(serial_number) or self.devices.get(serial_number)
             if not device_info:
-                _LOGGER.warning("⚠️ Device %s not found in registered list", serial_number[-8:])
-                # Try to clean up orphaned entities anyway
+                _LOGGER.warning("⚠️ Device %s not found in any tracking dict", serial_number[-8:])
+                # Try to clean up orphaned entries anyway
                 await self._remove_from_ha_registry(serial_number, {})
-                
-                # Still try to remove from DeviceManager
                 if self.device_manager.is_whitelisted(serial_number):
                     self.device_manager.remove_device(serial_number)
                     await self.device_manager.save()
-                    _LOGGER.info("✅ Removed orphaned device from DeviceManager")
-                
                 return False
             
             device_name = device_info.get('name', serial_number[-8:])
-            _LOGGER.info("🗑️ Starting permanent removal of device: %s (%s)", device_name, serial_number[-8:])
+            device_type = device_info.get("type", "unknown")
+            _LOGGER.info("🗑️ Permanently removing device: %s (%s, type=%s)", 
+                        device_name, serial_number[-8:], device_type)
             
-            # Step 1: Remove from DeviceManager (whitelist - single source of truth)
-            _LOGGER.info("  Step 1/7: Removing from DeviceManager (whitelist)...")
-            if self.device_manager.is_whitelisted(serial_number):
-                self.device_manager.remove_device(serial_number)
-                await self.device_manager.save()
-                _LOGGER.info("  ✅ Removed from DeviceManager whitelist")
-            else:
-                _LOGGER.info("  ℹ️ Device not in DeviceManager whitelist")
-            
-            # Step 2: Remove from Home Assistant registries (entities and device)
-            _LOGGER.info("  Step 2/7: Removing from HA registries...")
+            # Step 1: Remove from HA registries (entities and device entry)
             await self._remove_from_ha_registry(serial_number, device_info)
             
-            # Step 3: Remove from registered devices
-            _LOGGER.info("  Step 3/7: Removing from registered devices...")
+            # Step 2: Remove from _registered_devices (authoritative source)
             if serial_number in self._registered_devices:
                 del self._registered_devices[serial_number]
                 self._recompute_next_sender_index()
-                if device_info.get("type") in ("ew_sensor", "ewneo_sensor"):
+                if device_type in ("ew_sensor", "ewneo_sensor"):
                     self._recompute_next_ewneo_sensor_index()
             
-            # Step 4: Remove from legacy dicts
-            _LOGGER.info("  Step 4/7: Removing from legacy dicts...")
-            if serial_number in self.devices:
-                del self.devices[serial_number]
+            # Step 3: Remove from legacy in-memory dicts
+            self.devices.pop(serial_number, None)
             self._known_devices.discard(serial_number)
-            
-            # Step 5: Remove from DeviceManager
-            _LOGGER.info("  Step 5/7: Removing from DeviceManager...")
-            if self.device_manager.remove_device(serial_number):
-                await self.device_manager.save()
-                _LOGGER.info("    ✅ Removed from DeviceManager")
-            
-            # Remove from fired events tracking (allow re-registration if needed)
             self._devices_with_fired_events.discard(serial_number)
             
-            # Step 6: Perform device-specific cleanup (RX11, etc.)
-            _LOGGER.info("  Step 6/7: Device-specific cleanup...")
-            device_type = device_info.get("type", "unknown")
-            neo_device = device_info.get("neo_device", False)
-            _LOGGER.info("  Device type for cleanup: %s (neo_device flag: %s)", device_type, neo_device)
+            # Step 4: Remove from DeviceManager whitelist
+            if self.device_manager.is_whitelisted(serial_number):
+                self.device_manager.remove_device(serial_number)
             
-            # Check if this is an EWneo device using multiple indicators
+            # Step 5: Device-specific cleanup (RX11, EWneo, etc.)
             is_ewneo = self._is_ewneo_device(device_type, device_info)
-            
             if device_type == "ew_receiver":
                 await self._cleanup_rx11_device(serial_number, device_info)
             elif is_ewneo:
-                # Clean up all EWneo devices (switch, motor, dimmer, etc.)
-                # These include: ewneo_switch, ewneo_motor, ewneo_dimmer, ewneo_sensor, etc.
-                _LOGGER.info("  Device identified as EWneo - sending EWB_REMOVE_DEVICE...")
+                _LOGGER.info("  EWneo device - sending EWB_REMOVE_DEVICE...")
                 await self._cleanup_ewneo_device(serial_number, device_info)
-            else:
-                _LOGGER.info("  No specific cleanup needed for device type: %s", device_type)
             
-            # Step 7: Save changes to all storage systems
-            _LOGGER.info("  Step 7/7: Saving configuration...")
+            # Step 6: Save all persistent stores
             await self._save_registered_devices()
+            await self.device_manager.save()
             await self._save_device_configuration()
             
-            _LOGGER.info("✅ Device %s permanently unregistered from all systems (7/7 steps complete)", device_name)
+            _LOGGER.info("✅ Device %s permanently removed from all systems", device_name)
             return True
             
         except Exception as e:
@@ -1527,47 +1692,60 @@ class EldatCoordinator(DataUpdateCoordinator):
             return False
     
     async def restore_registered_devices_only(self) -> None:
-        """Restore ONLY registered devices at startup - ignore others."""
+        """Restore ONLY registered devices at startup - ignore others.
+        
+        IMPORTANT: _registered_devices (registered_devices.json) is the single source
+        of truth. Devices in _registered_devices that are NOT in DeviceManager are
+        synced INTO DeviceManager (not removed). This prevents data loss when
+        managed_devices.json gets out of sync.
+        """
         _LOGGER.info("🔄 Restoring %d registered devices from persistent storage", 
                    len(self._registered_devices))
         
-        # Clear any existing devices first
+        # Clear any existing in-memory devices first
         self.devices.clear()
         self._known_devices.clear()
         
         restored_count = 0
-        orphaned_devices = []  # Track devices without HA entities
-        removed_devices = []  # Track devices not in whitelist
+        synced_to_dm_count = 0
         
-        for serial_number, device_info in self._registered_devices.items():
+        for serial_number, device_info in list(self._registered_devices.items()):
             try:
-                # CRITICAL: Only restore devices that are in DeviceManager whitelist
-                if not self.device_manager.is_whitelisted(serial_number):
-                    removed_devices.append(serial_number)
-                    _LOGGER.warning("⚠️ Skipping device %s - not in DeviceManager whitelist (was removed)", 
-                                  serial_number[-8:])
-                    continue
-                
                 # Normalize device type fields (handle both 'type' and 'device_type')
                 device_type = device_info.get('type') or device_info.get('device_type')
                 if device_type and 'type' not in device_info:
                     device_info['type'] = device_type
                 
-                # Validate device info
+                # Validate device info - skip truly invalid entries
                 if not device_info.get('name') or not device_info.get('type'):
-                    _LOGGER.warning("⚠️ Skipping invalid registered device %s", serial_number[-8:])
+                    _LOGGER.warning("⚠️ Skipping invalid registered device %s (missing name or type)", 
+                                  serial_number[-8:])
                     continue
+                
+                # SYNC: If device is in _registered_devices but NOT in DeviceManager,
+                # add it to DeviceManager instead of removing it. _registered_devices
+                # is the authoritative source.
+                if not self.device_manager.is_whitelisted(serial_number):
+                    _LOGGER.info("🔄 Syncing device %s (%s) into DeviceManager (was missing from whitelist)", 
+                               serial_number[-8:], device_info.get('name'))
+                    self.device_manager.add_device(
+                        serial_number=serial_number,
+                        device_type=device_info.get("device_type", device_info.get("type", "unknown")),
+                        name=device_info.get("name", f"Device {serial_number}"),
+                        rx11_index=device_info.get("rx11_index"),
+                        area=device_info.get("area"),
+                    )
+                    synced_to_dm_count += 1
                 
                 # Regenerate entity specs to ensure entities list is present
                 device_info = await self._regenerate_entity_specs(serial_number, device_info)
                 
-                # Restore to legacy devices dict for platform compatibility
+                # Update _registered_devices with regenerated info
+                self._registered_devices[serial_number] = device_info
+                
+                # Populate legacy devices dict for platform compatibility
                 self.devices[serial_number] = device_info
                 self._known_devices.add(serial_number)
-                
-                # Note: homeassistant_device_id and homeassistant_entities are populated
-                # during entity creation by HA's entity platform, not during device registration.
-                # This is normal - entities will be created by platform setup.
                 
                 restored_count += 1
                 _LOGGER.debug("✅ Restored registered device: %s (%s)", 
@@ -1576,28 +1754,38 @@ class EldatCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 _LOGGER.error("❌ Failed to restore device %s: %s", serial_number[-8:], e)
         
-        # Clean up removed devices from _registered_devices
-        if removed_devices:
-            for serial in removed_devices:
-                del self._registered_devices[serial]
+        # Save DeviceManager if we synced devices into it
+        if synced_to_dm_count > 0:
+            await self.device_manager.save()
+            _LOGGER.info("🔄 Synced %d devices into DeviceManager whitelist", synced_to_dm_count)
+        
+        # Persist any entity spec regenerations done during restore
+        if restored_count > 0:
             await self._save_registered_devices()
-            _LOGGER.info("🧹 Cleaned up %d devices not in whitelist from registered_devices", len(removed_devices))
         
-        # Clean up orphaned devices from HA Device Registry that are not in whitelist
-        await self._cleanup_orphaned_ha_devices()
+        # DO NOT cleanup orphaned devices at startup - it's too risky and causes data loss
+        # Cleanup is ONLY called during integration unload (async_unload_entry in __init__.py)
+        # to completely remove all associated devices when the user removes the integration
+        _LOGGER.debug("ℹ️ Skipping orphan device cleanup at startup (disabled for safety - only runs on unload)")
         
-        _LOGGER.info("✅ Restored %d/%d registered devices - ignoring all others", 
+        _LOGGER.info("✅ Restored %d/%d registered devices", 
                    restored_count, len(self._registered_devices))
         
         # Events will be fired by fire_pending_device_events() after platform setup
-        # No need to store pending events - fire_pending_device_events uses self.devices directly
-        # and tracks already-fired events to prevent duplicates
 
-    async def _cleanup_orphaned_ha_devices(self) -> None:
-        """Clean up devices from HA Device Registry that are not in our whitelist.
+    async def _cleanup_orphaned_ha_devices(self, manual_call: bool = False) -> None:
+        """Clean up devices from HA Device Registry that are not in _registered_devices.
         
-        This handles the case where a device was deleted but the HA Device Registry
-        still has the device entry (e.g., from previous sessions).
+        This should ONLY be called during integration unload (@async_unload_entry).
+        Never call during startup or normal operation - it causes data loss.
+        
+        SAFETY: Only removes devices that are in NEITHER _registered_devices NOR DeviceManager.
+        Has a safety limit of 5 devices per cleanup pass.
+        
+        Args:
+            manual_call: If True, bypasses device count check. Only set to True during 
+                        integration unload. If False (default), skips cleanup if fewer 
+                        than 10 devices are loaded (prevents accidental deletion at startup).
         """
         try:
             import homeassistant.helpers.device_registry as dr
@@ -1608,8 +1796,32 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             devices_to_remove = []
             
+            # Safety check: don't cleanup if BOTH _registered_devices AND DeviceManager are empty
+            # (could indicate a loading failure)
+            has_registered_devices = bool(self._registered_devices)
+            has_managed_devices = bool(self.device_manager and self.device_manager.get_all_devices())
+            
+            if not has_registered_devices and not has_managed_devices:
+                _LOGGER.info("ℹ️ No devices loaded (neither _registered_devices nor DeviceManager) — skipping orphan HA device cleanup")
+                return
+            
+            # Additional safety: if not manual call and we have very few devices, skip
+            # (indicates we're still loading at startup)
+            device_count = len(self._registered_devices) + (len(self.device_manager.get_all_devices()) if has_managed_devices else 0)
+            if not manual_call and device_count < 10:
+                _LOGGER.info("ℹ️ Only %d devices loaded - skipping cleanup (might still be loading)", device_count)
+                return
+            
+            # If only one source is loaded, use it for cleanup
+            valid_serials = set()
+            if has_registered_devices:
+                valid_serials.update(self._registered_devices.keys())
+            if has_managed_devices:
+                valid_serials.update(self.device_manager.get_all_devices().keys())
+            
             # Find all devices belonging to this integration
             for device in device_registry.devices.values():
+                
                 # Check if device belongs to this config entry
                 if self.config_entry.entry_id not in device.config_entries:
                     continue
@@ -1633,10 +1845,10 @@ class EldatCoordinator(DataUpdateCoordinator):
                 if not serial_number:
                     continue
                 
-                # Check if this device should exist (is in whitelist)
-                if not self.device_manager.is_whitelisted(serial_number):
+                # Check if this device is known to us (in either _registered_devices or DeviceManager)
+                if serial_number not in valid_serials:
                     devices_to_remove.append((device, serial_number))
-                    _LOGGER.warning("🧹 Found orphaned HA device: %s (%s) - not in whitelist", 
+                    _LOGGER.warning("🧹 Found orphaned HA device: %s (%s) - not in registered_devices or DeviceManager", 
                                    device.name, serial_number[-8:])
             
             # Remove orphaned devices
@@ -1846,18 +2058,257 @@ class EldatCoordinator(DataUpdateCoordinator):
         """Get the transceiver type."""
         return self.transceiver.transceiver_type
 
+    async def _detect_and_repair_missing_entities(self) -> int:
+        """🔧 NEW: Detect and repair devices missing entities.
+        
+        Runs AFTER platform setup to ensure entity registry is populated.
+        Only repairs devices where entity loss is clearly unintended.
+        """
+        repaired = 0
+        
+        er = __import__('homeassistant.helpers.entity_registry', fromlist=['async_get']).async_get
+        
+        try:
+            entity_registry = er(self.hass)
+            
+            for serial, device_info in self._registered_devices.items():
+                device_name = device_info.get('name', f'Device {serial[-8:]}')
+                device_type = device_info.get('type', 'unknown')
+                
+                # Find actual entities for this device in HA
+                actual_entities = [
+                    ent for ent in entity_registry.entities.values()
+                    if ent.unique_id and ent.unique_id.startswith(serial) and ent.platform == DOMAIN
+                ]
+                
+                configured_entities = device_info.get('entities', [])
+                
+                # Only repair if:
+                # 1. Device has configured entities 
+                # 2. AND no entities exist in HA
+                # 3. AND device type should have entities
+                if configured_entities and not actual_entities and device_type != "ew_receiver":
+                    # For transmitters, it's normal they might not have entities loaded yet
+                    # So only log at debug level for transmitters
+                    if device_type == "ew_transmitter":
+                        _LOGGER.debug("🔍 Transmitter %s waiting for entity platform to create entities", 
+                                    device_name)
+                    else:
+                        # For other types, this is a real problem
+                        _LOGGER.warning("⚠️ Device %s (%s) has 0 entities in HA but %d configured", 
+                                      device_name, serial[-8:], len(configured_entities))
+                        
+                        # Only fire repair event for sensor types (transmitters often have delayed platform loading)
+                        if device_type in ["ewneo_sensor", "ew_sensor"]:
+                            # Regenerate entity specs
+                            device_info = await self._regenerate_entity_specs(serial, device_info)
+                            
+                            # Fire event to recreate
+                            self.hass.bus.async_fire(
+                                EVENT_DEVICE_ADDED,
+                                {
+                                    "serial_number": serial,
+                                    "device_info": device_info,
+                                    "missing_entities_repair": True,
+                                    "force_create": True
+                                }
+                            )
+                            
+                            repaired += 1
+                            await asyncio.sleep(0.1)
+        
+        except Exception as e:
+            _LOGGER.debug("Could not check for missing entities: %s", e)
+        
+        if repaired > 0:
+            _LOGGER.info("✅ Repaired %d devices with missing entities", repaired)
+            await self._save_registered_devices()
+        
+        return repaired
+
+    async def _validate_all_state_sources(self) -> Dict[str, int]:
+        """✅ NEW: Validate consistency between all 3 persistence sources.
+        
+        Checks:
+        1. _registered_devices (registered_devices.json) - main source
+        2. device_manager (managed_devices.json) - whitelist
+        3. HA Device Registry - native HA storage
+        
+        Keeps them in sync automatically.
+        """
+        stats = {
+            'registered_devices_count': len(self._registered_devices),
+            'device_manager_count': 0,
+            'entity_registry_count': 0,
+            'conflicts_found': 0,
+            'corrections_applied': 0,
+        }
+        
+        try:
+            from homeassistant.helpers import entity_registry as er
+            
+            # Count devices in DeviceManager
+            if self.device_manager:
+                stats['device_manager_count'] = len(self.device_manager.get_all_devices())
+            
+            # Count our entities in HA Entity Registry
+            entity_registry = er.async_get(self.hass)
+            our_entities = [
+                ent for ent in entity_registry.entities.values()
+                if ent.platform == DOMAIN
+            ]
+            stats['entity_registry_count'] = len(our_entities)
+            
+            # Check for mismatches between _registered_devices and DeviceManager
+            registered_serials = set(self._registered_devices.keys())
+            dm_serials = set(self.device_manager.get_all_devices().keys())
+            
+            # Devices in registered_devices but NOT in DeviceManager
+            missing_from_dm = registered_serials - dm_serials
+            if missing_from_dm:
+                _LOGGER.warning("⚠️ %d devices in _registered_devices but NOT in DeviceManager - syncing", 
+                               len(missing_from_dm))
+                for serial in missing_from_dm:
+                    device_info = self._registered_devices[serial]
+                    self.device_manager.add_device(
+                        serial_number=serial,
+                        device_type=device_info.get("type", "unknown"),
+                        name=device_info.get("name"),
+                        rx11_index=device_info.get("rx11_index")
+                    )
+                    stats['corrections_applied'] += 1
+            
+            # Devices in DeviceManager but NOT in _registered_devices - CRITICAL
+            orphaned_in_dm = dm_serials - registered_serials
+            if orphaned_in_dm:
+                _LOGGER.error("🛑 %d ORPHANED devices only in DeviceManager (not in _registered_devices)!", 
+                            len(orphaned_in_dm))
+                for serial in orphaned_in_dm:
+                    _LOGGER.warning("  ❌ Serial: %s", serial[-8:])
+                stats['conflicts_found'] += len(orphaned_in_dm)
+            
+            if stats['corrections_applied'] > 0:
+                await self.device_manager.save()
+            
+            _LOGGER.info("📊 State Validation: %d registered, %d DeviceManager, %d entities, "
+                        "%d conflicts, %d corrections",
+                        stats['registered_devices_count'],
+                        stats['device_manager_count'],
+                        stats['entity_registry_count'],
+                        stats['conflicts_found'],
+                        stats['corrections_applied'])
+            
+        except Exception as e:
+            _LOGGER.warning("⚠️ State validation error: %s", e)
+        
+        return stats
+
+    async def _validate_device_indices_with_rx11(self) -> int:
+        """🔐 NEW: Validate EW Receiver indices match actual RX11 hardware.
+        
+        After RX11 reconnect, validates that indices in our storage match
+        what's actually in the RX11. Corrects any mismatches.
+        
+        Returns: number of corrections made
+        """
+        if not hasattr(self.transceiver, '_rx11_wrapper') or not self.transceiver._rx11_wrapper:
+            _LOGGER.debug("No RX11 wrapper - skipping hardware validation")
+            return 0
+        
+        wrapper = self.transceiver._rx11_wrapper
+        corrections = 0
+        
+        try:
+            _LOGGER.info("🔍 Validating EW Receiver indices with RX11 hardware...")
+            
+            for index, device_info in list(self._used_ew_receiver_indices.items()):
+                stored_serial = device_info.get('receiver_serial')
+                stored_device_serial = device_info.get('device_serial')
+                
+                try:
+                    # Query hardware for this index
+                    actual_serial = await wrapper.rx11_ew_receiver_get_serial_by_index(int(index))
+                    
+                    if actual_serial is None:
+                        # Index is in storage but not in RX11 - remove it
+                        _LOGGER.warning("❌ Index %d in storage but NOT in RX11 - removing", index)
+                        self.mark_ew_receiver_index_free(index)
+                        corrections += 1
+                    
+                    elif actual_serial != stored_serial:
+                        # Serial mismatch - RX11 is authoritative
+                        _LOGGER.warning("⚠️ Index %d serial mismatch: Stored=%s, Hardware=%s - updating",
+                                      index, stored_serial[-8:], actual_serial[-8:])
+                        device_info['receiver_serial'] = actual_serial
+                        self._used_ew_receiver_indices[index] = device_info
+                        corrections += 1
+                    else:
+                        # Match - all good
+                        _LOGGER.debug("✅ Index %d verified: %s", index, actual_serial[-8:])
+                
+                except Exception as e:
+                    _LOGGER.debug("⚠️ Could not validate index %d: %s", index, e)
+            
+            if corrections > 0:
+                await self._save_used_ew_receiver_indices()
+                _LOGGER.info("✅ Fixed %d index mismatches with RX11 hardware", corrections)
+        
+        except Exception as e:
+            _LOGGER.warning("⚠️ RX11 hardware validation failed: %s", e)
+        
+        return corrections
+
     async def async_setup(self) -> bool:
         """Set up the coordinator."""
         try:
-            # Initialize registered device management
-            await self._load_registered_devices()
-            await self._migrate_existing_devices_to_registered_list()
+            # Load consolidated state from previous restarts
+            await self.state_manager.load()
             
-            # Initialize EWB index tracking
-            await self._load_used_ewb_indices()
+            # Initialize registered device management with timeout
+            try:
+                await asyncio.wait_for(self._load_registered_devices(), timeout=10.0)
+                await asyncio.wait_for(self._migrate_existing_devices_to_registered_list(), timeout=5.0)
+            except asyncio.TimeoutError:
+                _LOGGER.error("⏱️ Timeout loading registered devices — skipping setup to prevent entity loss")
+                self._registered_devices = {}
+                return False
             
-            # Initialize Easywave Receiver index tracking
-            await self._load_used_ew_receiver_indices()
+            # Sync StateManager with loaded devices
+            self.state_manager.set_registered_devices(self._registered_devices)
+            
+            # Initialize EWB index tracking with timeout
+            try:
+                await asyncio.wait_for(self._load_used_ewb_indices(), timeout=5.0)
+            except asyncio.TimeoutError:
+                _LOGGER.error("⏱️ Timeout loading EWB indices — using empty set")
+                self._used_ewb_indices = {}
+                self._next_free_ewb_index = 0
+            
+            # Sync StateManager with EWB indices
+            self.state_manager.set_ewb_indices(self._used_ewb_indices)
+            
+            # Initialize Easywave Receiver index tracking with timeout
+            try:
+                await asyncio.wait_for(self._load_used_ew_receiver_indices(), timeout=5.0)
+            except asyncio.TimeoutError:
+                _LOGGER.error("⏱️ Timeout loading Receiver indices — using empty set")
+                self._used_ew_receiver_indices = {}
+                self._next_free_ew_receiver_index = 0
+            
+            # Sync StateManager with Receiver indices
+            self.state_manager.set_ew_receiver_indices(self._used_ew_receiver_indices)
+            
+            # IMPORTANT: Sync DeviceManager whitelist FROM _registered_devices with timeout
+            try:
+                await asyncio.wait_for(self._sync_device_manager_from_registered(), timeout=5.0)
+            except asyncio.TimeoutError:
+                _LOGGER.error("⏱️ Timeout syncing DeviceManager — continuing with current state")
+            
+            # ✅ NEW: Validate all state sources are consistent with timeout
+            try:
+                await asyncio.wait_for(self._validate_all_state_sources(), timeout=5.0)
+            except asyncio.TimeoutError:
+                _LOGGER.error("⏱️ Timeout validating state sources — continuing")
             
             # Save to consolidate all data into single file after migration
             await self._save_registered_devices()
@@ -1884,6 +2335,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Synchronize Easywave Receiver index tracking with transceiver wrapper
             await self._sync_ew_receiver_indices_with_wrapper()
             
+            # ✅ NEW: Validate EW Receiver indices match RX11 hardware after reconnect
+            hardware_corrections = await self._validate_device_indices_with_rx11()
+            
             # Set telegram callback
             self.transceiver.set_telegram_callback(self._handle_telegram)
             
@@ -1900,6 +2354,18 @@ class EldatCoordinator(DataUpdateCoordinator):
             
             # Setup USB event monitoring for fast reconnect
             await self._setup_usb_monitoring()
+            
+            # Schedule delayed entity repair check AFTER platforms are loaded
+            # This ensures entity registry is populated before checking for missing entities
+            # Temporarily disabled - causes timeout during setup
+            # async def delayed_entity_repair():
+            #     """Check for missing entities after platform setup is complete."""
+            #     await asyncio.sleep(5.0)  # Wait for platforms to create entities (increased from 2s)
+            #     repaired = await self._detect_and_repair_missing_entities()
+            #     if repaired > 0:
+            #         _LOGGER.info("✅ Repaired %d devices with missing entities during startup", repaired)
+            # 
+            # asyncio.create_task(delayed_entity_repair())
             
             # DeviceManager saves automatically when devices are added
             
@@ -1953,6 +2419,17 @@ class EldatCoordinator(DataUpdateCoordinator):
                 _LOGGER.info("✅ Transceiver disconnected")
             except Exception as e:
                 _LOGGER.error("❌ Error disconnecting transceiver: %s", e)
+        
+        # Sync current state to StateManager before saving
+        self.state_manager.set_registered_devices(self._registered_devices)
+        self.state_manager.set_ewb_indices(self._used_ewb_indices)
+        self.state_manager.set_ew_receiver_indices(self._used_ew_receiver_indices)
+        
+        # Save consolidated state before shutdown
+        await self.state_manager.save()
+        
+        # Clean up old separate files from previous installations
+        await self.state_manager.cleanup_old_files()
         
         _LOGGER.info("✅ Modern coordinator shutdown completed")
 
@@ -2023,11 +2500,11 @@ class EldatCoordinator(DataUpdateCoordinator):
                 try:
                     clear_result = await self.transceiver.rx11_ewb_clear_filter()
                     if clear_result:
-                        _LOGGER.debug("✅ EWB-Filter erfolgreich geleert")
+                        _LOGGER.debug("✅ EWB filter successfully cleared")
                     else:
-                        _LOGGER.warning("⚠️ EWB-Filter konnte nicht geleert werden")
+                        _LOGGER.warning("⚠️ Failed to clear EWB filter")
                 except Exception as e:
-                    _LOGGER.error("❌ Exception beim Leeren des EWB-Filters: %s", e)
+                    _LOGGER.error("❌ Exception while clearing EWB filter: %s", e)
             
             # Collect all unique gateway serials from registered devices
             gateway_serials = set()
@@ -2043,7 +2520,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("No EWneo devices found - skipping gateway filter restore")
                 return
             
-            _LOGGER.info("🔧 Wiederherstellung von %d Gateway-Filter(n) nach Reconnect...", len(gateway_serials))
+            _LOGGER.info("🔧 Restoring %d gateway filter(s) after reconnect...", len(gateway_serials))
             
             # Add each gateway to the filter
             success_count = 0
@@ -2052,16 +2529,16 @@ class EldatCoordinator(DataUpdateCoordinator):
                     result = await self.transceiver.rx11_ewb_add_filter(gateway_serial)
                     if result:
                         success_count += 1
-                        _LOGGER.debug("✅ Gateway %s zum Filter hinzugefügt", gateway_serial[-8:])
+                        _LOGGER.debug("✅ Gateway %s added to filter", gateway_serial[-8:])
                     else:
-                        _LOGGER.warning("⚠️ Fehler beim Hinzufügen von Gateway %s zum Filter", gateway_serial[-8:])
+                        _LOGGER.warning("⚠️ Failed to add gateway %s to filter", gateway_serial[-8:])
                 except Exception as e:
-                    _LOGGER.error("❌ Exception beim Hinzufügen von Gateway %s: %s", gateway_serial[-8:], e)
+                    _LOGGER.error("❌ Exception adding gateway %s: %s", gateway_serial[-8:], e)
             
-            _LOGGER.info("✅ %d von %d Gateway-Filter(n) erfolgreich wiederhergestellt", success_count, len(gateway_serials))
+            _LOGGER.info("✅ %d of %d gateway filter(s) successfully restored", success_count, len(gateway_serials))
             
         except Exception as e:
-            _LOGGER.error("❌ Fehler bei Gateway-Filter-Wiederherstellung: %s", e)
+            _LOGGER.error("❌ Error restoring gateway filters: %s", e)
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from the transceiver."""
@@ -2135,7 +2612,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     self._last_connection_state = True  # Assume was connected
                 
                 if self._last_connection_state != is_connected:
-                    _LOGGER.warning("⚠️ RX11 USB Transceiver nicht verbunden - Entitäten werden deaktiviert")
+                    _LOGGER.info("⚠️ RX11 USB Transceiver nicht verbunden - Entitäten werden deaktiviert")
                     # Show persistent notification about disconnection
                     lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
                     await self.hass.services.async_call(
@@ -2153,7 +2630,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     self.async_update_listeners()
                     self._last_connection_state = is_connected
                 
-                _LOGGER.warning("⚠️ RX11 nicht verbunden - UpdateFailed wird geworfen, Entitäten sollten nicht verfügbar sein")
+                _LOGGER.info("⚠️ RX11 nicht verbunden - UpdateFailed wird geworfen, Entitäten sollten nicht verfügbar sein")
                 raise UpdateFailed("RX11 Transceiver not connected")
         else:
             # Reset reconnect counter on successful connection
@@ -2194,7 +2671,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     )
                 self.hass.async_create_task(dismiss_success())
             else:
-                _LOGGER.warning("⚠️ RX11 USB Transceiver nicht verbunden - Entitäten sind nicht verfügbar")
+                _LOGGER.debug("⚠️ RX11 USB Transceiver nicht verbunden - Entitäten sind nicht verfügbar")
                 # Show persistent notification about disconnection
                 lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
                 await self.hass.services.async_call(
@@ -2263,7 +2740,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
                 # Fire battery events separately from button events
                 if action == "battery_low":
-                    _LOGGER.warning("🔋 Firing battery_low event (transmitter-wide)")
+                    _LOGGER.debug("🔋 Firing battery_low event (transmitter-wide)")
                     await self._fire_battery_event(serial_number, telegram_data, "battery_low")
                     
                 else:
@@ -2377,7 +2854,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Add battery_level to top level for easier access by sensors
                 if "battery_level" in telegram_data:
                     event_data["battery_level"] = telegram_data["battery_level"]
-                    _LOGGER.warning("🔋 Including battery_level in EVENT_DEVICE_UPDATED: %d%%", telegram_data["battery_level"])
+                    _LOGGER.debug("🔋 Including battery_level in EVENT_DEVICE_UPDATED: %d%%", telegram_data["battery_level"])
                 
                 self.hass.bus.async_fire(EVENT_DEVICE_UPDATED, event_data)
                 
@@ -2506,7 +2983,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     "type": "sensor",
                     "sensor_type": "temperature", 
                     "translation_key": "temperature",  # HA looks up entity.sensor.temperature.name
-                    "unique_id": f"{serial_number}_temperature",
+                    "unique_id": make_unique_id(serial_number, "temperature", None),
                     "device_class": "temperature",
                     "unit_of_measurement": "°C",
                     "icon": "mdi:thermometer",
@@ -2518,7 +2995,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     "type": "sensor",
                     "sensor_type": "humidity",
                     "translation_key": "humidity",  # HA looks up entity.sensor.humidity.name
-                    "unique_id": f"{serial_number}_humidity",
+                    "unique_id": make_unique_id(serial_number, "humidity", None),
                     "device_class": "humidity",
                     "unit_of_measurement": "%",
                     "icon": "mdi:water-percent",
@@ -2530,7 +3007,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     "type": "sensor",
                     "sensor_type": "battery",
                     "translation_key": "battery",  # HA looks up entity.sensor.battery.name
-                    "unique_id": f"{serial_number}_battery",
+                    "unique_id": make_unique_id(serial_number, "battery", None),
                     "device_class": "battery",
                     "unit_of_measurement": "%",
                     "has_entity_name": True, 
@@ -2592,7 +3069,7 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Fire appropriate event
             if event_type == "battery_low":
                 self.hass.bus.async_fire("eldat_battery_low", event_data)
-                _LOGGER.warning("🪫 Battery LOW event: %s (transmitter-wide)", serial_number[-8:])
+                _LOGGER.warning("🪫 Battery LOW: %s", serial_number[-8:])
                 
             elif event_type == "battery_ok":
                 self.hass.bus.async_fire("eldat_battery_ok", event_data)
@@ -3019,12 +3496,21 @@ class EldatCoordinator(DataUpdateCoordinator):
     # Auto-discovery methods removed - devices must be manually added
 
     async def register_device(self, serial_number: str, device_info: Dict[str, Any]) -> None:
-        """Register a new device."""
-        # Store in devices dict
+        """Register a new device.
+        
+        Updates all three tracking systems in the correct order:
+        1. _registered_devices (authoritative persistent source)
+        2. self.devices (in-memory legacy reference, kept in sync)
+        3. DeviceManager (secondary persistent store for whitelist/availability)
+        """
+        # Store in _registered_devices (authoritative source)
+        self._registered_devices[serial_number] = device_info
+        
+        # Keep legacy dict in sync
         self.devices[serial_number] = device_info
         self._known_devices.add(serial_number)
         
-        # Add to DeviceManager (single source of truth)
+        # Sync to DeviceManager
         self.device_manager.add_device(
             serial_number=serial_number,
             device_type=device_info.get("device_type", device_info.get("type", "unknown")),
@@ -3032,9 +3518,10 @@ class EldatCoordinator(DataUpdateCoordinator):
             rx11_index=device_info.get("rx11_index"),
             area=device_info.get("area")
         )
-        # Save DeviceManager in background (non-blocking)
+        # Save both persistent stores
         if self._setup_complete:
             asyncio.create_task(self.device_manager.save())
+            asyncio.create_task(self._save_registered_devices())
         
         # Only register with transceiver if it's connected
         if self.transceiver and self.transceiver.is_connected:
@@ -3133,19 +3620,7 @@ class EldatCoordinator(DataUpdateCoordinator):
         _LOGGER.info("Device registered: %s (%s)", 
                     device_info.get("name"), serial_number)
 
-    async def unregister_device(self, serial_number: str, force_remove: bool = False) -> bool:
-        """Remove device from registered list and clean up entities.
-        
-        Args:
-            serial_number: Device serial number to remove
-            force_remove: Force removal even if device was auto-discovered
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        # DeviceManager whitelist is the single source of truth
-        # Devices not in whitelist are automatically not loaded
-        return await self.unregister_device_permanently(serial_number)
+
 
     def _is_ewneo_device(self, device_type: str, device_info: Dict[str, Any]) -> bool:
         """Determine if device is an EWneo device with multiple fallback checks.
@@ -3418,16 +3893,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                 else:
                     _LOGGER.warning("⚠️ Transceiver has no device_factory attribute")
             
-            # Remove failed devices from DeviceManager
+            # Log failed devices but do NOT remove them from DeviceManager
+            # A transient error (e.g., serial port issue) should not permanently delete device data
             if failed_devices:
-                _LOGGER.warning("🗑️ Removing %d failed devices from DeviceManager", len(failed_devices))
-                for serial in failed_devices:
-                    self.device_manager.remove_device(serial)
-                await self.device_manager.save()
-                _LOGGER.info("✅ DeviceManager updated after removing %d failed devices", len(failed_devices))
+                _LOGGER.warning("⚠️ %d devices failed to restore (will retry on next startup): %s", 
+                              len(failed_devices), [s[-8:] for s in failed_devices])
             
             # Log summary
-            _LOGGER.info("✅ Restored %d/%d devices successfully (%d removed due to errors)", 
+            _LOGGER.info("✅ Restored %d/%d devices successfully (%d failed, kept in DeviceManager)", 
                        loaded_count, len(managed_devices), len(failed_devices))
             
             # Recalculate next free indices after all devices are restored
@@ -3515,10 +3988,12 @@ class EldatCoordinator(DataUpdateCoordinator):
             return device_info
 
     async def _regenerate_entity_specs(self, serial_number: str, device_info: Dict[str, Any]) -> Dict[str, Any]:
-        """Regenerate entity specs with latest format and naming."""
+        """Regenerate entity specs with latest format and naming.
+        
+        NON-DESTRUCTIVE: Keeps a backup of old entities and restores on failure.
+        """
         try:
             # CRITICAL: Update device_type based on device_type_code for EWneo devices
-            # This ensures the correct model name is used in device registry
             device_type_code = device_info.get("device_type_code")
             if device_type_code is not None:
                 correct_type = DEVICE_TYPE_CODE_MAP.get(device_type_code)
@@ -3529,11 +4004,15 @@ class EldatCoordinator(DataUpdateCoordinator):
                                    serial_number[-8:], old_type, correct_type, device_type_code)
                         device_info["type"] = correct_type
             
-            # IMPORTANT: Remove old entities to force fresh generation
-            # This ensures entities with registration_id suffix are created
+            # NON-DESTRUCTIVE: Keep backup of old entities in case regeneration fails
+            old_entities = device_info.get("entities", [])
+            old_entities_backup = list(old_entities) if old_entities else []
+            
+            # Remove old entities to allow fresh generation
             if "entities" in device_info:
-                old_entities = device_info.pop("entities")
-                _LOGGER.debug("Removed %d old entities for %s before regeneration", len(old_entities), serial_number[-8:])
+                del device_info["entities"]
+                _LOGGER.debug("Temporarily removed %d old entities for %s before regeneration", 
+                            len(old_entities_backup), serial_number[-8:])
             
             _LOGGER.debug("About to regenerate entity specs for %s (type=%s, registration_id=%s)", 
                         serial_number, 
@@ -3553,11 +4032,9 @@ class EldatCoordinator(DataUpdateCoordinator):
                 platforms = [platform for platform, entities in entity_specs.items() if entities]
                 
                 if all_entities:
-                    # REPLACE old entity specs completely with newly generated ones
                     device_info["entities"] = all_entities
                     device_info["platforms"] = platforms
                     
-                    # Log unique_ids for debugging
                     for entity in all_entities:
                         _LOGGER.debug("  → Entity: %s (unique_id: %s)", 
                                      entity.get("sensor_type") or entity.get("type"), 
@@ -3566,14 +4043,25 @@ class EldatCoordinator(DataUpdateCoordinator):
                     _LOGGER.info("✅ Regenerated %d entity specs for device %s with updated naming", 
                                len(all_entities), serial_number)
                 else:
-                    _LOGGER.warning("⚠️  Entity specs generation returned empty list for device %s", serial_number)
+                    # Regeneration returned empty list — RESTORE backup
+                    _LOGGER.warning("⚠️ Entity specs generation returned empty list for device %s — restoring %d old entities", 
+                                  serial_number, len(old_entities_backup))
+                    if old_entities_backup:
+                        device_info["entities"] = old_entities_backup
             else:
-                _LOGGER.warning("⚠️  Entity specs generation returned None for device %s", serial_number)
+                # Regeneration returned None — RESTORE backup
+                _LOGGER.warning("⚠️ Entity specs generation returned None for device %s — restoring %d old entities", 
+                              serial_number, len(old_entities_backup))
+                if old_entities_backup:
+                    device_info["entities"] = old_entities_backup
                 
             return device_info
             
         except Exception as e:
-            _LOGGER.error("Error regenerating entity specs for %s: %s", serial_number, e)
+            _LOGGER.error("Error regenerating entity specs for %s: %s — keeping existing entities", serial_number, e)
+            # SAFETY: Restore backup on ANY exception
+            if 'old_entities_backup' in locals() and old_entities_backup:
+                device_info["entities"] = old_entities_backup
             return device_info
 
     async def send_command(self, serial_number: str, command, **kwargs) -> bool:
@@ -3666,12 +4154,24 @@ class EldatCoordinator(DataUpdateCoordinator):
             return False
 
     def get_all_devices(self) -> Dict[str, Dict[str, Any]]:
-        """Get all devices (both legacy and registered) with cleaned metadata."""
+        """Get all devices with cleaned metadata.
+        
+        _registered_devices is the authoritative source. self.devices is kept
+        as a synchronized reference for backward compatibility only.
+        Any device in self.devices that is NOT in _registered_devices is
+        included as well (for transition safety), but _registered_devices
+        always takes priority.
+        """
         all_devices = {}
         
-        # Merge devices and registered_devices
-        for serial, device_info in {**self.devices, **self._registered_devices}.items():
-            # Clean device_info before returning
+        # Start with self.devices (legacy) as a fallback base
+        for serial, device_info in self.devices.items():
+            cleaned_info = device_info.copy()
+            self._clean_device_info(cleaned_info)
+            all_devices[serial] = cleaned_info
+        
+        # Override/extend with _registered_devices (authoritative source)
+        for serial, device_info in self._registered_devices.items():
             cleaned_info = device_info.copy()
             self._clean_device_info(cleaned_info)
             all_devices[serial] = cleaned_info
@@ -3679,8 +4179,11 @@ class EldatCoordinator(DataUpdateCoordinator):
         return all_devices
 
     def get_device(self, serial_number: str) -> Optional[Dict[str, Any]]:
-        """Get device info by serial number."""
-        return self.devices.get(serial_number)
+        """Get device info by serial number.
+        
+        Checks _registered_devices first (authoritative), then falls back to self.devices.
+        """
+        return self._registered_devices.get(serial_number) or self.devices.get(serial_number)
 
     def get_device_state(self, serial_number: str) -> Optional[Dict[str, Any]]:
         """Get persistent state for a device."""
@@ -3733,12 +4236,58 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Device %s was auto-discovered. Use force=True to remove anyway.", serial_number)
             return False
             
-        return await self.unregister_device(serial_number, force_remove=force)
+        return await self._unregister_device_internal(serial_number)
 
     # Enhanced alias with additional options
     async def async_remove_device(self, serial_number: str, force: bool = False) -> bool:
-        """Remove device with full control options."""
-        return await self.unregister_device(serial_number, force_remove=force)
+        """Remove device with full control options and lifecycle management.
+        
+        This method coordinates the device removal through the lifecycle manager,
+        ensuring proper cleanup at each stage:
+        1. Lifecycle state transition to DELETING
+        2. Full cleanup of HA registries (entities + device)
+        3. Device-specific cleanup (RX11, EWneo, etc.)
+        4. Whitelist removal
+        5. Persistent storage update
+        
+        Args:
+            serial_number: Device serial number
+            force: Force removal even if device is not found
+            
+        Returns:
+            True if removal was successful, False otherwise
+        """
+        try:
+            # Mark device state as DELETING in lifecycle manager
+            device_state = self.device_lifecycle_manager.get_device_state(serial_number)
+            if device_state:
+                _LOGGER.info(
+                    "🔄 Device %s in lifecycle state %s, starting removal...",
+                    serial_number[-8:],
+                    device_state.state.value
+                )
+            
+            # Perform comprehensive removal through _unregister_device_internal
+            # This handles entity registry, device registry, and device-specific cleanup
+            unregister_result = await self._unregister_device_internal(serial_number)
+            
+            # Update lifecycle state to DELETED 
+            if unregister_result:
+                await self.device_lifecycle_manager.complete_device_removal(serial_number)
+                _LOGGER.info("✅ Device %s removal completed successfully", serial_number[-8:])
+                return True
+            else:
+                _LOGGER.warning("⚠️ Device %s removal incomplete, but marked as deleted", serial_number[-8:])
+                # Mark as deleted anyway for cleanup
+                await self.device_lifecycle_manager.complete_device_removal(serial_number)
+                return unregister_result
+                
+        except Exception as e:
+            _LOGGER.error("❌ Error in async_remove_device: %s", e)
+            if force:
+                # If force is true, mark as deleted despite error
+                await self.device_lifecycle_manager.complete_device_removal(serial_number)
+            return False
 
     async def _remove_from_ha_registry(self, serial_number: str, device_info: Dict[str, Any]) -> bool:
         """Remove device from Home Assistant device and entity registries."""
@@ -3770,8 +4319,8 @@ class EldatCoordinator(DataUpdateCoordinator):
             # This catches entities that might have been orphaned
             for entity_entry in list(entity_registry.entities.values()):
                 if entity_entry.platform == DOMAIN and entity_entry.unique_id:
-                    # Check if serial is in unique_id (format: {SERIAL}_{sensor_type})
-                    if serial_number.upper() in entity_entry.unique_id.upper():
+                    # Use startswith to avoid matching entities from other devices
+                    if entity_entry.unique_id.upper().startswith(serial_number.upper()):
                         if entity_entry.entity_id not in entities_to_remove:
                             entities_to_remove.append(entity_entry.entity_id)
                             _LOGGER.debug("    Found entity by unique_id pattern: %s", entity_entry.entity_id)
@@ -3797,7 +4346,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     # Remove from our tracking
                     if unique_id:
-                        self.created_entity_unique_ids.discard(unique_id)
+                        self.state_manager.unmark_entity_deleted(unique_id)
                         _LOGGER.debug("    Removed unique_id from tracking: %s", unique_id)
                 except Exception as e:
                     _LOGGER.warning("  Failed to remove entity %s: %s", entity_id, e)
@@ -3892,9 +4441,8 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Error in simplified RX11 device creation: %s", e)
             return False
 
-    # DEPRECATED: Moved to transceivers/rx11/transceiver.py for proper architectural layering
-    # Use self.transceiver.create_rx11_ew_device_info() instead
-    # async def _create_rx11_ew_device_info(...)
+    # Device creation/removal helper methods are now in device_lifecycle.py
+    # and device-specific transceiver classes
 
     async def _allocate_ew_receiver_with_persistence(self, device_serial: str) -> Dict[str, Any] | None:
         """Allocate Easywave Receiver with persistent serial number storage."""
@@ -4723,9 +5271,30 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Report failure (increments failure counter, may trigger notification after 2 failures)
                 await self.report_ewneo_communication_failure(device_serial)
                 return False
-                
         except Exception as e:
             _LOGGER.error("❌ Error sending EwbQueryState command (mode %d): %s", mode, e)
             # Report failure on exception as well
             await self.report_ewneo_communication_failure(device_serial)
             return False
+    
+    # Entity Persistence Helper Methods
+    
+    def is_entity_created(self, unique_id: str) -> bool:
+        """Check if entity was already created in a previous session.
+        
+        Args:
+            unique_id: The entity's unique_id
+            
+        Returns:
+            True if entity was created before, False otherwise
+        """
+        return self.state_manager.is_entity_created(unique_id)
+    
+    def mark_entity_created(self, unique_id: str, entity_name: str = None) -> None:
+        """Mark an entity as created. Will be persisted on shutdown.
+        
+        Args:
+            unique_id: The entity's unique_id
+            entity_name: Optional entity name for metadata
+        """
+        self.state_manager.mark_entity_created(unique_id, entity_name)

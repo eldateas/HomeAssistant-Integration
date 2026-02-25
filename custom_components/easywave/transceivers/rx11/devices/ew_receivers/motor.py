@@ -56,6 +56,8 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
         EWneo motors create cover entities with all features (open/close/stop/position).
         This is NOT used for classic Easywave Receivers.
         """
+        from .....helpers_unique_id import make_unique_id
+        
         specs = {
             "switch": [],
             "light": [],
@@ -72,7 +74,7 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             specs["cover"].append({
                 "type": "cover",
                 "name": f"{self.name}{channel_suffix}",
-                "unique_id": f"{self.serial_number}_cover_ch{channel}",
+                "unique_id": make_unique_id(self.serial_number, "cover", channel if self.channel_count > 1 else None),
                 "device_class": "shade",
                 "icon": "mdi:window-shutter",
                 "channel": channel,

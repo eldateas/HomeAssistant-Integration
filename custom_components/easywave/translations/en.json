@@ -398,7 +398,7 @@
           "device_transmitter_switch_mode": "⬅️ Back"
         },
         "menu_option_descriptions": {
-          "device_transmitter_buttons_1": "The transmitter/channel has only 1 button with button code A.",
+          "device_transmitter_buttons_1": "The transmitter/channel has only 1 button with any button code.",
           "device_transmitter_buttons_2": "The transmitter/channel has 2 buttons with button codes A and B.",
           "device_transmitter_buttons_3": "The transmitter/channel has 3 buttons with button codes A, B and C.",
           "device_transmitter_buttons_4": "The transmitter/channel has 4 buttons with button codes A, B, C and D."
@@ -609,7 +609,7 @@
       },
       "device_receiver_description_heating": {
         "title": "Learn Receiver",
-        "description": "Please put your heating control receiver into programming mode **ON/OFF** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+        "description": "Please put your heating control receiver into programming mode **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Continue",
           "device_receiver_type": "⬅️ Back"

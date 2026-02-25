@@ -20,6 +20,13 @@ from .const import (
     DOMAIN,
     CONF_DEVICE_PATH,
     CONF_DEVICE_NAME,
+    CONF_USB_VID,
+    CONF_USB_PID,
+    CONF_USB_SERIAL_NUMBER,
+    CONF_USB_MANUFACTURER,
+    CONF_USB_PRODUCT,
+    CONF_FW_VERSION,
+    CONF_HW_VERSION,
     CONF_TRANSCEIVER_TYPE,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
@@ -113,7 +120,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # If integration already configured, go to device adding flow
         existing_entries = self._async_current_entries()
         if existing_entries:
-            _LOGGER.info("ELDAT Integration bereits konfiguriert - leite zu Geräte-Flow weiter")
+            _LOGGER.info("ELDAT Integration already configured - redirecting to device flow")
             return await self.async_step_device()
 
         # Automatically detect and setup transceiver
@@ -130,7 +137,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             rx11_devices = await self.hass.async_add_executor_job(find_rx11_devices)
             
             if rx11_devices:
-                _LOGGER.info("RX11 Geräte erkannt: %s", len(rx11_devices))
+                _LOGGER.info("RX11 devices detected: %s", len(rx11_devices))
                 self._transceiver_type = TransceiverType.RX11
                 self._discovered_devices = rx11_devices
                 return await self.async_step_rx11_setup()
@@ -142,16 +149,16 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             #     return await self.async_step_rx21_setup()
             
             # No supported transceivers found
-            _LOGGER.warning("Keine unterstützten RX11 USB Transceiver gefunden")
+            _LOGGER.warning("No supported RX11 USB transceivers found")
             return self.async_abort(
                 reason="no_devices",
                 description_placeholders={
-                    "details": "Keine RX11 USB Transceiver gefunden. Stellen Sie sicher, dass ein RX11 USB-Gerät angeschlossen und erkannt wird."
+                    "details": "No RX11 USB transceivers found. Please ensure an RX11 USB device is connected and recognized."
                 }
             )
         
         except Exception as e:
-            _LOGGER.error("Fehler bei automatischer Transceiver-Erkennung: %s", e)
+            _LOGGER.error("Error during automatic transceiver detection: %s", e)
             return self.async_abort(
                 reason="detection_failed",
                 description_placeholders={"error": str(e)}
@@ -160,7 +167,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_rx11_setup(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Setup RX11 transceiver."""
+        """Setup RX11 transceiver with USB device identification."""
         errors: dict[str, str] = {}
         
         # Show error if no devices found
@@ -170,8 +177,14 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Use first discovered device automatically
         first_device = self._discovered_devices[0]
         device_path = first_device["device"]
-        manufacturer = first_device.get("manufacturer", "")
+        vid = first_device.get("vid", 0x155A)
+        pid = first_device.get("pid", 0x1014)
+        serial_number = first_device.get("serial_number", "unknown")
+        manufacturer = first_device.get("manufacturer", "ELDAT")
         product_name = first_device.get("name", "RX11 Device")
+        
+        # Create unique ID from USB serial number (or device path as fallback)
+        unique_id = f"rx11_{serial_number}" if serial_number != "unknown" else device_path
         
         # Device name without manufacturer prefix - use product name directly
         default_device_name = product_name
@@ -180,30 +193,36 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Use default device name - user can customize in HA dialog
             device_name = default_device_name
 
-            # Skip connection test - let the actual setup validate the connection
-            await self.async_set_unique_id(device_path)
+            # Use USB serial number as unique ID for device identification
+            await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
             return self.async_create_entry(
                 title="Easywave Gateway",
                 data={
                     CONF_TRANSCEIVER_TYPE: TransceiverType.RX11.value,
+                    # Primary: USB device identification (allows USB port changes)
+                    CONF_USB_VID: vid,
+                    CONF_USB_PID: pid,
+                    CONF_USB_SERIAL_NUMBER: serial_number,
+                    CONF_USB_MANUFACTURER: manufacturer,
+                    CONF_USB_PRODUCT: product_name,
+                    # Fallback: current device path (will be auto-updated if port changes)
                     CONF_DEVICE_PATH: device_path,
                     CONF_DEVICE_NAME: device_name,
                     CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
-                    "usb_manufacturer": manufacturer,
-                    "usb_product": product_name,
                 },
             )
 
         # Show form without device name input
         data_schema = vol.Schema({})
 
-        # Device label for description - use product name without manufacturer
-        device_label = product_name
+        # Device label for description - use product name with serial number
+        device_label = f"{product_name} ({serial_number})"
 
         description_placeholders = {
             "device_name": device_label,
             "device_path": device_path,
+            "usb_serial": serial_number,
             "docs_url": get_docs_url("rx11_setup"),
         }
 
@@ -379,11 +398,33 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_device_transmitter_switch_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle impulse switch mode selection."""
         self._device_config["switch_mode"] = "impulse"
+        # For 1-button mode with "single" grouping, skip button count selection
+        # and auto-detect button type during learning
+        operating_type = self._device_config.get("operating_type", "1")
+        grouping_mode = self._device_config.get("grouping_mode", "single")
+        
+        if operating_type == "1" and grouping_mode == "single":
+            # Auto-detect button type for 1-button single mode
+            self._device_config["button_count"] = 1
+            self._device_config["channels"] = 1
+            return await self.async_step_device_transmitter_description()
+        
         return await self.async_step_device_transmitter_button_count()
 
     async def async_step_device_transmitter_switch_permanent(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle permanent switch mode selection."""
         self._device_config["switch_mode"] = "permanent"
+        # For 1-button mode with "single" grouping, skip button count selection
+        # and auto-detect button type during learning
+        operating_type = self._device_config.get("operating_type", "1")
+        grouping_mode = self._device_config.get("grouping_mode", "single")
+        
+        if operating_type == "1" and grouping_mode == "single":
+            # Auto-detect button type for 1-button single mode
+            self._device_config["button_count"] = 1
+            self._device_config["channels"] = 1
+            return await self.async_step_device_transmitter_description()
+        
         return await self.async_step_device_transmitter_button_count()
 
     async def async_step_device_transmitter_button_count(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -455,7 +496,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return self.async_show_menu(
             step_id="device_transmitter_2button_button_count",
-            menu_options=["device_transmitter_2button_2", "device_transmitter_2button_4", "device_transmitter_2button_usage", "device_cancel"],
+            menu_options=["device_transmitter_2button_2", "device_transmitter_2button_4", "device_transmitter_2button_usage"],
             description_placeholders={
                 "usage_type": usage_type,
                 "docs_url": get_docs_url("device_transmitter_2button_button_count"),
@@ -717,7 +758,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             learned = await run_learning(coordinator, _match_transmitter, timeout=LEARNING_TIMEOUT_SECONDS)
 
             if learned:
-                _LOGGER.info("Transmitter Telegramm empfangen: %s", learned)
+                _LOGGER.info("📨 Transmitter Telegramm empfangen: button=%s, button_name=%s", 
+                               learned.get("button"), learned.get("button_name"))
                 received_serial = learned.get("serial_number", learned.get("serial", "?"))
                 
                 # Get next sender index for name
@@ -743,7 +785,36 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 usage_type = self._device_config.get("usage_type", "switch")
                 cover_mode = self._device_config.get("cover_mode", False)
                 
+                # Determine button type based on detected button for 1-button mode
+                detected_button_type = None
+                detected_button = learned.get("button")
+                detected_button_name = learned.get("button_name", "")
+                _LOGGER.debug("🔘 Button detection: detected_button=%s, button_name=%s, operating_type=%s", 
+                             detected_button, detected_button_name, operating_type)
                 
+                # Always detect button type for 1-button transmitters (regardless of grouping mode)
+                if operating_type == "1" and detected_button is not None:
+                    # Priority 1: Use button_name directly if it's a single letter (A/B/C/D)
+                    if detected_button_name and isinstance(detected_button_name, str) and len(detected_button_name) == 1:
+                        button_letter = detected_button_name.upper()
+                        if button_letter in ["A", "B", "C", "D"]:
+                            detected_button_type = button_letter
+                            _LOGGER.info("🔘 Auto-detected button type from button_name: %s (raw button=%s)", 
+                                       detected_button_type, detected_button)
+                    
+                    # Fallback: Parse button index if button_name wasn't helpful
+                    if not detected_button_type:
+                        button_idx = detected_button if isinstance(detected_button, int) else 0
+                        # button field is 0-indexed: 0=A, 1=B, 2=C, 3=D
+                        if 0 <= button_idx <= 3:
+                            button_labels = ["A", "B", "C", "D"]
+                            detected_button_type = button_labels[button_idx]
+                            _LOGGER.info("🔘 Auto-detected button type from index: %s (button_idx: %d, raw value: %s)", 
+                                       detected_button_type, button_idx, detected_button)
+                        else:
+                            _LOGGER.warning("⚠️ Button index out of range: %d (detected_button=%s, button_name=%s)", 
+                                          button_idx, detected_button, detected_button_name)
+                            detected_button_type = None
                 
                 self._learned_device = {
                     "name": f"Easywave {t_transmitter(lang)} #{sender_index}",
@@ -757,6 +828,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "switch_mode": switch_mode,
                     "usage_type": usage_type,
                     "cover_mode": cover_mode,
+                    "detected_button_type": detected_button_type,  # Detected button type (A/B/C/D for 1-button)
                     "last_telegram": {
                         "info_type": learned.get("info_type"),
                         "button": learned.get("button"),
@@ -765,6 +837,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         "timestamp": learned.get("timestamp"),
                     },
                 }
+                _LOGGER.debug("💾 Saved to _learned_device: detected_button_type=%s for 1-button transmitter",
+                               detected_button_type)
                 coordinator.stop_setup_mode()
                 return "success"
                 
@@ -893,10 +967,10 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 # Only accept LEARN telegrams, not regular sensor data telegrams
                 if is_sensor and is_learn and not dev.get("added_manually", False):
-                    _LOGGER.info("✅ EWneo-Sensor Learn-Telegramm erkannt: %s", dev.get("serial_number", "?"))
+                    _LOGGER.info("✅ EWneo sensor learning telegram detected: %s", dev.get("serial_number", "?"))
                     return dev
                 elif is_sensor and not is_learn:
-                    _LOGGER.debug("⏭️ Messwert-Telegramm ignoriert (kein Lerntelegramm): %s", dev.get("serial_number", "?"))
+                    _LOGGER.debug("⏭️ Measurement telegram ignored (not a learning telegram): %s", dev.get("serial_number", "?"))
                 return None
 
             coordinator.start_setup_mode(timeout_seconds=LEARNING_TIMEOUT_SECONDS)
@@ -1199,20 +1273,24 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show receiver learning overview with start/back options."""
         receiver_kind = self._device_config.get("receiver_kind", "switch")
         
-        # Map receiver_kind to readable operating mode description
-        mode_descriptions = {
-            "impulse": "Impuls (1-Tast)",
-            "switch_2button": "EIN / AUS (2-Tast)",
-            "cover_2button": "AUF / ZU (2-Tast)",
-            "motor_3button": "AUF / STOPP / ZU (3-Tast)",
-            "heating_cooling": "EIN / AUS (Heizung)",
-            "universal_4button": "UNIVERSAL (4-Tast)",
+        # Map receiver_kind to programming mode (without operating type annotation)
+        # This ensures consistent text when navigating forward or backward
+        programming_modes = {
+            "impulse": "Impuls",
+            "switch_2button": "EIN / AUS",
+            "cover_2button": "AUF / ZU",
+            "motor_3button": "AUF / STOPP / ZU",
+            "heating_cooling": "EIN / AUS",
+            "universal_4button": "UNIVERSAL",
         }
         
-        operating_mode = mode_descriptions.get(receiver_kind, receiver_kind)
+        programming_mode = programming_modes.get(receiver_kind, receiver_kind)
+        
+        # Save which dialog we came from for correct back navigation
+        self._device_config["previous_description_step"] = "device_receiver_description"
         
         placeholders = {
-            "operating_mode": operating_mode,
+            "operating_mode": programming_mode,
             "docs_url": get_docs_url("device_receiver_description"),
         }
         
@@ -1224,7 +1302,11 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_device_receiver_description_heating(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show receiver learning overview for heating mode with specific instructions."""
+        # Save which dialog we came from for correct back navigation
+        self._device_config["previous_description_step"] = "device_receiver_description_heating"
+        
         placeholders = {
+            "operating_mode": "EIN / AUS",
             "docs_url": get_docs_url("device_receiver_description_heating"),
         }
         
@@ -1236,6 +1318,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_device_receiver_description_universal(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show receiver learning overview for universal mode with specific instructions."""
+        # Save which dialog we came from for correct back navigation
+        self._device_config["previous_description_step"] = "device_receiver_description_universal"
+        
         placeholders = {
             "docs_url": get_docs_url("device_receiver_description_universal"),
         }
@@ -1276,9 +1361,13 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     
     async def async_step_device_receiver_confirm_learning(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Ask user to confirm that LED acknowledged learning."""
+        # Use saved previous description step for correct back navigation
+        # Falls back to generic description if not saved
+        back_step = self._device_config.get("previous_description_step", "device_receiver_description")
+        
         return self.async_show_menu(
             step_id="device_receiver_confirm_learning",
-            menu_options=["device_receiver_verify", "device_receiver_description"],
+            menu_options=["device_receiver_verify", back_step],
             description_placeholders={
                 "docs_url": get_docs_url("device_receiver_confirm_learning"),
             },
@@ -1300,10 +1389,9 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             coordinator = self.hass.data.get(DOMAIN, {}).get(entries[0].entry_id) if entries else None
             serial = self._device_config.get("serial_number")
             rx11_index = self._device_config.get("rx11_index")
-            
             if coordinator and serial and rx11_index is not None:
                 coordinator.mark_ew_receiver_index_used(rx11_index, serial, serial, device_name)
-                _LOGGER.info("🔒 Marked receiver as used: Index %d", rx11_index)
+                _LOGGER.info("🔒 Marked receiver as used: Index %d, Serial %s", rx11_index, serial[-8:])
             
             # Create the device
             self._device_config.update({
@@ -2511,14 +2599,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if serial_number in coordinator.devices:
                     _LOGGER.info("🔄 Device %s already exists, removing before re-adding", serial_number[-8:])
                     
-                    # Mark device for removal in registry
-                    entity_registry.mark_device_for_removal(serial_number)
-                    
-                    # Remove from coordinator
+                    # Remove from coordinator (handles all lifecycle cleanup)
                     await coordinator.async_remove_device(serial_number, force=True)
-                    
-                    # Complete removal cleanup
-                    entity_registry.complete_device_removal(serial_number)
                     
                     # Wait a bit to ensure cleanup
                     await asyncio.sleep(0.5)
@@ -2566,12 +2648,20 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Update device info with entity specifications
                 device_data.update(entity_info)
                 
+                # IMPORTANT: Ensure rx11_index is persisted for EW Receiver devices
+                # This is critical for index tracking and re-serialization on startup
+                if device_data.get("type") == "ew_receiver" and "rx11_index" in self._device_config:
+                    device_data["rx11_index"] = self._device_config["rx11_index"]
+                    _LOGGER.info("💾 Persisting rx11_index=%d for EW Receiver device", device_data["rx11_index"])
+                
                 # Note: Entity creation is now fully handled by HA's entity registry
                 # No manual reset needed - HA will handle duplicate prevention automatically
                 _LOGGER.info("🔄 Device %s ready for entity creation via HA registry", serial_number[-8:])
                 
                 # Register device PERMANENTLY in the registered devices list FIRST
                 # Note: register_device_permanently will fire all necessary events
+                _LOGGER.debug("💾 Storing in coordinator.devices: detected_button_type=%s, rx11_index=%s",
+                               device_data.get("detected_button_type"), device_data.get("rx11_index"))
                 coordinator.devices[serial_number] = device_data
                 await coordinator.register_device_permanently(serial_number, device_data)
                 _LOGGER.info("✅ Device saved to registry: %s", serial_number[-8:])

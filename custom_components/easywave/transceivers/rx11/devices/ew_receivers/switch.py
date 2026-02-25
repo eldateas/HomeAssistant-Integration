@@ -55,6 +55,8 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
         EWneo switches create switch entities with on/off control.
         This is NOT used for classic Easywave Receivers.
         """
+        from .....helpers_unique_id import make_unique_id
+        
         specs = {
             "switch": [],
             "light": [],
@@ -71,7 +73,7 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             specs["switch"].append({
                 "type": "switch",
                 "name": f"{self.name}{channel_suffix}",
-                "unique_id": f"{self.serial_number}_switch_ch{channel}",
+                "unique_id": make_unique_id(self.serial_number, "switch", channel if self.channel_count > 1 else None),
                 "device_class": "switch",
                 "icon": "mdi:light-switch",
                 "channel": channel,

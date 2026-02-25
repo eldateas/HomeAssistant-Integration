@@ -337,7 +337,8 @@ class EldatButton(EldatEntity, ButtonEntity):
         super().__init__(coordinator, serial_number, device_info)
         
         self._button_id = button_id
-        self._attr_unique_id = f"{serial_number}_button_{button_id}"
+        from .helpers_unique_id import make_unique_id
+        self._attr_unique_id = make_unique_id(serial_number, "button", button_id)
         
         self._attr_name = f"Button {button_id + 1}"
         

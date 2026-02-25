@@ -4,6 +4,9 @@ This module provides button transmitter classes for EW (EasyWave) devices.
 The unified RX11ButtonTransmitter class handles all button counts (1-4),
 replacing the separate Single/Dual/Triple/Quad button classes.
 
+Supports auto-detected 1-button types (A/B/C/D) based on the button pressed
+during learning.
+
 Legacy class names are provided as aliases for backward compatibility.
 """
 from .button_transmitter import (
@@ -15,6 +18,11 @@ from .button_transmitter import (
     create_rx11_dual_button_transmitter,
     create_rx11_triple_button_transmitter,
     create_rx11_quad_button_transmitter,
+    # New 1-button type-specific factories
+    create_rx11_single_button_a_transmitter,
+    create_rx11_single_button_b_transmitter,
+    create_rx11_single_button_c_transmitter,
+    create_rx11_single_button_d_transmitter,
 )
 
 # Backward compatibility aliases with EW prefix
@@ -40,6 +48,11 @@ __all__ = [
     "create_rx11_dual_button_transmitter",
     "create_rx11_triple_button_transmitter",
     "create_rx11_quad_button_transmitter",
+    # New 1-button type-specific factories
+    "create_rx11_single_button_a_transmitter",
+    "create_rx11_single_button_b_transmitter",
+    "create_rx11_single_button_c_transmitter",
+    "create_rx11_single_button_d_transmitter",
     
     # Backward compatibility - EW prefixed
     "RX11EWSingleButtonTransmitter",

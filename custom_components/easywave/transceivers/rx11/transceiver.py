@@ -152,6 +152,37 @@ class RX11Transceiver(BaseTransceiver):
         """Return the RX11 wrapper instance for direct access."""
         return self._rx11_wrapper
 
+    def set_usb_serial_number(self, serial_number: str) -> None:
+        """Set USB serial number for device identification."""
+        if self._rx11_wrapper:
+            self._rx11_wrapper.set_usb_serial_number(serial_number)
+        _LOGGER.debug("📋 RX11 USB Serial Number set: %s", serial_number)
+    
+    def get_usb_serial_number(self) -> Optional[str]:
+        """Get USB serial number for device identification."""
+        if self._rx11_wrapper:
+            return self._rx11_wrapper.get_usb_serial_number()
+        return None
+    
+    def get_device_info(self) -> dict:
+        """Get complete device information including USB and version details.
+        
+        Returns dictionary with device identification, USB information, and versions.
+        """
+        device_info = {
+            'device_path': self.device_path,
+            'usb_serial_number': self.get_usb_serial_number(),
+            'hw_version': self._hw_version,
+            'fw_version': self._fw_version,
+            'connected': self.is_connected
+        }
+        
+        if self._rx11_wrapper:
+            wrapper_info = self._rx11_wrapper.get_device_info()
+            device_info.update(wrapper_info)
+        
+        return device_info
+
     def get_connection_health_stats(self) -> dict:
         """Get connection health and error statistics."""
         if self._rx11_wrapper:
@@ -230,7 +261,7 @@ class RX11Transceiver(BaseTransceiver):
             
             # If original path failed, search for device by VID/PID
             if not hasattr(self, '_search_logged'):
-                _LOGGER.warning("⚠️ Connection to %s failed, searching for RX11 device by VID/PID...", 
+                _LOGGER.info("⚠️ Connection to %s failed, searching for RX11 device by VID/PID...", 
                               self.device_path)
                 self._search_logged = True
             else:
@@ -812,7 +843,7 @@ class RX11Transceiver(BaseTransceiver):
             
             # Handle info_type 0 as release for existing devices
             if info_type == 0:
-                _LOGGER.warning("🔍 RELEASE detected: info_type=0, info_data_len=%d", len(info_data))
+                _LOGGER.debug("🔍 RELEASE detected: info_type=0, info_data_len=%d", len(info_data))
                 # This is a release telegram - find the device type and handle accordingly
                 # For Easywave Transmitter releases, we need to determine which button was released
                 # The button info should be in the first byte of info_data (similar to press)
@@ -826,7 +857,7 @@ class RX11Transceiver(BaseTransceiver):
                     button_name = button_names.get(button_id, "A")
 
                     current_status = self._battery_status.get(serial_number)
-                    _LOGGER.warning("🔍 RELEASE processing: serial=%s, button=%d (%s), battery_status=%s, saw_battery_telegram=%s", 
+                    _LOGGER.debug("🔍 RELEASE processing: serial=%s, button=%d (%s), battery_status=%s, saw_battery_telegram=%s", 
                                serial_number, 
                                button_id,
                                button_name,
@@ -886,7 +917,7 @@ class RX11Transceiver(BaseTransceiver):
                             button_names = {0: "A", 1: "B", 2: "C", 3: "D"}
                             button_name = button_names.get(button_id, "Unknown")
                             
-                            _LOGGER.warning("🔋 Battery LOW telegram → status set to 'low' for %s, using previous button=%s (%d)", 
+                            _LOGGER.debug("🔋 Battery LOW telegram → status set to 'low' for %s, using previous button=%s (%d)", 
                                           serial_number, button_name, button_id)
                             
                             # Create a battery-only event with button info from previous press
@@ -901,7 +932,7 @@ class RX11Transceiver(BaseTransceiver):
                                 "is_low_battery": True,
                                 "battery_status": "low",
                             })
-                            _LOGGER.warning("🔋 Battery LOW event created for previous button %s (%d)", button_name, button_id)
+                            _LOGGER.debug("🔋 Battery LOW event: button %s", button_name)
                             
                         else:
                             # Normal button press - extract button ID from telegram
@@ -916,7 +947,7 @@ class RX11Transceiver(BaseTransceiver):
                             if current_status == "low":
                                 # First normal press after battery low → transition to pending_recovery
                                 self._battery_status[serial_number] = "pending_recovery"
-                                _LOGGER.warning("🔄 First normal press after battery low for %s → pending_recovery", serial_number)
+                                _LOGGER.debug("🔄 First normal press after battery low for %s → pending_recovery", serial_number)
                                 
                             elif current_status == "pending_recovery":
                                 # Second normal press after battery low → transition to normal (battery replaced!)

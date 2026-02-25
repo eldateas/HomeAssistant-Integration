@@ -72,17 +72,31 @@ try:
         create_rx11_dual_button_transmitter,
         create_rx11_triple_button_transmitter,
         create_rx11_quad_button_transmitter,
+        # New 1-button type-specific factories
+        create_rx11_single_button_a_transmitter,
+        create_rx11_single_button_b_transmitter,
+        create_rx11_single_button_c_transmitter,
+        create_rx11_single_button_d_transmitter,
     )
     transmitter_imports['single'] = create_rx11_single_button_transmitter
     transmitter_imports['dual'] = create_rx11_dual_button_transmitter
     transmitter_imports['triple'] = create_rx11_triple_button_transmitter
     transmitter_imports['quad'] = create_rx11_quad_button_transmitter
+    # New 1-button type-specific
+    transmitter_imports['single_a'] = create_rx11_single_button_a_transmitter
+    transmitter_imports['single_b'] = create_rx11_single_button_b_transmitter
+    transmitter_imports['single_c'] = create_rx11_single_button_c_transmitter
+    transmitter_imports['single_d'] = create_rx11_single_button_d_transmitter
 except ImportError as e:
     _LOGGER.warning(f"Could not import button transmitters: {e}")
     transmitter_imports['single'] = lambda *args, **kwargs: None
     transmitter_imports['dual'] = lambda *args, **kwargs: None
     transmitter_imports['triple'] = lambda *args, **kwargs: None
     transmitter_imports['quad'] = lambda *args, **kwargs: None
+    transmitter_imports['single_a'] = lambda *args, **kwargs: None
+    transmitter_imports['single_b'] = lambda *args, **kwargs: None
+    transmitter_imports['single_c'] = lambda *args, **kwargs: None
+    transmitter_imports['single_d'] = lambda *args, **kwargs: None
 
 # EWneo transceiver classes - now using unified modules
 try:
@@ -209,11 +223,15 @@ class RX11DeviceFactory:
     }
     
     TRANSMITTER_FACTORY_FUNCTIONS = {
-        # EW Transmitters - based on button count
-        (DeviceType.EW_TRANSMITTER, 1): transmitter_imports.get('single'),
+        # EW Transmitters - 2, 3, 4 button variants (standard)
         (DeviceType.EW_TRANSMITTER, 2): transmitter_imports.get('dual'),
         (DeviceType.EW_TRANSMITTER, 3): transmitter_imports.get('triple'),
         (DeviceType.EW_TRANSMITTER, 4): transmitter_imports.get('quad'),
+        # EW Transmitters - 1-button type-specific factories (ONLY A/B/C/D, no generic "single")
+        (DeviceType.EW_TRANSMITTER, 'single_a'): transmitter_imports.get('single_a'),
+        (DeviceType.EW_TRANSMITTER, 'single_b'): transmitter_imports.get('single_b'),
+        (DeviceType.EW_TRANSMITTER, 'single_c'): transmitter_imports.get('single_c'),
+        (DeviceType.EW_TRANSMITTER, 'single_d'): transmitter_imports.get('single_d'),
     }
     
     EWNEO_TRANSCEIVER_FACTORY_FUNCTIONS = {
@@ -238,10 +256,10 @@ class RX11DeviceFactory:
     ) -> Optional[BaseDevice]:
         """Create a device instance based on device information and telegram data."""
         try:
-            _LOGGER.info("🏭 Creating device for %s: device_type=%s, type=%s", 
+            _LOGGER.debug("Creating device: serial=%s, type=%s, detected_button_type=%s", 
                         serial_number, 
-                        device_info.get("device_type"), 
-                        device_info.get("type"))
+                        device_info.get("device_type"),
+                        device_info.get("detected_button_type"))
             
             # Merge telegram data with device info for better type detection
             combined_info = dict(device_info)
@@ -299,7 +317,23 @@ class RX11DeviceFactory:
             elif device_type == DeviceType.EW_TRANSMITTER:
                 # Handle transmitters
                 button_count = cls._determine_button_count(combined_info)
-                factory_func = cls.TRANSMITTER_FACTORY_FUNCTIONS.get((device_type, button_count))
+                detected_type = device_info.get("detected_button_type")
+                _LOGGER.debug("EW_TRANSMITTER: button_count=%d, detected_button_type=%s", 
+                           button_count, detected_type)
+                
+                # 1-button transmitters MUST use type-specific factories (A/B/C/D)
+                if button_count == 1:
+                    # Use detected button type or default to A
+                    button_type = device_info.get("detected_button_type", "A")
+                    factory_key = f"single_{button_type.lower()}"
+                    factory_func = cls.TRANSMITTER_FACTORY_FUNCTIONS.get(
+                        (device_type, factory_key)
+                    )
+                    _LOGGER.debug("Using 1-button type %s (factory_key=%s) for transmitter %s", 
+                               button_type, factory_key, serial_number)
+                else:
+                    # 2/3/4 button transmitters use standard factories
+                    factory_func = cls.TRANSMITTER_FACTORY_FUNCTIONS.get((device_type, button_count))
                 
             elif device_type in cls.EWNEO_TRANSCEIVER_FACTORY_FUNCTIONS:
                 # Handle EWneo transceivers (bidirectional devices)

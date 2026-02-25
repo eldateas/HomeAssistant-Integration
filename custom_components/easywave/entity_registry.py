@@ -55,24 +55,31 @@ class EldatEntityRegistry:
             return True
     
     def mark_device_for_removal(self, device_serial: str) -> None:
-        """Mark a device for removal to prevent new entity registrations during cleanup."""
+        """DEPRECATED: Use coordinator.device_lifecycle_manager instead.
+        
+        This method is kept for backwards compatibility only.
+        Device lifecycle is now managed by DeviceLifecycleManager.
+        """
         with self._lock:
             self._devices_being_removed.add(device_serial)
-            _LOGGER.debug("Device %s marked for removal", device_serial[-8:])
+            _LOGGER.debug("⚠️ DEPRECATED: mark_device_for_removal() used - migrate to DeviceLifecycleManager")
     
     def complete_device_removal(self, device_serial: str) -> None:
-        """Complete device removal and clean up session tracking."""
+        """DEPRECATED: Use coordinator.device_lifecycle_manager instead.
+        
+        This method is kept for backwards compatibility only.
+        Device lifecycle is now managed by DeviceLifecycleManager.
+        """
         with self._lock:
             # Remove from removal tracking
             self._devices_being_removed.discard(device_serial)
             
-            # Clean up session entities for this device
-            entities_to_remove = [e for e in self._session_entities if device_serial in e]
+            # Clean up session entities for this device (use startswith for safety)
+            entities_to_remove = [e for e in self._session_entities if e.startswith(device_serial)]
             for entity_id in entities_to_remove:
                 self._session_entities.discard(entity_id)
                 
-            _LOGGER.debug("Device %s removal complete - cleaned %d session entities", 
-                        device_serial[-8:], len(entities_to_remove))
+            _LOGGER.debug("⚠️ DEPRECATED: complete_device_removal() used - migrate to DeviceLifecycleManager")
     
     def clear(self) -> None:
         """Clear all session tracking (useful for integration reload)."""

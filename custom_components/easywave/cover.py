@@ -197,8 +197,8 @@ class EldatCover(EldatEntity, CoverEntity):
                 CoverEntityFeature.CLOSE
             )
         
-        # Set unique ID and name from entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_cover")
+        from .helpers_unique_id import make_unique_id
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "cover")
         translation_key = entity_spec.get("translation_key")
         if translation_key:
             self._attr_translation_key = translation_key

@@ -114,9 +114,10 @@ async def async_setup_entry(
                 _LOGGER.debug("Device added event missing data, skipping")
                 return
             
-            # Skip if this device already had entities created during setup
-            if serial_number in created_device_serials:
-                _LOGGER.debug("Skipping switch creation for %s - already created during setup", serial_number[-8:])
+            # Skip heating_cooling devices - they are created during async_setup_platform()
+            receiver_kind = device_info.get("receiver_kind")
+            if receiver_kind == "heating_cooling":
+                _LOGGER.debug("⏭️ Skipping heating_cooling device %s - already created during setup", serial_number[-8:])
                 return
 
             # Check if we have switch entities in the entities list
@@ -250,38 +251,31 @@ async def async_setup_entry(
 
     # Also listen for registered device events
     async def _handle_registered_device_added(event):
+        """Handle newly registered devices (added after setup).
+        
+        NOTE: This handler skips heating_cooling devices as they are already
+        created during async_setup_platform(). This prevents duplicate entity
+        creation with conflicting unique_ids.
+        
+        This handler is mainly for devices registered AFTER Home Assistant startup.
+        """
         try:
             serial_number = event.data.get("serial_number")
             device_info = event.data.get("device_info")
             
             if not serial_number or not device_info:
                 return
-                
-            # Check if this is a heating_cooling device
+            
+            # Skip heating_cooling devices - they're created during async_setup_platform()
+            # Creating them here would result in duplicate entity IDs
             receiver_kind = device_info.get("receiver_kind")
             if device_info.get("type") == "ew_receiver" and receiver_kind == "heating_cooling":
-                _LOGGER.info("🌡️ Registered heating/cooling device detected: %s", serial_number)
+                _LOGGER.debug("⏭️ Skipping heating/cooling device %s - entities already created during setup", 
+                            serial_number[-8:])
+                return
+            
+            # Fall through to other platform-specific handlers if needed
                 
-                # Generate switch entities
-                from .entity_specs import create_entity_specs_for_device
-                entity_specs = create_entity_specs_for_device(serial_number, device_info)
-                switch_entities = entity_specs.get("switch", [])
-                
-                new_switches = []
-                for entity_spec in switch_entities:
-                    new_switches.append(
-                        EldatEWReceiverSwitch(
-                            coordinator=coordinator,
-                            serial_number=serial_number,
-                            device_info=device_info,
-                            entity_spec=entity_spec,
-                        )
-                    )
-                
-                if new_switches:
-                    async_add_entities(new_switches)
-                    _LOGGER.info("✅ Created %d heating/cooling switch entities for registered device %s", 
-                               len(new_switches), serial_number)
         except Exception:
             _LOGGER.exception("Error handling registered device for switches")
 
@@ -434,7 +428,8 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         # Store translation_key for dynamic name resolution
         self._translation_key = entity_spec.get("translation_key")
         self._static_name = entity_spec.get("name")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_switch_{self._channel}")
+        from .helpers_unique_id import make_unique_id
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "ewneo_switch", self._channel)
         self._attr_device_class = SwitchDeviceClass.SWITCH
         
         # Store icons for state-based icon changes (like EW receivers)
@@ -1071,7 +1066,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
             self._last_command_time = None
             self._last_command_code = None
 
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_configured_switch_{self._channel}_{int(time.time())}")
+        from .helpers_unique_id import make_unique_id
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "configured_switch", self._channel)
         
         # For heating/cooling switches, ensure they are always enabled by default
         if self._is_heating_cooling:
@@ -1153,8 +1149,9 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
             # Update Home Assistant state immediately to show as available
             self.async_write_ha_state()
             
-            # Send initial state or restored state
-            await self._send_initial_state()
+            # DO NOT send initial state on startup - prevents unwanted commands to heating devices
+            # The persistent state is restored above, but no RF command should be sent on startup
+            _LOGGER.debug("🔍 Restored heating/cooling state: %s", restored_state)
             
             # Start timer if we have a persistent state and device was used before
             if restored_state and self._supports_4h_repetition and self._last_command_time:
@@ -1632,7 +1629,8 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
         
         # Set up entity attributes
         self._attr_name = entity_spec.get("name", f"Transmitter {serial_number} Button {self._button}")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_transmitter_switch_{self._button}")
+        from .helpers_unique_id import make_unique_id
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "transmitter_switch", self._button)
         self._attr_icon = entity_spec.get("icon", self._icon_off)
         self._attr_device_class = SwitchDeviceClass.SWITCH
         self._attr_entity_registry_enabled_default = True
@@ -1727,7 +1725,8 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
         self._off_label = entity_spec.get("off_label", self._options[1] if len(self._options) > 1 else "down")
 
         self._attr_name = entity_spec.get("name", f"Transmitter {serial_number} State")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state")
+        from .helpers_unique_id import make_unique_id
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "state")
         self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
         self._attr_device_class = SwitchDeviceClass.SWITCH
         self._attr_entity_registry_enabled_default = True
@@ -1890,11 +1889,12 @@ class EldatSwitch(EldatEntity, SwitchEntity):
         # STATELESS: Kein Zustandstracking - Switch ist vollständig zustandslos (except heating/cooling)
         self._available = True
 
+        from .helpers_unique_id import make_unique_id
         if channel > 0:
-            self._attr_unique_id = f"{serial_number}_switch_{channel}"
+            self._attr_unique_id = make_unique_id(serial_number, "switch", channel)
             self._attr_name = f"{device_info.get('name', serial_number)} Channel {channel + 1}"
         else:
-            self._attr_unique_id = f"{serial_number}_switch"
+            self._attr_unique_id = make_unique_id(serial_number, "switch")
             self._attr_name = f"{device_info.get('name', serial_number)} Switch"
 
         # Get device-specific icon
@@ -2100,8 +2100,8 @@ class EldatSwitch(EldatEntity, SwitchEntity):
         if self._is_heating_cooling:
             _LOGGER.info("🔍 Heating/cooling switch added to hass: %s", self._attr_name)
             
-            # Send initial state or restored state
-            await self._send_initial_state()
+            # DO NOT send initial state on startup - prevents unwanted commands to heating devices
+            # Persistent state is already restored in __init__, no RF commands should be sent
             
             # Schedule repeat timer if we have a last command
             if self._last_command_time and self._last_command_code:

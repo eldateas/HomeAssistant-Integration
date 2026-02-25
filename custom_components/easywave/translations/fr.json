@@ -398,7 +398,7 @@
           "device_transmitter_switch_mode": "⬅️ Retour"
         },
         "menu_option_descriptions": {
-          "device_transmitter_buttons_1": "L'émetteur/canal a 1 bouton avec le code de bouton A.",
+          "device_transmitter_buttons_1": "L'émetteur/canal a 1 bouton avec n'importe quel code de bouton.",
           "device_transmitter_buttons_2": "L'émetteur/canal a 2 boutons avec les codes de bouton A et B.",
           "device_transmitter_buttons_3": "L'émetteur/canal a 3 boutons avec les codes de bouton A, B et C.",
           "device_transmitter_buttons_4": "L'émetteur/canal a 4 boutons avec les codes de bouton A, B, C et D."
@@ -609,7 +609,7 @@
       },
       "device_receiver_description_heating": {
         "title": "Apprendre le récepteur",
-        "description": "Veuillez mettre votre récepteur de contrôle de chauffage en mode de programmation **ON/OFF** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour les instructions sur la sélection du bon mode de programmation, veuillez consulter le manuel d'utilisation du récepteur.\n\nCliquez sur 'Continuer' une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
+        "description": "Veuillez mettre votre récepteur de contrôle de chauffage en mode de programmation **{operating_mode}** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour les instructions sur la sélection du bon mode de programmation, veuillez consulter le manuel d'utilisation du récepteur.\n\nCliquez sur 'Continuer' une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Continuer",
           "device_receiver_type": "⬅️ Retour"
@@ -631,7 +631,9 @@
         "description": "La LED du récepteur s'est-elle allumée en continu pendant 4s ou le processus d'apprentissage a-t-il été confirmé par le récepteur ? (voir le manuel d'utilisation)",
         "menu_options": {
           "device_receiver_verify": "✅ Oui",
-          "device_receiver_description": "❌ Non"
+          "device_receiver_description": "❌ Non",
+          "device_receiver_description_heating": "❌ Non",
+          "device_receiver_description_universal": "❌ Non"
         }
       },
       "device_receiver_verify": {

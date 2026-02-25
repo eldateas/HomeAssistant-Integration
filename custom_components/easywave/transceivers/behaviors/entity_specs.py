@@ -25,8 +25,9 @@ class EntitySpecsMixin:
     def _get_registration_id_suffix(self) -> str:
         """Get registration ID suffix for unique_id generation.
         
-        Returns a suffix like '_a1b2c3' based on registration_id,
+        Returns a suffix like 'a1b2c3' based on registration_id (WITHOUT underscore),
         or empty string for backwards compatibility with existing devices.
+        The caller is responsible for adding the underscore if needed.
         """
         registration_id = self.properties.get("registration_id", "")
         if not registration_id:
@@ -35,7 +36,7 @@ class EntitySpecsMixin:
         # Create a short hash from the registration_id
         hash_input = str(registration_id).encode('utf-8')
         hash_hex = hashlib.md5(hash_input).hexdigest()[:6]
-        return f"_{hash_hex}"
+        return hash_hex
     
     def _create_base_entity_spec(self, entity_type: str, channel: int = 0, **kwargs) -> Dict[str, Any]:
         """Create a base entity specification."""

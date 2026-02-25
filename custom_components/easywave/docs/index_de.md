@@ -367,7 +367,7 @@ automation:
           entity_id: switch.ew_receiver_heizung
 ```
 
-### Batteriewarnung
+### Batteriestatus
 
 ```yaml
 automation:

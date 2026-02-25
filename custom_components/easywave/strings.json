@@ -602,7 +602,7 @@
       },
       "device_receiver_description_heating": {
         "title": "Learn Receiver",
-        "description": "Please put your heating control receiver into programming mode **ON/OFF** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+        "description": "Please put your heating control receiver into programming mode **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Continue",
           "device_receiver_type": "⬅️ Back"
@@ -624,7 +624,9 @@
         "description": "Did the LED on the receiver light up continuously for 4s or was the learning process acknowledged by the receiver? (see operating manual)",
         "menu_options": {
           "device_receiver_verify": "✅ Yes",
-          "device_receiver_description": "❌ No"
+          "device_receiver_description": "❌ No",
+          "device_receiver_description_heating": "❌ No",
+          "device_receiver_description_universal": "❌ No"
         }
       },
       "device_receiver_verify": {

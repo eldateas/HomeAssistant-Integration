@@ -17,6 +17,13 @@ from .const import (
     DOMAIN,
     CONF_DEVICE_PATH,
     CONF_DEVICE_NAME,
+    CONF_USB_VID,
+    CONF_USB_PID,
+    CONF_USB_SERIAL_NUMBER,
+    CONF_USB_MANUFACTURER,
+    CONF_USB_PRODUCT,
+    CONF_FW_VERSION,
+    CONF_HW_VERSION,
     CONF_TRANSCEIVER_TYPE,
     DEVICE_SCAN_INTERVAL,
     DEFAULT_DEVICE_NAME,
@@ -29,55 +36,101 @@ from .translations import translate, get_language
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _find_usb_device_path(hass: HomeAssistant, configured_path: str) -> str:
-    """Find the actual USB device path, handling port changes.
+async def _find_usb_device_path(hass: HomeAssistant, entry: ConfigEntry) -> tuple[str, dict[str, Any]]:
+    """Find the actual USB device path using USB identification.
     
-    If the configured path doesn't exist, searches for ELDAT device by VID/PID.
-    This allows the integration to continue working when USB port changes.
+    Uses VID/PID/SerialNumber to identify the device, allowing USB port changes
+    without reconfiguration. Falls back to configured path if available.
     
     Args:
         hass: Home Assistant instance
-        configured_path: The originally configured device path
+        entry: Config entry with USB identification data
         
     Returns:
-        The actual device path (may be different from configured_path)
+        Tuple of (device_path, device_info) where device_info contains VID, PID, SN, manufacturer, product
     """
     import os
+    import serial.tools.list_ports
     
-    # If configured path exists, use it
-    if os.path.exists(configured_path):
-        return configured_path
+    entry_data = entry.data
     
-    _LOGGER.warning("⚠️ Configured USB path %s not found, searching for ELDAT device...", configured_path)
+    # Extract USB identification from config entry
+    vid = entry_data.get(CONF_USB_VID)
+    pid = entry_data.get(CONF_USB_PID)
+    serial_number = entry_data.get(CONF_USB_SERIAL_NUMBER, "unknown")
+    configured_path = entry_data.get(CONF_DEVICE_PATH)
     
-    # Search for ELDAT device by VID/PID
-    try:
-        import serial.tools.list_ports
+    # If we have USB identification, use it to find the device
+    if vid is not None and pid is not None:
+        _LOGGER.info("🔍 Searching for RX11 device: VID=0x%04X, PID=0x%04X, SN=%s", vid, pid, serial_number)
         
-        # Run blocking I/O operation in executor to avoid blocking event loop
-        def _list_ports():
-            return list(serial.tools.list_ports.comports())
+        try:
+            # Run blocking I/O operation in executor to avoid blocking event loop
+            def _list_ports():
+                return list(serial.tools.list_ports.comports())
+            
+            ports = await hass.async_add_executor_job(_list_ports)
+            
+            # Look for ELDAT USB device by VID/PID
+            for port in ports:
+                if port.vid == vid and port.pid == pid:
+                    # If we have a serial number, check if it matches
+                    if serial_number != "unknown" and port.serial_number:
+                        if port.serial_number == serial_number:
+                            _LOGGER.info("✅ Found RX11 at %s (VID:0x%04X PID:0x%04X SN:%s)", 
+                                       port.device, port.vid, port.pid, port.serial_number)
+                            device_info = {
+                                "device": port.device,
+                                "vid": port.vid,
+                                "pid": port.pid,
+                                "serial_number": port.serial_number,
+                                "manufacturer": port.manufacturer or "ELDAT",
+                                "product": port.product or "RX11 Device",
+                                "location": port.location,
+                            }
+                            return port.device, device_info
+                    else:
+                        # No serial number to check, use first matching VID/PID
+                        _LOGGER.info("✅ Found RX11 at %s (VID:0x%04X PID:0x%04X)", 
+                                   port.device, port.vid, port.pid)
+                        device_info = {
+                            "device": port.device,
+                            "vid": port.vid,
+                            "pid": port.pid,
+                            "serial_number": port.serial_number or "unknown",
+                            "manufacturer": port.manufacturer or "ELDAT",
+                            "product": port.product or "RX11 Device",
+                            "location": port.location,
+                        }
+                        return port.device, device_info
+            
+            _LOGGER.warning("⚠️ No RX11 USB device found with VID:0x%04X PID:0x%04X SN:%s", vid, pid, serial_number)
         
-        ports = await hass.async_add_executor_job(_list_ports)
-        
-        # Look for ELDAT USB devices
-        for port in ports:
-            # Check if this is an ELDAT device (VID: 0x155A, PID: 0x1014)
-            if port.vid == 0x155A and port.pid == 0x1014:
-                _LOGGER.info("✅ Found ELDAT device at %s (VID:0x%04X PID:0x%04X)", 
-                           port.device, port.vid, port.pid)
-                return port.device
-        
-        # No ELDAT device found
-        _LOGGER.warning("⚠️ No alternative ELDAT USB device found - waiting for device to be connected")
-        
-    except ImportError:
-        _LOGGER.warning("⚠️ pyserial not available for USB device detection")
-    except Exception as e:
-        _LOGGER.error("❌ Error searching for USB device: %s", e)
+        except Exception as e:
+            _LOGGER.error("❌ Error searching for USB device: %s", e)
     
-    # Fallback: return configured path (will fail later if still doesn't exist)
-    return configured_path
+    # Fallback: use configured path if it exists
+    if configured_path and os.path.exists(configured_path):
+        _LOGGER.info("✅ Using configured device path: %s", configured_path)
+        device_info = {
+            "device": configured_path,
+            "vid": vid,
+            "pid": pid,
+            "serial_number": serial_number,
+            "manufacturer": entry_data.get(CONF_USB_MANUFACTURER, "ELDAT"),
+            "product": entry_data.get(CONF_USB_PRODUCT, "RX11 Device"),
+        }
+        return configured_path, device_info
+    
+    # No device found
+    _LOGGER.warning("⚠️ No RX11 USB device found and configured path not available")
+    device_info = {
+        "device": configured_path or "unknown",
+        "vid": vid,
+        "pid": pid,
+        "serial_number": serial_number,
+    }
+    return configured_path or "unknown", device_info
 
 
 # Platforms to set up
@@ -104,28 +157,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Get configuration data
     transceiver_type_str = entry.data.get(CONF_TRANSCEIVER_TYPE)
-    device_path = entry.data.get(CONF_DEVICE_PATH)
     device_name = entry.data.get(CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME)
     
     if not transceiver_type_str:
         _LOGGER.error("No transceiver type specified in config entry")
         raise ConfigEntryNotReady("Transceiver type missing")
     
-    if not device_path:
-        _LOGGER.error("No device path specified in config entry")
-        raise ConfigEntryNotReady("Device path missing")
+    # Find USB device using VID/PID/SerialNumber identification
+    # This handles USB port changes automatically
+    actual_device_path, device_info = await _find_usb_device_path(hass, entry)
     
-    # Auto-detect USB port if configured path doesn't exist
-    # This allows the device to work even if USB port changes (e.g., USB0 -> USB1)
-    actual_device_path = await _find_usb_device_path(hass, device_path)
-    if actual_device_path != device_path:
-        _LOGGER.info("🔄 USB port changed: %s → %s", device_path, actual_device_path)
+    if actual_device_path == "unknown":
+        _LOGGER.error("Could not find RX11 USB device - device not connected or not recognized")
+        raise ConfigEntryNotReady("RX11 USB device not found")
+    
+    # Update config entry with latest device information if path changed
+    stored_path = entry.data.get(CONF_DEVICE_PATH)
+    if actual_device_path != stored_path:
+        _LOGGER.info("🔄 USB device port changed: %s → %s", stored_path, actual_device_path)
         # Update config entry with new path (persistent across restarts)
         hass.config_entries.async_update_entry(
             entry,
-            data={**entry.data, CONF_DEVICE_PATH: actual_device_path}
+            data={
+                **entry.data,
+                CONF_DEVICE_PATH: actual_device_path,
+                CONF_USB_SERIAL_NUMBER: device_info.get("serial_number", "unknown"),
+            }
         )
-        device_path = actual_device_path
     
     try:
         transceiver_type = TransceiverType(transceiver_type_str)
@@ -133,12 +191,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("Invalid transceiver type: %s", transceiver_type_str)
         raise ConfigEntryNotReady(f"Invalid transceiver type: {transceiver_type_str}")
     
-    _LOGGER.info("Setting up %s transceiver at %s", transceiver_type.value, device_path)
+    _LOGGER.info("Setting up %s transceiver at %s (SN:%s)", 
+                transceiver_type.value, actual_device_path, device_info.get("serial_number", "unknown"))
     
     # Step 1: Create and setup transceiver
     try:
-        transceiver = TransceiverFactory.create_transceiver(transceiver_type, device_path)
+        transceiver = TransceiverFactory.create_transceiver(transceiver_type, actual_device_path)
         _LOGGER.info("Created %s transceiver instance", transceiver_type.value)
+        
+        # Set USB device information from config entry
+        usb_serial = entry.data.get(CONF_USB_SERIAL_NUMBER, "unknown")
+        if hasattr(transceiver, 'set_usb_serial_number'):
+            transceiver.set_usb_serial_number(usb_serial)
+            _LOGGER.debug("Set USB Serial Number: %s", usb_serial)
+        
     except Exception as e:
         _LOGGER.error("Failed to create transceiver: %s", e)
         raise ConfigEntryNotReady(f"Failed to create {transceiver_type.value} transceiver: {e}")
@@ -157,24 +223,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from .device_migration import migrate_to_device_manager
         await migrate_to_device_manager(hass, entry.entry_id)
         
-        # Check for entity incompatibilities and migrate if needed (fallback protection)
-        _LOGGER.debug("Checking for entity compatibility issues...")
-        from .entity_migration import migrate_entities_if_needed
-        managed_devices = coordinator.device_manager.get_all_devices()
-        migration_report = await migrate_entities_if_needed(hass, entry.entry_id, managed_devices)
-        
-        if migration_report.get("migrated_devices", 0) > 0:
-            _LOGGER.info("🔄 Entity migration completed: %d devices, %d entities updated",
-                        migration_report["migrated_devices"],
-                        len(migration_report.get("recreated_entities", [])))
-        
-        # Log cleanup results
-        duplicates = migration_report.get("duplicate_entities_removed", 0)
-        legacy_battery = migration_report.get("legacy_battery_sensors_removed", 0)
-        orphaned = migration_report.get("orphaned_entities_removed", 0)
-        if duplicates > 0 or legacy_battery > 0 or orphaned > 0:
-            _LOGGER.info("🧹 Entity cleanup: %d duplicates, %d legacy battery sensors, %d orphaned entities removed",
-                        duplicates, legacy_battery, orphaned)
+        # NOTE: Entity migration moved AFTER restore_registered_devices_only (Step 3.1)
+        # to ensure _registered_devices is loaded as authoritative source before
+        # any cleanup runs. Previously this ran here and could delete entities
+        # for devices that exist in registered_devices.json but not managed_devices.json.
         
         # Setup coordinator
         if not await coordinator.async_setup():
@@ -215,14 +267,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as e:
         _LOGGER.debug("Could not purge gateway sensor history (this is normal on first setup): %s", e)
     
-    # Step 3: Restore ONLY registered devices BEFORE setting up platforms
-    _LOGGER.debug("Restoring only registered devices...")
+    # Step 3: Restore registered devices and sync DeviceManager BEFORE setting up platforms
+    _LOGGER.debug("Restoring registered devices...")
     await coordinator.restore_registered_devices_only()
     _LOGGER.info("✅ Restored %d registered devices", len(coordinator.get_all_registered_devices()))
     
-    # Give a moment for device restoration to complete
-    import asyncio
-    await asyncio.sleep(0.5)
+    # Step 3.1: Entity migration - NOW safe because _registered_devices is loaded
+    # Uses BOTH registered_devices AND DeviceManager as valid_serials to prevent data loss
+    try:
+        from .entity_migration import migrate_entities_if_needed
+        # Combine both sources so no device is considered "orphaned" by mistake
+        all_known_serials = set(coordinator.get_all_registered_devices().keys())
+        all_known_serials.update(coordinator.device_manager.get_all_devices().keys())
+        
+        # Build a combined device dict for migration checks
+        # Convert ManagedDevice objects to dicts for migration function
+        combined_devices = {}
+        for serial, device in coordinator.device_manager.get_all_devices().items():
+            combined_devices[serial] = device.to_dict() if hasattr(device, 'to_dict') else device
+        combined_devices.update(coordinator.get_all_registered_devices())
+        
+        migration_report = await migrate_entities_if_needed(hass, entry.entry_id, combined_devices)
+        
+        if migration_report.get("migrated_devices", 0) > 0:
+            _LOGGER.info("🔄 Entity migration completed: %d devices, %d entities updated",
+                        migration_report["migrated_devices"],
+                        len(migration_report.get("recreated_entities", [])))
+        
+        duplicates = migration_report.get("duplicate_entities_removed", 0)
+        legacy_battery = migration_report.get("legacy_battery_sensors_removed", 0)
+        orphaned = migration_report.get("orphaned_entities_removed", 0)
+        if duplicates > 0 or legacy_battery > 0 or orphaned > 0:
+            _LOGGER.info("🧹 Entity cleanup: %d duplicates, %d legacy battery sensors, %d orphaned entities removed",
+                        duplicates, legacy_battery, orphaned)
+    except Exception as e:
+        _LOGGER.warning("⚠️ Entity migration check failed (non-fatal): %s", e)
     
     # Step 3.5: Clear EWB filter BEFORE platforms setup to prevent ERR_FILTER_OUT_OF_MEM
     if coordinator.transceiver and coordinator.transceiver.is_connected:
@@ -277,7 +356,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry and clean up all associated devices."""
     _LOGGER.debug("Unloading ELDAT integration")
     
     # Unload platforms first
@@ -294,10 +373,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = hass.data[DOMAIN].get(entry.entry_id)
     if coordinator:
         try:
+            # Clean up orphaned devices from HA Device Registry
+            # This should ONLY happen on unload, not on startup
+            _LOGGER.info("🧹 Cleaning up orphaned devices during integration unload...")
+            await coordinator._cleanup_orphaned_ha_devices(manual_call=True)
+            
+            # Shutdown coordinator
             await coordinator.async_shutdown()
             _LOGGER.info("✅ Coordinator shutdown completed")
         except Exception as e:
-            _LOGGER.error("❌ Error during coordinator shutdown: %s", e)
+            _LOGGER.error("❌ Error during coordinator shutdown/cleanup: %s", e)
     
     # Remove from hass data
     if unload_ok:
@@ -426,7 +511,11 @@ async def async_remove_config_entry_device(
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove a config entry with proper cleanup - removes ALL devices and persistent data."""
+    """Remove a config entry with proper cleanup - removes ALL devices and persistent data.
+    
+    Stellt sicher, dass beim Löschen der Integration ALLE Dateien und Daten gelöscht werden,
+    damit bei einer Neu-Installation ein sauberer Start erfolgt.
+    """
     import homeassistant.helpers.entity_registry as er
     
     _LOGGER.info("🗑️ Removing ELDAT config entry and all associated data...")
@@ -442,8 +531,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # Step 2: Get coordinator for shutdown and index reset
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
-        # Clear all tracking sets to prevent stale data
-        coordinator.created_entity_unique_ids.clear()
+        # Entity persistence is automatically saved on shutdown by coordinator.async_shutdown()
+        # No need to clear as persistence manager handles it
         coordinator._devices_with_fired_events.clear()
         coordinator._known_devices.clear()
         coordinator.devices.clear()
@@ -501,32 +590,76 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     
     _LOGGER.info("✅ Removed %d devices from device registry", len(devices_to_remove))
     
-    # Step 5: Clean up ALL persistent data files from BOTH directories
+    # Step 5: Clean up ALL persistent data files from BOTH directories (COMPREHENSIVE)
     import os
     
-    # Files that may exist in each directory
+    # Umfassendere Liste: Alle möglichen Dateien die durch die Integration erstellt werden
+    # Diese Liste wird erweitert, um auch neue oder zukünftige Dateien zu erfassen
     files_to_remove = [
+        # Aktuelle koordinator-Dateien
         "registered_devices.json",
+        "registered_devices.json.bak",
+        # DeviceManager (whitelist) Dateien
         "managed_devices.json", 
         "managed_devices_backup.json",
+        "managed_devices.json.bak",
+        # Index-Tracking Dateien
         "used_ewb_indices.json",
         "used_ew_receiver_indices.json",
-        # Legacy migration files (if present)
+        "ewb_indices.json",
+        "ew_receiver_indices.json",
+        # Legacy migration files (wenn vorhanden)
         "device_whitelist.json",
         "device_whitelist.json.migrated_backup",
+        "device_whitelist.json.bak",
         "eldat_devices.json",
         "eldat_devices.json.migrated_backup",
+        "eldat_devices.json.bak",
         "eldat_device_registry.json",
         "eldat_device_registry.json.migrated_backup",
+        "eldat_device_registry.json.bak",
+        # State Manager Dateien (Entity Persistence)
+        f"eldat_entity_persistence_{entry.entry_id}.json",
+        f"entity_persistence_{entry.entry_id}.json",
+        # Device Backup Dateien
+        f"device_backup_{entry.entry_id}.json",
+        "device_backup.json",
+        # Device Lifecycle Dateien (wenn separat gespeichert)
+        f"device_lifecycle_{entry.entry_id}.json",
+        "device_lifecycle.json",
+        # Transceiver Konfiguration
+        f"transceiver_config_{entry.entry_id}.json",
+        "transceiver_config.json",
+        # Learning Modus / Setup Dateien
+        "learning_mode.json",
+        f"learning_{entry.entry_id}.json",
+        # Cache Dateien
+        ".cache",
+        f".cache_{entry.entry_id}",
+        # Log Dateien
+        f"eldat_{entry.entry_id}.log",
+        f"easywave_{entry.entry_id}.log",
     ]
     
-    # Clean up BOTH directories: "eldat" (coordinator files) and "easywave" (DeviceManager files)
+    # Clean up BOTH directories: "eldat" (coordinator files) und "easywave" (DeviceManager files)
+    # Existiert möglicherweise AUCH eine .local/share/homeassistant/custom_components/easywave/ Datei?
     data_directories = [
         Path(hass.config.config_dir) / "eldat",
         Path(hass.config.config_dir) / DOMAIN,  # "easywave"
     ]
     
     total_removed = 0
+    total_dir_removed = 0
+    
+    # Helper function to do glob operations in executor (non-blocking)
+    def _glob_files(dir_path: Path) -> list:
+        """Get all .json and .json.* files from directory (sync operation for executor)."""
+        try:
+            pattern_files = list(dir_path.glob("*.json")) + list(dir_path.glob("*.json.*"))
+            return pattern_files
+        except Exception:
+            return []
+    
     for data_dir in data_directories:
         if data_dir.exists():
             try:
@@ -534,13 +667,36 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 for filename in files_to_remove:
                     filepath = data_dir / filename
                     if filepath.exists():
-                        os.remove(filepath)
-                        removed_count += 1
-                        _LOGGER.info("🗑️ Removed: %s/%s", data_dir.name, filename)
+                        try:
+                            os.remove(filepath)
+                            removed_count += 1
+                            _LOGGER.debug("🗑️ Removed: %s/%s", data_dir.name, filename)
+                        except Exception as e:
+                            _LOGGER.debug("Could not remove %s: %s", filename, e)
+                
+                # Entferne AUCH alle .json und .bak Dateien (fallback für Dateien die wir vergessen haben)
+                # Use executor to avoid blocking the event loop
+                pattern_files = await hass.async_add_executor_job(_glob_files, data_dir)
+                for filepath in pattern_files:
+                    # Überspringe nur die Datei, wenn sie zu einer anderen Config Entry gehört
+                    filename = filepath.name
+                    other_entry = False
+                    for other_id in hass.config_entries.async_entries(DOMAIN):
+                        if other_id.entry_id != entry.entry_id and other_id.entry_id in filename:
+                            other_entry = True
+                            break
+                    
+                    if not other_entry:
+                        try:
+                            os.remove(filepath)
+                            removed_count += 1
+                            _LOGGER.debug("🗑️ Removed glob: %s/%s", data_dir.name, filename)
+                        except Exception:
+                            pass
                 
                 total_removed += removed_count
                 
-                # Remove empty directory (use executor to avoid blocking)
+                # Versuche Empty Directory zu Entfernen (mit Executor um Event Loop nicht zu blockieren)
                 def _check_and_remove_dir(dir_path):
                     try:
                         if dir_path.exists() and not any(dir_path.iterdir()):
@@ -552,9 +708,28 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 
                 if await hass.async_add_executor_job(_check_and_remove_dir, data_dir):
                     _LOGGER.info("🗑️ Removed empty directory: %s", data_dir.name)
+                    total_dir_removed += 1
                     
             except Exception as e:
                 _LOGGER.warning("⚠️ Could not clean up data files in %s: %s", data_dir.name, e)
     
-    _LOGGER.info("✅ ELDAT config entry removed - %d devices, %d entities, %d files deleted", 
-                len(devices_to_remove), len(entities_to_remove), total_removed)
+    # Zusätzlich: Versuche, Konfigurationsdateien im Config-Root zu löschen (falls dort gespeichert)
+    root_config_dir = Path(hass.config.config_dir)
+    root_files_to_check = [
+        f"eldat_{entry.entry_id}.json",
+        f".eldat_{entry.entry_id}.json",
+        f"easywave_{entry.entry_id}.json",
+    ]
+    
+    for filename in root_files_to_check:
+        filepath = root_config_dir / filename
+        if filepath.exists():
+            try:
+                os.remove(filepath)
+                total_removed += 1
+                _LOGGER.debug("🗑️ Removed root config: %s", filename)
+            except Exception as e:
+                _LOGGER.debug("Could not remove root %s: %s", filename, e)
+    
+    _LOGGER.info("✅ ELDAT config entry removed - %d devices, %d entities, %d files deleted, %d directories removed", 
+                len(devices_to_remove), len(entities_to_remove), total_removed, total_dir_removed)

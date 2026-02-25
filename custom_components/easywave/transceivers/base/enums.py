@@ -61,8 +61,11 @@ class DeviceSubtype(Enum):
     WIND_SPEED = "wind_speed"
     RAIN = "rain"
     
-    # Transmitter Subtypen (basierend auf Button-Anzahl)
-    SINGLE_BUTTON = "single_button"
+    # Transmitter Subtypen - nur typisierte 1-Button Varianten (A/B/C/D, kein generischer SINGLE_BUTTON)
+    SINGLE_BUTTON_A = "single_button_a"  # 1-Button Type A
+    SINGLE_BUTTON_B = "single_button_b"  # 1-Button Type B
+    SINGLE_BUTTON_C = "single_button_c"  # 1-Button Type C
+    SINGLE_BUTTON_D = "single_button_d"  # 1-Button Type D
     DUAL_BUTTON = "dual_button"
     TRIPLE_BUTTON = "triple_button"
     QUAD_BUTTON = "quad_button"

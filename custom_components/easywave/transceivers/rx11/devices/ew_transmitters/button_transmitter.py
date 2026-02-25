@@ -29,7 +29,6 @@ TELEGRAM_BUTTON_PUSH = 0x01
 TELEGRAM_EW_BUTTON_PRESS = 0x04
 TELEGRAM_EW_BUTTON_RELEASE = 0x05
 
-
 class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitter):
     """Unified button transmitter for RX11 transceiver.
     
@@ -42,14 +41,27 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
     - 2 buttons: A, B
     - 3 buttons: A, B, C
     - 4 buttons: A, B, C, D
+    
+    Special 1-Button Variants (auto-detected by button type):
+    - 1 button Type A (single_button_a): Only button A
+    - 1 button Type B (single_button_b): Only button B
+    - 1 button Type C (single_button_c): Only button C
+    - 1 button Type D (single_button_d): Only button D
     """
     
-    # Button count to subtype mapping
+    # Button count to subtype mapping (for 2/3/4 buttons only - 1 button uses type-specific mapping)
     BUTTON_COUNT_TO_SUBTYPE = {
-        1: DeviceSubtype.SINGLE_BUTTON,
         2: DeviceSubtype.DUAL_BUTTON,
         3: DeviceSubtype.TRIPLE_BUTTON,
         4: DeviceSubtype.QUAD_BUTTON,
+    }
+    
+    # Button type letter to subtype mapping (for 1-button specific types)
+    BUTTON_TYPE_TO_SUBTYPE = {
+        "A": DeviceSubtype.SINGLE_BUTTON_A,
+        "B": DeviceSubtype.SINGLE_BUTTON_B,
+        "C": DeviceSubtype.SINGLE_BUTTON_C,
+        "D": DeviceSubtype.SINGLE_BUTTON_D,
     }
     
     # Button count to operating mode mapping
@@ -67,6 +79,7 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         self, 
         serial_number: str,
         button_count: int = 4,
+        button_type: Optional[str] = None,
         name: Optional[str] = None,
         **kwargs
     ):
@@ -75,19 +88,40 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         Args:
             serial_number: Device serial number
             button_count: Number of buttons (1-4)
+            button_type: Optional button type for 1-button mode ("A", "B", "C", "D")
+                        If specified, button_count is set to 1
             name: Optional device name
             **kwargs: Additional arguments passed to BaseTransmitter
         """
-        # Validate and set button count
-        if button_count not in range(1, 5):
-            _LOGGER.warning(
-                "Invalid button count %d, defaulting to 4", button_count
-            )
-            button_count = 4
-        
-        # Determine subtype and operating mode
-        subtype = self.BUTTON_COUNT_TO_SUBTYPE[button_count]
-        operating_mode = self.BUTTON_COUNT_TO_MODE[button_count]
+        # Handle 1-button specific types (A/B/C/D) - REQUIRED, no fallback to generic
+        if button_count == 1:
+            # 1-button MUST use a specific type (A/B/C/D)
+            _LOGGER.info("🔘 1-Button init: button_type=%s, button_count=%d", button_type, button_count)
+            if button_type and button_type.upper() in self.BUTTON_TYPE_TO_SUBTYPE:
+                subtype = self.BUTTON_TYPE_TO_SUBTYPE[button_type.upper()]
+                self._button_type = button_type.upper()
+                _LOGGER.info("🔘 Creating 1-Button Transmitter Type %s (subtype: %s)", 
+                            self._button_type, subtype.value)
+            else:
+                # Default to A if no/invalid type specified
+                original_type = button_type
+                button_type = "A"
+                subtype = self.BUTTON_TYPE_TO_SUBTYPE[button_type]
+                self._button_type = button_type
+                _LOGGER.warning("⚠️ No valid button type for 1-button transmitter, defaulting to Type A (provided: %s)", original_type)
+            operating_mode = self.BUTTON_COUNT_TO_MODE[1]
+        else:
+            # Multi-button (2/3/4)
+            if button_count not in range(2, 5):
+                _LOGGER.warning(
+                    "Invalid button count %d for multi-button, defaulting to 4", button_count
+                )
+                button_count = 4
+            
+            # Determine subtype and operating mode
+            subtype = self.BUTTON_COUNT_TO_SUBTYPE[button_count]
+            operating_mode = self.BUTTON_COUNT_TO_MODE[button_count]
+            self._button_type = None
         
         # Initialize with proper configuration
         super().__init__(
@@ -103,7 +137,16 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         self._button_count = button_count
         self._button_press_times: Dict[int, datetime] = {}
         self._button_last_actions: Dict[int, str] = {}
-        self._button_labels = self.BUTTON_LABELS[:button_count]
+        
+        # Set button labels - for 1-button types, only show specific button
+        if button_type and button_type in self.BUTTON_LABELS:
+            # 1-Button specific type shows only its label
+            button_idx = self.BUTTON_LABELS.index(button_type)
+            self._button_labels = [button_type]
+        else:
+            # Standard multi-button shows all up to button_count
+            self._button_labels = self.BUTTON_LABELS[:button_count]
+        
         self._battery_low = False  # Track battery low status
     
     @property
@@ -152,7 +195,8 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
         )
         # Use registration_id suffix for unique entity on re-learning
         reg_id_suffix = self._get_registration_id_suffix()
-        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning{reg_id_suffix}"
+        from .....helpers_unique_id import make_unique_id
+        battery_warning_spec["unique_id"] = make_unique_id(self.serial_number, "battery_warning", None, reg_id_suffix)
         battery_warning_spec["sensor_type"] = "battery_warning"
         specs["binary_sensor"].append(battery_warning_spec)
         
@@ -314,12 +358,29 @@ def create_rx11_button_transmitter(
     serial_number: str,
     device_info: Dict[str, Any],
     button_count: int = 4,
+    button_type: Optional[str] = None,
     **kwargs
 ) -> RX11ButtonTransmitter:
-    """Factory function to create button transmitter with specified button count."""
+    """Factory function to create button transmitter with specified button count.
+    
+    Args:
+        serial_number: Device serial number
+        device_info: Device info dictionary
+        button_count: Number of buttons (1-4)
+        button_type: Optional button type for 1-button mode ("A", "B", "C", "D")
+        **kwargs: Additional arguments
+        
+    Returns:
+        RX11ButtonTransmitter instance
+    """
+    # Check if device_info contains detected button type (auto-detection)
+    if button_type is None and device_info.get("detected_button_type"):
+        button_type = device_info.get("detected_button_type")
+    
     return RX11ButtonTransmitter(
         serial_number=serial_number,
         button_count=button_count,
+        button_type=button_type,
         name=device_info.get('name'),
         **kwargs
     )
@@ -331,9 +392,17 @@ def create_rx11_single_button_transmitter(
     device_info: Dict[str, Any],
     **kwargs
 ) -> RX11ButtonTransmitter:
-    """Factory function for single button transmitter (backward compatibility)."""
+    """Factory function for single button transmitter (backward compatibility).
+    
+    Also handles auto-detected 1-button types (A/B/C/D) from device_info.
+    """
+    # Pass detected_button_type from device_info to factory
+    detected_button_type = device_info.get("detected_button_type")
+    _LOGGER.debug("Creating single button transmitter with detected_button_type=%s",
+               detected_button_type)
     return create_rx11_button_transmitter(
-        serial_number, device_info, button_count=1, **kwargs
+        serial_number, device_info, button_count=1, 
+        button_type=detected_button_type, **kwargs
     )
 
 
@@ -367,6 +436,51 @@ def create_rx11_quad_button_transmitter(
     """Factory function for quad button transmitter (backward compatibility)."""
     return create_rx11_button_transmitter(
         serial_number, device_info, button_count=4, **kwargs
+    )
+
+
+# New factory functions for 1-button specific types (auto-detected)
+def create_rx11_single_button_a_transmitter(
+    serial_number: str,
+    device_info: Dict[str, Any],
+    **kwargs
+) -> RX11ButtonTransmitter:
+    """Factory function for single button type A transmitter (auto-detected)."""
+    return create_rx11_button_transmitter(
+        serial_number, device_info, button_count=1, button_type="A", **kwargs
+    )
+
+
+def create_rx11_single_button_b_transmitter(
+    serial_number: str,
+    device_info: Dict[str, Any],
+    **kwargs
+) -> RX11ButtonTransmitter:
+    """Factory function for single button type B transmitter (auto-detected)."""
+    return create_rx11_button_transmitter(
+        serial_number, device_info, button_count=1, button_type="B", **kwargs
+    )
+
+
+def create_rx11_single_button_c_transmitter(
+    serial_number: str,
+    device_info: Dict[str, Any],
+    **kwargs
+) -> RX11ButtonTransmitter:
+    """Factory function for single button type C transmitter (auto-detected)."""
+    return create_rx11_button_transmitter(
+        serial_number, device_info, button_count=1, button_type="C", **kwargs
+    )
+
+
+def create_rx11_single_button_d_transmitter(
+    serial_number: str,
+    device_info: Dict[str, Any],
+    **kwargs
+) -> RX11ButtonTransmitter:
+    """Factory function for single button type D transmitter (auto-detected)."""
+    return create_rx11_button_transmitter(
+        serial_number, device_info, button_count=1, button_type="D", **kwargs
     )
 
 

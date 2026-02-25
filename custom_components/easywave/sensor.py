@@ -62,11 +62,14 @@ async def _cleanup_duplicate_sensor_entities(
     config_entry_id: str, 
     coordinator
 ) -> int:
-    """Remove old sensor entities without registration_id suffix when device has registration_id.
+    """Remove stale sensor entities that have a DIFFERENT registration_id suffix.
     
-    When a device is re-learned with the registration_id system, new entities with a suffix 
-    are created. This function removes ALL old entities (without suffix) for that device,
-    regardless of whether matching new entities exist yet.
+    SAFETY: Only removes entities that have BOTH:
+    1. A registration_id suffix that does NOT match the current one
+    2. A matching entity WITH the correct suffix already exists
+    
+    Entities without suffix are NOT removed here — they are handled by
+    the central entity_migration in __init__.py.
     
     Returns:
         Number of entities removed
@@ -77,6 +80,9 @@ async def _cleanup_duplicate_sensor_entities(
     
     entity_registry = er.async_get(hass)
     removed_count = 0
+    
+    # Safety limit: never remove more than 50 entities in one pass
+    MAX_REMOVALS = 50
     
     # Get all sensor entities for this config entry
     all_entities = [
@@ -103,45 +109,55 @@ async def _cleanup_duplicate_sensor_entities(
         hash_hex = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
         expected_suffix = f"_{hash_hex}"
         
-        # Find entities for this device
-        device_entities = [e for e in all_entities if e.unique_id and serial_number in e.unique_id]
+        # Find entities for this device (use startswith to avoid substring false-matches)
+        device_entities = [e for e in all_entities if e.unique_id and e.unique_id.startswith(serial_number)]
         
         # Pattern to detect ANY registration_id suffix (6 hex chars at the end)
         suffix_pattern = re.compile(r'^(.+)_([0-9a-f]{6})$')
         
-        # Remove ALL entities that don't have the expected suffix
+        # Build set of entities WITH correct suffix (must exist before we remove old ones)
+        correct_suffix_ids = {e.unique_id for e in device_entities if e.unique_id.endswith(expected_suffix)}
+        
+        # Only remove stale entities if matching correct-suffix entities already exist
+        if not correct_suffix_ids:
+            _LOGGER.debug("No sensor entities with correct suffix for %s yet — skipping cleanup", serial_number[-8:])
+            continue
+        
         for entity in device_entities:
+            if removed_count >= MAX_REMOVALS:
+                _LOGGER.warning("⚠️ Safety limit reached: stopped after removing %d sensor entities", MAX_REMOVALS)
+                return removed_count
+            
             unique_id = entity.unique_id
             
-            # Check if entity has the expected suffix
+            # Skip entities with correct suffix
             if unique_id.endswith(expected_suffix):
-                continue  # This is a valid new entity
+                continue
             
-            # Check if entity has ANY suffix (might be from old registration)
+            # Only remove entities with a DIFFERENT suffix (stale from old registration)
             match = suffix_pattern.match(unique_id)
             if match:
-                suffix = f"_{match.group(2)}"
-                if suffix != expected_suffix:
-                    # This entity has a DIFFERENT suffix - it's from an old registration
-                    try:
-                        entity_registry.async_remove(entity.entity_id)
-                        removed_count += 1
-                        _LOGGER.info("🧹 Removed old sensor entity with wrong suffix: %s (had %s, expected %s)", 
-                                   entity.entity_id, suffix, expected_suffix)
-                    except Exception as e:
-                        _LOGGER.warning("⚠️ Failed to remove old entity %s: %s", entity.entity_id, e)
-            else:
-                # This entity has NO suffix - it's an old entity format
-                try:
-                    entity_registry.async_remove(entity.entity_id)
-                    removed_count += 1
-                    _LOGGER.info("🧹 Removed old sensor entity without suffix: %s (device has registration_id)", 
-                               entity.entity_id)
-                except Exception as e:
-                    _LOGGER.warning("⚠️ Failed to remove old entity %s: %s", entity.entity_id, e)
+                old_suffix = f"_{match.group(2)}"
+                if old_suffix != expected_suffix:
+                    # Verify a replacement entity exists before removing
+                    base_id = match.group(1)
+                    replacement_id = f"{base_id}{expected_suffix}"
+                    if replacement_id in correct_suffix_ids:
+                        try:
+                            entity_registry.async_remove(entity.entity_id)
+                            removed_count += 1
+                            _LOGGER.info("🧹 Removed stale sensor entity: %s (had %s, replaced by %s)", 
+                                       entity.entity_id, old_suffix, expected_suffix)
+                        except Exception as e:
+                            _LOGGER.warning("⚠️ Failed to remove old entity %s: %s", entity.entity_id, e)
+                    else:
+                        _LOGGER.debug("Keeping sensor entity %s — no replacement with suffix %s found", 
+                                    entity.entity_id, expected_suffix)
+            # NOTE: Entities WITHOUT suffix are intentionally NOT removed here.
+            # Central entity_migration in __init__.py handles suffix-less entity cleanup.
     
     if removed_count > 0:
-        _LOGGER.info("🧹 Cleaned up %d old sensor entities", removed_count)
+        _LOGGER.info("🧹 Cleaned up %d stale sensor entities (with wrong suffix)", removed_count)
     
     return removed_count
 
@@ -201,13 +217,10 @@ async def async_setup_entry(
             sensors.extend(device_sensors)
             _LOGGER.debug("Prepared %d sensor entities for device: %s (%s)", 
                         len(device_sensors), device_name, device_type)
-        else:
+        elif device_type in ["ew_sensor", "ewneo_sensor", "ew_transceiver", "ewneo_transceiver"]:
+            # Only warn if this device TYPE should have sensors
             _LOGGER.warning("⚠️ No sensors created for device %s (%s) - checking registry...", 
                           device_name, device_type)
-            
-            # If no sensors were created but device should have sensors, log warning
-            if device_type in ["ew_sensor", "ewneo_sensor", "ew_transceiver"]:
-                _LOGGER.warning("⚠️ No sensors created for EW-Sensor device %s - may need manual intervention", serial_number[-8:])
     
     if sensors:
         async_add_entities(sensors)
@@ -687,12 +700,14 @@ class EldatGatewaySensor(SensorEntity):
         # Get USB device info from config entry
         usb_manufacturer = coordinator.config_entry.data.get("usb_manufacturer", "ELDAT EaS GmbH")
         usb_product = coordinator.config_entry.data.get("usb_product", "RX11")
+        usb_serial_number = coordinator.config_entry.data.get("usb_serial_number", "unknown")
         
-        # Store version info for dynamic device_info
+        # Store version info for dynamic device_info and display
         self._hw_version = hw_version
         self._sw_version = sw_version
         self._usb_manufacturer = usb_manufacturer
         self._usb_product = usb_product
+        self._usb_serial_number = usb_serial_number
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -702,6 +717,7 @@ class EldatGatewaySensor(SensorEntity):
             name="RX11 USB Transceiver",
             manufacturer=self._usb_manufacturer,
             model=self._usb_product,
+            serial_number=self._usb_serial_number if self._usb_serial_number != "unknown" else None,
             sw_version=self._sw_version,
             hw_version=self._hw_version,
         )
@@ -784,6 +800,9 @@ class EldatGatewaySensor(SensorEntity):
         transceiver = self.coordinator.transceiver
         attrs = {
             "device_path": getattr(transceiver, "device_path", None),
+            "usb_serial_number": transceiver.get_usb_serial_number() if hasattr(transceiver, 'get_usb_serial_number') else None,
+            "hardware_version": getattr(transceiver, "_hw_version", None),
+            "firmware_version": getattr(transceiver, "_fw_version", None),
             "known_devices": len(self.coordinator.devices),
             "learning_mode": getattr(transceiver, "_learning_mode", False),
             "continuous_monitoring": getattr(transceiver, "_ewb_rcv_running", False),

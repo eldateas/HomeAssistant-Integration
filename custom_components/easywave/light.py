@@ -47,9 +47,9 @@ async def async_setup_entry(
                 continue
             try:
                 lt = EldatEWReceiverDimmer(coordinator, serial, device_info, entity_spec)
-                if lt.unique_id not in coordinator.created_entity_unique_ids:
+                if not coordinator.is_entity_created(lt.unique_id):
                     lights.append(lt)
-                    coordinator.created_entity_unique_ids.add(lt.unique_id)
+                    coordinator.mark_entity_created(lt.unique_id, lt.name)
                 else:
                     _LOGGER.warning("Light: Skipping duplicate light with unique_id: %s", lt.unique_id)
             except Exception as e:
@@ -100,9 +100,9 @@ async def async_setup_entry(
                         _LOGGER.debug("Light: Entity with unique_id %s already exists as %s, skipping", lt.unique_id, existing_entity)
                         continue
                     
-                    if lt.unique_id not in coordinator.created_entity_unique_ids:
+                    if not coordinator.is_entity_created(lt.unique_id):
                         new.append(lt)
-                        coordinator.created_entity_unique_ids.add(lt.unique_id)
+                        coordinator.mark_entity_created(lt.unique_id, lt.name)
                         _LOGGER.debug("Light: Added new light entity with unique_id: %s", lt.unique_id)
                     else:
                         _LOGGER.warning("Light: Skipping duplicate light with unique_id: %s from event", lt.unique_id)
@@ -169,14 +169,12 @@ class EldatEWReceiverDimmer(EldatEntity, LightEntity):
         self._receiver_kind = entity_spec.get("receiver_kind", "dimmer")
         self._operating_mode = entity_spec.get("operating_mode", 1)
         
-        # Create unique ID that matches config flow pattern
+        from .helpers_unique_id import make_unique_id
         base_unique_id = entity_spec.get("unique_id")
         if base_unique_id:
-            # Use the unique_id from entity_spec (created by config flow)
             self._attr_unique_id = base_unique_id
         else:
-            # Fallback: create unique ID that matches config flow pattern
-            self._attr_unique_id = f"{serial_number}_light_{self._receiver_kind}_mode{self._operating_mode}_ch{self._channel}"
+            self._attr_unique_id = make_unique_id(serial_number, f"light_{self._receiver_kind}_mode{self._operating_mode}", self._channel)
         
         # Operating mode and button configuration
         self._button_config = entity_spec.get("button_config", {})
@@ -470,7 +468,8 @@ class EldatEWneoLight(EldatEntity, LightEntity):
     @property
     def unique_id(self) -> str:
         """Return unique ID for this light."""
-        return self._entity_spec.get("unique_id", f"{self._serial_number}_light_{self._channel}")
+        from .helpers_unique_id import make_unique_id
+        return self._entity_spec.get("unique_id") or make_unique_id(self._serial_number, "light", self._channel)
 
     @property
     def is_on(self) -> bool:
@@ -537,7 +536,7 @@ class EldatEWneoLight(EldatEntity, LightEntity):
         def handle_ewneo_state_update(event):
             """Handle EWneo state update events."""
             if event.data.get("serial_number") == self._serial_number:
-                _LOGGER.info("🔄 EWneo light %s: Received state update event", self._serial_number[-8:])
+                _LOGGER.debug("🔄 EWneo light %s: Received state update event", self._serial_number[-8:])
                 parsed_state = event.data.get("parsed_state", {})
                 if parsed_state and parsed_state.get("type") == "light":
                     # Use thread-safe add_job to schedule state update
@@ -568,10 +567,10 @@ class EldatEWneoLight(EldatEntity, LightEntity):
         if state_changed:
             if self._attr_color_mode == ColorMode.BRIGHTNESS:
                 brightness_pct = round((self._brightness / 255.0) * 100, 1)
-                _LOGGER.info("🎯 EWneo light %s: State updated - On: %s, Brightness: %d%% (%d/255)", 
+                _LOGGER.debug("🎯 EWneo light %s: State updated - On: %s, Brightness: %d%% (%d/255)", 
                             self._serial_number[-8:], self._is_on, brightness_pct, self._brightness)
             else:
-                _LOGGER.info("🎯 EWneo light %s: State updated - On: %s", 
+                _LOGGER.debug("🎯 EWneo light %s: State updated - On: %s", 
                             self._serial_number[-8:], self._is_on)
             self.async_write_ha_state()
 

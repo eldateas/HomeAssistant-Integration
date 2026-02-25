@@ -55,6 +55,8 @@ class RX11ClimateReceiver(EntitySpecsMixin, BaseReceiver):
         Creates button entities for stateless operation:
         - Mode 1 (Eintastbedienung): 1 Toggle button (Ein/Aus)
         """
+        from .....helpers_unique_id import make_unique_id
+        
         specs = {
             "switch": [],
             "light": [],
@@ -72,7 +74,7 @@ class RX11ClimateReceiver(EntitySpecsMixin, BaseReceiver):
             specs["button"].append({
                 "type": "button",
                 "name": f"{self.name}{channel_suffix} A - Ein/Aus",
-                "unique_id": f"{self.serial_number}_toggle_ch{channel}",
+                "unique_id": make_unique_id(self.serial_number, "toggle", channel if self.channel_count > 1 else None),
                 "channel": channel,
                 "button_code": 0,  # TM_BUTTON_A
                 "action": "toggle",

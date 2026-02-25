@@ -73,7 +73,7 @@ class EntityMigrationHelper:
             )
             
             if incompatibilities:
-                _LOGGER.warning("⚠️ Found %d incompatible entities for device %s",
+                _LOGGER.info("⚠️ Found %d incompatible entities for device %s",
                               len(incompatibilities), serial_number[-8:])
                 report["incompatible_entities"] += len(incompatibilities)
                 
@@ -88,9 +88,9 @@ class EntityMigrationHelper:
                 if success:
                     report["migrated_devices"] += 1
         
-        # Log migration summary
+        # Log migration summary (debug level for detail)
         if report["migrated_devices"] > 0:
-            _LOGGER.info("✅ Migration complete: %d devices, %d entities recreated",
+            _LOGGER.debug("✅ Migration complete: %d devices, %d entities recreated",
                         report["migrated_devices"], len(report["recreated_entities"]))
         
         return report
@@ -131,8 +131,8 @@ class EntityMigrationHelper:
             if not entity.unique_id:
                 continue
             
-            # Check if entity belongs to this device (contains serial in unique_id)
-            if serial_number not in entity.unique_id:
+            # Check if entity belongs to this device (use startswith for safe matching)
+            if not entity.unique_id.startswith(serial_number):
                 continue
             
             # Check if unique_id matches expected format
@@ -321,6 +321,9 @@ class EntityMigrationHelper:
     ) -> int:
         """Remove orphaned entities that don't belong to any valid device.
         
+        SAFETY: Uses startswith() instead of substring matching to avoid
+        false positives. Has a safety limit of 20 entities per cleanup pass.
+        
         Args:
             config_entry_id: Config entry ID
             valid_serials: Set of valid device serial numbers
@@ -329,27 +332,40 @@ class EntityMigrationHelper:
             Number of entities removed
         """
         removed_count = 0
+        MAX_REMOVALS = 20  # Safety limit to prevent mass deletion
+        
         existing_entities = self._get_existing_entities(config_entry_id)
         
+        if not valid_serials:
+            _LOGGER.info("⚠️ No valid serials provided for orphan cleanup — skipping to prevent data loss")
+            return 0
+        
         for entity in existing_entities:
+            if removed_count >= MAX_REMOVALS:
+                _LOGGER.warning("⚠️ Safety limit reached: stopped orphan cleanup after removing %d entities", MAX_REMOVALS)
+                break
+            
             if not entity.unique_id:
                 continue
             
-            # Check if entity belongs to any valid device
+            # Check if entity belongs to any valid device (use startswith for safe matching)
             belongs_to_valid_device = any(
-                serial in entity.unique_id for serial in valid_serials
+                entity.unique_id.startswith(serial) for serial in valid_serials
             )
             
             if not belongs_to_valid_device:
-                # Check if it's the gateway sensor
-                if "gateway" in entity.unique_id:
+                # Check if it's the gateway sensor or other special entities
+                if "gateway" in entity.unique_id or "rx11" in entity.unique_id.lower():
                     continue
                 
                 _LOGGER.info("🗑️ Removing orphaned entity: %s (unique_id=%s)",
                            entity.entity_id, entity.unique_id[-16:])
                 
-                self.entity_registry.async_remove(entity.entity_id)
-                removed_count += 1
+                try:
+                    self.entity_registry.async_remove(entity.entity_id)
+                    removed_count += 1
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Failed to remove orphaned entity %s: %s", entity.entity_id, e)
         
         if removed_count > 0:
             _LOGGER.info("✅ Removed %d orphaned entities", removed_count)
@@ -393,8 +409,8 @@ async def cleanup_legacy_battery_sensors(
             
             # Check for exact battery sensor (not battery_warning)
             if entity.unique_id and entity.unique_id.endswith("_battery"):
-                # Make sure it's not battery_warning
-                if serial_number in entity.unique_id and "warning" not in entity.unique_id:
+                # Make sure it's not battery_warning, and use startswith for safe matching
+                if entity.unique_id.startswith(serial_number) and "warning" not in entity.unique_id:
                     _LOGGER.info("🔋 Removing legacy battery percentage sensor: %s", entity.entity_id)
                     try:
                         entity_registry.async_remove(entity.entity_id)
@@ -441,8 +457,8 @@ async def cleanup_duplicate_entities(
         if not registration_id:
             continue
         
-        # Find entities for this device
-        device_entities = [e for e in all_entities if e.unique_id and serial_number in e.unique_id]
+        # Find entities for this device (use startswith to avoid substring false-matches)
+        device_entities = [e for e in all_entities if e.unique_id and e.unique_id.startswith(serial_number)]
         
         # Separate entities with and without registration_id suffix
         entities_with_suffix = []

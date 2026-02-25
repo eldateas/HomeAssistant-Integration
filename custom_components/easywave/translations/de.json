@@ -58,7 +58,7 @@
         }
       },
       "battery_warning": {
-        "name": "Batteriewarnung"
+        "name": "Batteriestatus"
       }
     },
     "sensor": {
@@ -363,7 +363,7 @@
       },
       "device_transmitter_grouping": {
         "title": "Bedienung",
-        "description": "Sollen die Tasten als eigenständige Entitäten oder in einer\nEntität, gruppiert als Zustände, angelegt werden?",
+        "description": "Sollen die Tasten als eigenständige Entitäten oder in einer Entität, gruppiert als Zustände, angelegt werden?",
         "menu_options": {
           "device_transmitter_grouping_single": "⚪ Einzeln schalten",
           "device_transmitter_grouping_group": "⚪ Als Gruppe schalten",
@@ -376,7 +376,7 @@
       },
       "device_transmitter_switch_mode": {
         "title": "Verhalten",
-        "description": "Soll der Schaltzustand nach der Betätigung zurück gesetzt\nwerden oder permanent anstehen?",
+        "description": "Soll der Schaltzustand nach der Betätigung zurück gesetzt werden oder permanent anstehen?",
         "menu_options": {
           "device_transmitter_switch_impulse": "⚪ Impuls",
           "device_transmitter_switch_permanent": "⚪ Dauer",
@@ -398,7 +398,7 @@
           "device_transmitter_switch_mode": "⬅️ Zurück"
         },
         "menu_option_descriptions": {
-          "device_transmitter_buttons_1": "Der einzulernende Sender / Kanal hat nur 1 Taste mit dem Tastencode A.",
+          "device_transmitter_buttons_1": "Der einzulernende Sender / Kanal hat nur 1 Taste mit einem beliebigen Tastencode.",
           "device_transmitter_buttons_2": "Der einzulernende Sender / Kanal hat 2 Tasten mit den Tastencodes A und B.",
           "device_transmitter_buttons_3": "Der einzulernende Sender / Kanal hat 3 Tasten mit den Tastencodes A, B und C.",
           "device_transmitter_buttons_4": "Der einzulernende Sender / Kanal hat 4 Tasten mit den Tastencodes A, B, C und D."
@@ -608,7 +608,7 @@
       },
       "device_receiver_description_heating": {
         "title": "Empfänger einlernen",
-        "description": "Bringen Sie Ihren Empfänger für Heizungssteuerung bitte jetzt in den Programmiermodus **EIN / AUS**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhytmus blinkt.",
+        "description": "Bringen Sie Ihren Empfänger für Heizungssteuerung bitte jetzt in den Programmiermodus **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhytmus blinkt.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Weiter",
           "device_receiver_type": "⬅️ Zurück"
@@ -630,7 +630,9 @@
         "description": "Hat die LED am Empfänger für 4s durchgängig geleuchtet bzw. wurde der Einlernvorgang vom Empfänger quittiert? (s. Bedienungsanleitung)",
         "menu_options": {
           "device_receiver_verify": "✅ Ja",
-          "device_receiver_description": "❌ Nein"
+          "device_receiver_description": "❌ Nein",
+          "device_receiver_description_heating": "❌ Nein",
+          "device_receiver_description_universal": "❌ Nein"
         }
       },
       "device_receiver_verify": {
@@ -1098,7 +1100,7 @@
       "state_ab": "Zustand A/B",
       "state_cd": "Zustand C/D",
       "battery": "Batterie",
-      "battery_warning": "Batteriewarnung",
+      "battery_warning": "Batteriestatus",
       "battery_level": "Batteriestand",
       "channel": "Kanal {channel}",
       "temperature": "Temperatur",

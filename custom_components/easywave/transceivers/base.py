@@ -125,8 +125,11 @@ class DeviceSubtype(Enum):
     WIND_SPEED = "wind_speed"
     RAIN = "rain"
     
-    # Transmitter Subtypen (basierend auf Button-Anzahl)
-    SINGLE_BUTTON = "single_button"
+    # Transmitter Subtypen - nur typisierte 1-Button Varianten (A/B/C/D)
+    SINGLE_BUTTON_A = "single_button_a"  # 1-Button Type A
+    SINGLE_BUTTON_B = "single_button_b"  # 1-Button Type B
+    SINGLE_BUTTON_C = "single_button_c"  # 1-Button Type C
+    SINGLE_BUTTON_D = "single_button_d"  # 1-Button Type D
     DUAL_BUTTON = "dual_button"
     TRIPLE_BUTTON = "triple_button"
     QUAD_BUTTON = "quad_button"
@@ -782,20 +785,23 @@ class EntitySpecsMixin:
     
     def _create_base_entity_spec(self, entity_type: str, channel: int = 0, **kwargs) -> Dict[str, Any]:
         """Create a base entity specification."""
-        channel_suffix = f"_ch{channel}" if channel > 0 else ""
+        from ..helpers_unique_id import make_unique_id
+        
+        channel_num = channel if channel > 0 else None
         
         # Get registration_id suffix for unique entity IDs on re-learning
         reg_id_suffix = self._get_registration_id_suffix()
         
         # If name is explicitly None, don't set a default - HA will use device_class translation
         entity_name = kwargs.get("name")
+        channel_suffix = f"_ch{channel}" if channel > 0 else ""
         if "name" not in kwargs:
             entity_name = f"{self.name} {entity_type.title()}{channel_suffix}"
         
         spec = {
             "type": entity_type,
             "name": entity_name,
-            "unique_id": f"{self.serial_number}_{entity_type}{channel_suffix}{reg_id_suffix}",
+            "unique_id": make_unique_id(self.serial_number, entity_type, channel_num, reg_id_suffix),
             "channel": channel,
             "device_class": kwargs.get("device_class"),
             "icon": kwargs.get("icon"),
@@ -811,8 +817,9 @@ class EntitySpecsMixin:
     def _get_registration_id_suffix(self) -> str:
         """Get registration ID suffix for unique_id generation.
         
-        Returns a suffix like '_a1b2c3' based on registration_id,
+        Returns a suffix like 'a1b2c3' based on registration_id (WITHOUT underscore),
         or empty string for backwards compatibility with existing devices.
+        The caller is responsible for adding the underscore if needed (via make_unique_id).
         """
         import hashlib
         
@@ -823,4 +830,4 @@ class EntitySpecsMixin:
         # Create a short hash from the registration_id
         hash_input = str(registration_id).encode('utf-8')
         hash_hex = hashlib.md5(hash_input).hexdigest()[:6]
-        return f"_{hash_hex}"
+        return hash_hex

@@ -310,6 +310,9 @@ class DeviceManager:
     def remove_device(self, serial_number: str) -> bool:
         """Remove a device from the whitelist.
         
+        Note: This is a simple whitelist removal.  For complete cleanup including
+        entity registry and device registry cleanup, use coordinator.async_remove_device().
+        
         Args:
             serial_number: Serial number of device to remove
             
@@ -368,77 +371,61 @@ class DeviceManager:
         """
         return serial_number in self._devices
     
-    def mark_device_available(self, serial_number: str) -> bool:
-        """Mark a device as available.
-        
-        Devices not in whitelist cannot be marked available.
+    def set_device_availability(self, serial_number: str, available: bool) -> bool:
+        """Setzt die Verfügbarkeit eines Geräts.
         
         Args:
-            serial_number: Device serial number
+            serial_number: Seriennummer des Geräts
+            available: True = verfügbar, False = nicht verfügbar
             
         Returns:
-            True if marked, False if device not in whitelist
+            True wenn gesetzt, False wenn Gerät nicht im Whitelist
         """
         device = self._devices.get(serial_number)
-        if device:
+        if not device:
+            if available:
+                _LOGGER.warning("⚠️ Kann Verfügbarkeit nicht setzen: Gerät %s nicht im Whitelist", 
+                              serial_number[-8:])
+            else:
+                _LOGGER.debug("🔍 Gerät %s not in whitelist, already unavailable", 
+                             serial_number[-8:])
+            return False
+        
+        if available:
             device.mark_available()
-            _LOGGER.debug("✅ Device %s marked as available", serial_number[-8:])
-            return True
+            _LOGGER.debug("✅ Gerät %s verfügbar", serial_number[-8:])
         else:
-            _LOGGER.warning("⚠️ Cannot mark unavailable: device %s not in whitelist", 
-                          serial_number[-8:])
-            return False
+            device.mark_unavailable()
+            _LOGGER.debug("❌ Gerät %s nicht verfügbar", serial_number[-8:])
+        
+        return True
     
-    def mark_device_unavailable(self, serial_number: str) -> bool:
-        """Mark a device as unavailable.
+    def get_devices_by_availability(self, available: Optional[bool] = None) -> Dict[str, ManagedDevice]:
+        """Holt Geräte nach Verfügbarkeitsstatus.
         
         Args:
-            serial_number: Device serial number
+            available: True=verfügbar, False=nicht verfügbar, None=alle
             
         Returns:
-            True if marked, False if device not found
+            Dictionary mit gefilterten Geräten
         """
-        device = self._devices.get(serial_number)
-        if device:
-            device.mark_unavailable()
-            _LOGGER.debug("❌ Device %s marked as unavailable", serial_number[-8:])
-            return True
-        else:
-            _LOGGER.debug("🔍 Device %s not in whitelist, already unavailable", 
-                         serial_number[-8:])
-            return False
+        if available is None:
+            return self._devices.copy()
+        
+        target_state = DeviceAvailability.AVAILABLE if available else DeviceAvailability.UNAVAILABLE
+        return {
+            serial: device
+            for serial, device in self._devices.items()
+            if device.availability == target_state
+        }
     
     def get_all_devices(self) -> Dict[str, ManagedDevice]:
-        """Get all managed devices.
+        """Holt alle verwalteten Geräte.
         
         Returns:
-            Dictionary mapping serial_number -> ManagedDevice
+            Dictionary mit allen Geräten
         """
         return self._devices.copy()
-    
-    def get_available_devices(self) -> Dict[str, ManagedDevice]:
-        """Get all available devices.
-        
-        Returns:
-            Dictionary of available devices
-        """
-        return {
-            serial: device
-            for serial, device in self._devices.items()
-            if device.availability == DeviceAvailability.AVAILABLE
-        }
-    
-    def get_unavailable_devices(self) -> Dict[str, ManagedDevice]:
-        """Get all unavailable devices.
-        
-        Returns:
-            Dictionary of unavailable devices
-        """
-        return {
-            serial: device
-            for serial, device in self._devices.items()
-            if device.availability == DeviceAvailability.UNAVAILABLE
-        }
     
     def update_device_info(self, serial_number: str, **kwargs) -> bool:
         """Update device information.
@@ -480,13 +467,13 @@ class DeviceManager:
         # Mark whitelisted devices that were found as available
         available_count = 0
         for serial in whitelisted_serials & discovered_serials:
-            self.mark_device_available(serial)
+            self.set_device_availability(serial, True)
             available_count += 1
         
         # Mark whitelisted devices that were NOT found as unavailable
         unavailable_count = 0
         for serial in whitelisted_serials - discovered_serials:
-            self.mark_device_unavailable(serial)
+            self.set_device_availability(serial, False)
             unavailable_count += 1
         
         # Log devices that were discovered but not whitelisted

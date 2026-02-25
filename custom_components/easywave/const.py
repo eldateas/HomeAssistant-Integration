@@ -16,10 +16,15 @@ ELDAT_VID: Final = 0x155A  # Vendor ID
 ELDAT_PIDS: Final = [0x1014]  # Product ID - RX11 USB Transceiver
 
 # Config Entry Keys
-CONF_DEVICE_PATH: Final = "device_path"
+CONF_DEVICE_PATH: Final = "device_path"  # Legacy: optional fallback
 CONF_DEVICE_NAME: Final = "device_name"
-CONF_USB_VID: Final = "usb_vid"
-CONF_USB_PID: Final = "usb_pid"
+CONF_USB_VID: Final = "usb_vid"  # Primary: USB Vendor ID
+CONF_USB_PID: Final = "usb_pid"  # Primary: USB Product ID
+CONF_USB_SERIAL_NUMBER: Final = "usb_serial_number"  # Primary: USB Serial Number
+CONF_USB_MANUFACTURER: Final = "usb_manufacturer"  # Display: Manufacturer name
+CONF_USB_PRODUCT: Final = "usb_product"  # Display: Product name
+CONF_FW_VERSION: Final = "fw_version"  # Display: Firmware version
+CONF_HW_VERSION: Final = "hw_version"  # Display: Hardware version
 # CONF_AUTO_DISCOVERY removed - auto-discovery feature disabled
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_TRANSCEIVER_TYPE: Final = "transceiver_type"

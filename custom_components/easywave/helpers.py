@@ -105,9 +105,6 @@ def battery_percentage_from_level(battery_level: int | None) -> int:
     
     # Linear interpolation between 10% and 100%
     return int(10 + (90 * level / 7.0))
-
-
-# Obsolete Funktion entfernt - verwende stattdessen:
 # from .entity_specs import create_entity_specs_for_device
 
 
