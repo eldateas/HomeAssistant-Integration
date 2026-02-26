@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timedelta
@@ -76,6 +77,8 @@ class EldatCoordinator(DataUpdateCoordinator):
         self._registered_devices_file = f"{hass.config.config_dir}/eldat/registered_devices.json"
         # STRUCTURAL SAFEGUARD: Track entity counts from last save to detect mass entity loss
         self._last_saved_entity_counts: Dict[str, int] = {}
+        # Devices that need entity spec regeneration after transceiver setup
+        self._devices_needing_entity_spec_regen: List[str] = []
         
         # EWB Index Tracking - Persistent storage of used EWB indices
         self._used_ewb_indices: Dict[int, Dict[str, Any]] = {}  # {index: {gateway_serial, device_serial, device_name, created_at}}
@@ -456,67 +459,84 @@ class EldatCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("💾 Saved %d used EWB indices to registered_devices.json", len(self._used_ewb_indices))
     
     async def _load_used_ew_receiver_indices(self) -> None:
-        """Load used Easywave Receiver indices from registered_devices.json (with migration)."""
-        import json
-        import aiofiles
-        import os
+        """Load used Easywave Receiver indices from registered_devices.json."""
         try:
-            # Try loading from registered_devices.json first
-            if os.path.exists(self._registered_devices_file):
-                async with aiofiles.open(self._registered_devices_file, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    data = json.loads(content)
+            # Load from registered_devices.json (saved data)
+            async with aiofiles.open(self._registered_devices_file, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                data = json.loads(content)
+                self._used_ew_receiver_indices = {}
+                # Convert string keys back to integers
+                for str_idx, metadata in data.get('used_ew_receiver_indices', {}).items():
+                    self._used_ew_receiver_indices[int(str_idx)] = metadata
+                
+                # Also load next_free index from storage
+                self._next_free_ew_receiver_index = data.get('next_free_ew_receiver_index', 0)
+                
+                _LOGGER.debug("📋 Loaded %d used EW Receiver indices from storage (next free: %d)", 
+                            len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
                     
-                    # Load from integrated structure
-                    if 'used_ew_receiver_indices' in data:
-                        # Convert string keys back to integers
-                        self._used_ew_receiver_indices = {int(k): v for k, v in data.get('used_ew_receiver_indices', {}).items()}
-                        self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index() if self._used_ew_receiver_indices else 0
-                        _LOGGER.info("📋 Loaded %d used Easywave Receiver indices from registered_devices.json (next free: %d)", 
-                                   len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
-                    
-                    # Also restore indices from device list if not already tracked
-                    # This handles migration from old storage format
-                    devices = data.get('devices', {})
-                    for serial, device_info in devices.items():
-                        if device_info.get('type') == 'ew_receiver' and 'rx11_index' in device_info:
-                            rx11_index = device_info['rx11_index']
-                            # Only add if not already tracked (avoid duplicates)
-                            if rx11_index not in self._used_ew_receiver_indices:
-                                self._used_ew_receiver_indices[rx11_index] = {
-                                    'receiver_serial': device_info.get('serial_number', serial),
-                                    'device_serial': serial,
-                                    'device_name': device_info.get('name', f'Easywave Receiver {serial[-8:]}'),
-                                    'created_at': device_info.get('registered_at', datetime.now().isoformat())
-                                }
-                                _LOGGER.info("🔄 Restored EW Receiver index %d from device list: %s", 
-                                           rx11_index, serial[-8:])
-                    
-                    if self._used_ew_receiver_indices:
-                        self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
-                        _LOGGER.info("📍 After restoration: %d used indices, next free: %d", 
-                                   len(self._used_ew_receiver_indices), self._next_free_ew_receiver_index)
-                    return
-            
-            # Migration: Load from old separate file if it exists
-            if os.path.exists(self._ew_receiver_indices_file):
-                async with aiofiles.open(self._ew_receiver_indices_file, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    old_data = json.loads(content)
-                    self._used_ew_receiver_indices = {int(k): v for k, v in old_data.get('used_indices', {}).items()}
-                    self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index() if self._used_ew_receiver_indices else 0
-                    _LOGGER.info("🔄 Migrated %d Easywave Receiver indices from old file (will be saved to registered_devices.json)", 
-                               len(self._used_ew_receiver_indices))
-                    return
-            
-            # No data found
-            _LOGGER.info("📋 No Easywave Receiver indices found, starting with empty tracking")
+        except FileNotFoundError:
+            # File doesn't exist yet
             self._used_ew_receiver_indices = {}
             self._next_free_ew_receiver_index = 0
+            _LOGGER.debug("📋 No registered_devices.json yet - starting with empty indices")
         except Exception as e:
-            _LOGGER.error("❌ Failed to load used Easywave Receiver indices: %s", e)
+            _LOGGER.error("❌ Error in _load_used_ew_receiver_indices: %s", e)
             self._used_ew_receiver_indices = {}
             self._next_free_ew_receiver_index = 0
+    
+    def _validate_device_config(self, serial_number: str, device_info: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """Validate that a device has minimal required configuration.
+        
+        Returns: (is_valid, error_message)
+        """
+        device_type = device_info.get('device_type')
+        device_name = device_info.get('name', serial_number[-8:])
+        entities = device_info.get('entities', [])
+        
+        # All devices must have at least one entity
+        if not entities:
+            return False, f"No entities defined for {device_name} (will be removed)"
+        
+        # Transmitters must have operating_type set
+        if device_type == 'ew_transmitter':
+            operating_type = device_info.get('operating_type')
+            if operating_type is None or operating_type == '':
+                return False, f"Transmitter {device_name} has no operating_type set (will be removed)"
+        
+        # EW Receivers must have receiver_kind or operating_mode
+        if device_type == 'ew_receiver':
+            receiver_kind = device_info.get('receiver_kind')
+            operating_mode = device_info.get('operating_mode')
+            if not receiver_kind and not operating_mode:
+                return False, f"EW Receiver {device_name} has no receiver_kind or operating_mode (will be removed)"
+        
+        return True, None
+    
+    async def _validate_and_clean_devices(self, devices: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+        """Validate all devices and remove or fix invalid ones.
+        
+        Returns: (cleaned_devices_dict, any_changes_made)
+        """
+        invalid_serials = []
+        changes_made = False
+        
+        for serial_number, device_info in list(devices.items()):
+            is_valid, error_msg = self._validate_device_config(serial_number, device_info)
+            
+            if not is_valid:
+                _LOGGER.warning("⚠️ Device validation failed: %s", error_msg)
+                invalid_serials.append(serial_number)
+                changes_made = True
+        
+        # Remove invalid devices
+        for serial in invalid_serials:
+            device_name = devices[serial].get('name', 'Unknown')
+            del devices[serial]
+            _LOGGER.error("❌ Removed invalid device: %s (will need to be re-learned)", device_name)
+        
+        return devices, changes_made
     
     async def _save_used_ew_receiver_indices(self) -> None:
         """Save used Easywave Receiver indices to registered_devices.json."""
@@ -606,6 +626,11 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     self._registered_devices = loaded_devices
                     
+                    # Validate all devices and remove invalid ones
+                    cleaned_devices, validation_changed = await self._validate_and_clean_devices(loaded_devices)
+                    self._registered_devices = cleaned_devices
+                    devices_updated = devices_updated or validation_changed
+                    
                     # Initialize entity count tracking from loaded state
                     self._last_saved_entity_counts = {
                         serial: len(info.get("entities", []))
@@ -670,11 +695,51 @@ class EldatCoordinator(DataUpdateCoordinator):
                     
                     _LOGGER.info("📋 Rebuilt EWB indices: %d devices, %d total (next free: %d)", 
                                len(indices_from_devices), len(self._used_ewb_indices), self._next_free_ewb_index)
-                    
                     # Save changes if we had to reassign indices OR if indices were cleaned up
                     if indices_changed or len(self._used_ewb_indices) != len(loaded_indices):
                         await self._save_registered_devices()
                         _LOGGER.info("💾 Saved corrected indices to storage")
+                    
+                    # Rebuild used_ew_receiver_indices from device data to fix inconsistencies
+                    # This ensures all EW Receiver devices are properly tracked
+                    _LOGGER.info("🔄 Rebuilding EW Receiver indices from device data...")
+                    ew_receiver_indices_from_devices = {}
+                    ew_receiver_indices_changed = False
+                    for serial, device_info in loaded_devices.items():
+                        if device_info.get('device_type') == 'ew_receiver' and 'rx11_index' in device_info:
+                            index = device_info['rx11_index']
+                            device_name = device_info.get('name', f"EW Receiver ({serial})")
+                            
+                            # Check for duplicate indices
+                            if index in ew_receiver_indices_from_devices:
+                                _LOGGER.error("❌ DUPLICATE EW RECEIVER INDEX DETECTED: Index %d used by both %s and %s!", 
+                                            index, ew_receiver_indices_from_devices[index]['device_serial'][-8:], serial[-8:])
+                                # Assign new index to this device
+                                new_index = self._find_next_free_ew_receiver_index()
+                                _LOGGER.info("✅ Reassigning EW Receiver %s from index %d to %d", serial[-8:], index, new_index)
+                                device_info['rx11_index'] = new_index
+                                index = new_index
+                                ew_receiver_indices_changed = True
+                            
+                            # Store metadata for later sync
+                            ew_receiver_indices_from_devices[index] = {
+                                'device_serial': serial,
+                                'device_name': device_name,
+                                'receiver_serial': device_info.get('serial_number'),
+                                'created_at': device_info.get('registered_at', datetime.now().isoformat())
+                            }
+                    
+                    # ALWAYS rebuild used_ew_receiver_indices from device data (source of truth)
+                    self._used_ew_receiver_indices = ew_receiver_indices_from_devices.copy()
+                    self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
+                    
+                    _LOGGER.info("📋 Rebuilt EW Receiver indices: %d devices using indices %s (next free: %d)", 
+                               len(ew_receiver_indices_from_devices), sorted(ew_receiver_indices_from_devices.keys()), 
+                               self._next_free_ew_receiver_index)
+                    
+                    # Always save EW Receiver indices (regardless of changes)
+                    await self._save_registered_devices()
+                    _LOGGER.info("💾 Persisted EW Receiver indices to storage")
                     
                     _LOGGER.info("📋 Loaded %d registered devices from storage", len(self._registered_devices))
                     if devices_updated:
@@ -815,6 +880,36 @@ class EldatCoordinator(DataUpdateCoordinator):
         except Exception as e:
             # Log as warning so we can see if it fails
             _LOGGER.warning("⚠️ Could not purge entity history: %s", e)
+
+    async def _purge_device_history_by_serial(self, serial_number: str) -> None:
+        """Purge all history and activity for a device by serial number.
+        
+        Finds all entities belonging to this device (by serial in unique_id)
+        and removes their complete history.
+        
+        Used when:
+        - Registering an existing device (clean old history)
+        - Unregistering a device (remove all activity)
+        """
+        try:
+            from homeassistant.helpers.entity_registry import async_get
+            entity_registry = async_get(self.hass)
+            
+            # Find all entities with this serial number in unique_id
+            entity_ids_to_purge = []
+            for entity in entity_registry.entities.values():
+                if entity.unique_id and serial_number in entity.unique_id:
+                    entity_ids_to_purge.append(entity.entity_id)
+            
+            if entity_ids_to_purge:
+                _LOGGER.info("🧹 Purging history for device %s - found %d entities", 
+                           serial_number[-8:], len(entity_ids_to_purge))
+                await self._purge_entity_history(entity_ids_to_purge)
+            else:
+                _LOGGER.debug("ℹ️ No entities found for device %s to purge", serial_number[-8:])
+        
+        except Exception as e:
+            _LOGGER.warning("⚠️ Could not purge device history for %s: %s", serial_number[-8:], e)
 
     def _ensure_default_sender_name(self, device_info: Dict[str, Any]) -> None:
         """Assign default Easywave Sender #N name when no custom name is set.
@@ -1041,44 +1136,116 @@ class EldatCoordinator(DataUpdateCoordinator):
             _LOGGER.error("❌ Failed to save registered devices: %s", e)
     
     async def _migrate_existing_devices_to_registered_list(self) -> None:
-        """Migrate existing devices from eldat_devices.json to registered list."""
+        """Migrate existing devices from various sources to registered list.
+        
+        Priority:
+        1. eldat_devices.json (legacy)
+        2. managed_devices.json (DeviceManager JSON) - current system
+        3. DeviceManager API (fallback)
+        """
         import json
         import aiofiles
         import os
         try:
-            # Check if legacy device file exists
-            legacy_file = f"{os.path.dirname(self._registered_devices_file)}/eldat_devices.json"
-            if not os.path.exists(legacy_file):
-                return
-                
-            _LOGGER.info("🔄 Migrating existing devices to registered list...")
-            
-            async with aiofiles.open(legacy_file, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                legacy_data = json.loads(content)
-                
             migrated_count = 0
-            legacy_devices = legacy_data.get('devices', {})
             
-            for serial_number, device_info in legacy_devices.items():
-                # Only migrate if not already in registered list
-                if serial_number not in self._registered_devices:
-                    # Add migration metadata
-                    device_info['migrated_from_legacy'] = True
-                    device_info['migrated_at'] = datetime.now().isoformat()
+            # STEP 1: Migrate from eldat_devices.json (legacy)
+            legacy_file = f"{os.path.dirname(self._registered_devices_file)}/eldat_devices.json"
+            if os.path.exists(legacy_file):
+                _LOGGER.info("🔄 Migrating from eldat_devices.json...")
+                try:
+                    async with aiofiles.open(legacy_file, 'r', encoding='utf-8') as f:
+                        content = await f.read()
+                        legacy_data = json.loads(content)
                     
-                    self._registered_devices[serial_number] = device_info
-                    migrated_count += 1
+                    legacy_devices = legacy_data.get('devices', {})
+                    for serial_number, device_info in legacy_devices.items():
+                        if serial_number not in self._registered_devices:
+                            device_info['migrated_from_legacy'] = True
+                            device_info['migrated_at'] = datetime.now().isoformat()
+                            self._registered_devices[serial_number] = device_info
+                            migrated_count += 1
                     
+                    if migrated_count > 0:
+                        _LOGGER.info("✅ Migrated %d devices from eldat_devices.json", migrated_count)
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Error reading eldat_devices.json: %s", e)
+            
+            # STEP 2: Migrate from managed_devices.json (JSON file directly - most reliable)
+            managed_file = f"{os.path.dirname(self._registered_devices_file)}/../easywave/managed_devices.json"
+            if os.path.exists(managed_file):
+                _LOGGER.info("🔄 Migrating from managed_devices.json...")
+                try:
+                    async with aiofiles.open(managed_file, 'r', encoding='utf-8') as f:
+                        content = await f.read()
+                        managed_data = json.loads(content)
+                    
+                    managed_devices = managed_data.get('devices', {})
+                    for serial_number, device_data in managed_devices.items():
+                        if serial_number not in self._registered_devices:
+                            # Convert DeviceManager format to registered_devices format
+                            device_info = {
+                                'serial_number': serial_number,
+                                'device_type': device_data.get('device_type'),
+                                'type': device_data.get('device_type'),
+                                'name': device_data.get('name'),
+                                'registered_at': device_data.get('created_at', datetime.now().isoformat()),
+                                'migrated_from_device_manager': True,
+                                'rx11_index': device_data.get('rx11_index'),
+                            }
+                            
+                            # Merge extra_data if present
+                            if device_data.get('extra_data'):
+                                device_info.update(device_data['extra_data'])
+                            
+                            self._registered_devices[serial_number] = device_info
+                            migrated_count += 1
+                            _LOGGER.debug("  ✅ Synced device %s (%s) from managed_devices.json", 
+                                       serial_number[-8:], device_data.get('device_type'))
+                    
+                    if migrated_count > 0:
+                        _LOGGER.info("✅ Migrated %d devices from managed_devices.json", migrated_count)
+                
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Error reading managed_devices.json: %s", e)
+            
+            # STEP 3: Fallback to DeviceManager API if needed
+            if migrated_count == 0:
+                _LOGGER.info("🔄 Falling back to DeviceManager API...")
+                try:
+                    dm_devices = self.device_manager.get_all_devices()
+                    for device in dm_devices.values():
+                        serial_number = device.serial_number
+                        if serial_number not in self._registered_devices:
+                            device_info = {
+                                'serial_number': serial_number,
+                                'device_type': device.device_type,
+                                'type': device.device_type,
+                                'name': device.name,
+                                'registered_at': datetime.now().isoformat(),
+                                'migrated_from_device_manager_api': True,
+                            }
+                            if device.extra_data:
+                                device_info.update(device.extra_data)
+                            
+                            self._registered_devices[serial_number] = device_info
+                            migrated_count += 1
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Error accessing DeviceManager API: %s", e)
+            
             if migrated_count > 0:
-                _LOGGER.info("✅ Migrated %d devices from legacy storage to registered list", migrated_count)
+                _LOGGER.info("🔄 Synced %d total devices to registered list", migrated_count)
                 # Save the migrated registered list
                 await self._save_registered_devices()
-            else:
-                _LOGGER.debug("No devices to migrate from legacy storage")
                 
+                # Mark that we need to regenerate entity specs after transceiver is ready
+                self._devices_needing_entity_spec_regen = list(self._registered_devices.keys())
+                _LOGGER.info("⏳ Marked %d devices for entity spec regeneration after setup", len(self._devices_needing_entity_spec_regen))
+            else:
+                _LOGGER.info("ℹ️ No devices to migrate (all sources checked)")
+            
         except Exception as e:
-            _LOGGER.error("❌ Failed to migrate legacy devices: %s", e)
+            _LOGGER.error("❌ Failed to migrate devices: %s", e)
     
     def is_device_registered(self, serial_number: str) -> bool:
         """Check if device is in registered devices list."""
@@ -1130,9 +1297,19 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Bei Neustarts wird das Gerät bereits in _registered_devices geladen,
             # also wird diese Stelle nicht erreicht
             if serial_number not in self._registered_devices:
-                # Neues Gerät - setze neue registration_id
-                device_info['registration_id'] = str(int(datetime.now().timestamp() * 1000))
-                _LOGGER.debug("📝 Assigned new registration_id to device %s", serial_number[-8:])
+                # Neues Gerät - verwende registration_id wenn vorhanden
+                # FÜR ALLE GERÄTE: generiere deterministische registration_id aus serial + type
+                if not device_info.get('registration_id'):
+                    device_type = device_info.get('type', 'unknown')
+                    import hashlib
+                    # All devices use deterministic registration_id based on serial + type
+                    # This ensures unique_ids are stable across re-learning
+                    det_id = hashlib.md5(f"{device_type}_{serial_number}".encode('utf-8')).hexdigest()
+                    device_info['registration_id'] = det_id
+                    _LOGGER.info("🔧 Generated deterministic registration_id for %s: %s", 
+                                device_type, det_id[:6])
+                else:
+                    _LOGGER.debug("📝 Using existing registration_id for device %s", serial_number[-8:])
             else:
                 # Bekanntes Gerät beim Neustart - BEHALTE alte registration_id
                 existing_info = self._registered_devices[serial_number]
@@ -1141,10 +1318,13 @@ class EldatCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("📝 Preserved registration_id for device %s (%s) on startup", 
                                  serial_number[-8:], device_info['registration_id'][:6])
                 else:
-                    # Fallback: wenn keine registration_id existiert, erstelle neue
-                    device_info['registration_id'] = str(int(datetime.now().timestamp() * 1000))
-                    _LOGGER.warning("⚠️ Generated new registration_id for device %s (had no previous ID)", 
-                                   serial_number[-8:])
+                    # Fallback: wenn keine registration_id existiert, erstelle neue (deterministische)
+                    device_type = device_info.get('type', 'unknown')
+                    import hashlib
+                    det_id = hashlib.md5(f"{device_type}_{serial_number}".encode('utf-8')).hexdigest()
+                    device_info['registration_id'] = det_id
+                    _LOGGER.warning("🔧 Generated deterministic registration_id for %s (had no previous ID): %s", 
+                                   device_type, det_id[:6])
             
             # Add metadata
             device_info['registered_at'] = datetime.now().isoformat()
@@ -1162,6 +1342,8 @@ class EldatCoordinator(DataUpdateCoordinator):
                 # Cleanup old entities from previous registrations
                 # This ensures re-learning creates fresh entities without old logbook entries
                 await self._cleanup_old_entities_for_device(serial_number)
+                # Also purge old history/activity for this device
+                await self._purge_device_history_by_serial(serial_number)
             
             # IMPORTANT: Clear old measurement values from device_info itself
             # These may have been carried over from the learning telegram or old data
@@ -1421,12 +1603,15 @@ class EldatCoordinator(DataUpdateCoordinator):
     # ============================================================
     
     def mark_ew_receiver_index_used(self, index: int, receiver_serial: str, device_serial: str, device_name: str = None) -> None:
-        """Mark an Easywave Receiver index as used by a specific device."""
-        from datetime import datetime
+        """Mark an Easywave Receiver index as used.
         
+        IMPORTANT: Store metadata for consistent access by syncing methods.
+        The actual serials will be fetched LIVE from the RX11 when needed.
+        """
+        # Store metadata for this index
         self._used_ew_receiver_indices[index] = {
-            'receiver_serial': receiver_serial,  # Gateway serial from RX11
-            'device_serial': device_serial,      # Device's own serial
+            'receiver_serial': receiver_serial,
+            'device_serial': device_serial,
             'device_name': device_name or f"Easywave Receiver ({device_serial})",
             'created_at': datetime.now().isoformat()
         }
@@ -1436,10 +1621,10 @@ class EldatCoordinator(DataUpdateCoordinator):
             self._next_free_ew_receiver_index = self._find_next_free_ew_receiver_index()
         
         # Also update device_manager._rx11_index_to_serial for consistency
+        # This is used by HA to link devices, but the serial is fetched from RX11
         self.device_manager._rx11_index_to_serial[index] = device_serial
             
-        _LOGGER.info("📍 Marked Easywave Receiver index %d as used (device: %s, receiver: %s)", 
-                    index, device_serial[-8:], receiver_serial[-8:])
+        _LOGGER.info("📍 Marked Easywave Receiver index %d as used (device: %s)", index, device_name or device_serial[-8:])
         
         # Save to persistent storage
         asyncio.create_task(self._save_used_ew_receiver_indices())
@@ -1452,8 +1637,8 @@ class EldatCoordinator(DataUpdateCoordinator):
     def mark_ew_receiver_index_free(self, index: int) -> None:
         """Mark an Easywave Receiver index as free/available for new devices."""
         if index in self._used_ew_receiver_indices:
-            device_info = self._used_ew_receiver_indices.pop(index)
-            _LOGGER.info("♻️ Marked Easywave Receiver index %d as free (was: %s)", index, device_info.get('device_name', 'Unknown'))
+            self._used_ew_receiver_indices.pop(index)
+            _LOGGER.info("♻️ Marked Easywave Receiver index %d as free", index)
             
             # Update next free index cache if this becomes the new earliest free
             if index < self._next_free_ew_receiver_index:
@@ -1465,11 +1650,6 @@ class EldatCoordinator(DataUpdateCoordinator):
                 
             # Save to persistent storage
             asyncio.create_task(self._save_used_ew_receiver_indices())
-            
-            # Update transceiver wrapper tracking if available
-            if hasattr(self.transceiver, '_rx11_wrapper') and self.transceiver._rx11_wrapper:
-                wrapper = self.transceiver._rx11_wrapper
-                wrapper.mark_receiver_available(index)
     
     def reset_all_ew_receiver_indices(self) -> None:
         """Reset all Easywave Receiver indices - used when integration is removed."""
@@ -1597,21 +1777,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             device_serial = device_info.get('device_serial')
             
             if receiver_serial:
-                # Re-read actual serial from RX11 to ensure we have the correct one
-                _LOGGER.debug("🔍 Syncing index %s: stored serial=%s", index, receiver_serial)
-                actual_serial = await wrapper.rx11_ew_receiver_get_serial_by_index(int(index))
-                
-                if actual_serial and actual_serial != receiver_serial:
-                    _LOGGER.warning("⚠️ Serial mismatch for index %s! Stored: %s, Actual: %s", 
-                                  index, receiver_serial[-8:], actual_serial[-8:])
-                    # Use the actual serial from RX11
-                    receiver_serial = actual_serial
-                    # Update stored value
-                    device_info['receiver_serial'] = actual_serial
-                    self._used_ew_receiver_indices[int(index)] = device_info
-                    await self._save_used_ew_receiver_indices()
-                elif actual_serial:
-                    _LOGGER.debug("✅ Serial match for index %s: %s", index, actual_serial[-8:])
+                # Don't try to re-read from RX11 during sync - it can timeout
+                # The actual serial will be fetched LIVE when command is sent (in wrapper.py)
+                _LOGGER.debug("🔍 Syncing index %d: using stored serial %s", index, receiver_serial[-8:])
                 
                 wrapper.mark_receiver_used(int(index), receiver_serial)
                 
@@ -1651,6 +1819,9 @@ class EldatCoordinator(DataUpdateCoordinator):
             device_type = device_info.get("type", "unknown")
             _LOGGER.info("🗑️ Permanently removing device: %s (%s, type=%s)", 
                         device_name, serial_number[-8:], device_type)
+            
+            # Step 0: Purge history and activity for this device
+            await self._purge_device_history_by_serial(serial_number)
             
             # Step 1: Remove from HA registries (entities and device entry)
             await self._remove_from_ha_registry(serial_number, device_info)
@@ -2203,61 +2374,6 @@ class EldatCoordinator(DataUpdateCoordinator):
         
         return stats
 
-    async def _validate_device_indices_with_rx11(self) -> int:
-        """🔐 NEW: Validate EW Receiver indices match actual RX11 hardware.
-        
-        After RX11 reconnect, validates that indices in our storage match
-        what's actually in the RX11. Corrects any mismatches.
-        
-        Returns: number of corrections made
-        """
-        if not hasattr(self.transceiver, '_rx11_wrapper') or not self.transceiver._rx11_wrapper:
-            _LOGGER.debug("No RX11 wrapper - skipping hardware validation")
-            return 0
-        
-        wrapper = self.transceiver._rx11_wrapper
-        corrections = 0
-        
-        try:
-            _LOGGER.info("🔍 Validating EW Receiver indices with RX11 hardware...")
-            
-            for index, device_info in list(self._used_ew_receiver_indices.items()):
-                stored_serial = device_info.get('receiver_serial')
-                stored_device_serial = device_info.get('device_serial')
-                
-                try:
-                    # Query hardware for this index
-                    actual_serial = await wrapper.rx11_ew_receiver_get_serial_by_index(int(index))
-                    
-                    if actual_serial is None:
-                        # Index is in storage but not in RX11 - remove it
-                        _LOGGER.warning("❌ Index %d in storage but NOT in RX11 - removing", index)
-                        self.mark_ew_receiver_index_free(index)
-                        corrections += 1
-                    
-                    elif actual_serial != stored_serial:
-                        # Serial mismatch - RX11 is authoritative
-                        _LOGGER.warning("⚠️ Index %d serial mismatch: Stored=%s, Hardware=%s - updating",
-                                      index, stored_serial[-8:], actual_serial[-8:])
-                        device_info['receiver_serial'] = actual_serial
-                        self._used_ew_receiver_indices[index] = device_info
-                        corrections += 1
-                    else:
-                        # Match - all good
-                        _LOGGER.debug("✅ Index %d verified: %s", index, actual_serial[-8:])
-                
-                except Exception as e:
-                    _LOGGER.debug("⚠️ Could not validate index %d: %s", index, e)
-            
-            if corrections > 0:
-                await self._save_used_ew_receiver_indices()
-                _LOGGER.info("✅ Fixed %d index mismatches with RX11 hardware", corrections)
-        
-        except Exception as e:
-            _LOGGER.warning("⚠️ RX11 hardware validation failed: %s", e)
-        
-        return corrections
-
     async def async_setup(self) -> bool:
         """Set up the coordinator."""
         try:
@@ -2335,8 +2451,30 @@ class EldatCoordinator(DataUpdateCoordinator):
             # Synchronize Easywave Receiver index tracking with transceiver wrapper
             await self._sync_ew_receiver_indices_with_wrapper()
             
-            # ✅ NEW: Validate EW Receiver indices match RX11 hardware after reconnect
-            hardware_corrections = await self._validate_device_indices_with_rx11()
+            # STEP: Regenerate entity specs for any devices that need it (from migration)
+            if self._devices_needing_entity_spec_regen:
+                _LOGGER.info("🔄 Regenerating entity specs for %d migrated devices...", 
+                           len(self._devices_needing_entity_spec_regen))
+                regen_count = 0
+                for serial_number in self._devices_needing_entity_spec_regen:
+                    if serial_number in self._registered_devices:
+                        device_info = self._registered_devices[serial_number]
+                        if not device_info.get('entities'):
+                            try:
+                                _LOGGER.debug("  Regenerating entity specs for device %s", serial_number[-8:])
+                                device_info = await self._regenerate_entity_specs(serial_number, device_info)
+                                self._registered_devices[serial_number] = device_info
+                                regen_count += 1
+                            except Exception as e:
+                                _LOGGER.warning("⚠️ Failed to regenerate entity specs for %s: %s", 
+                                             serial_number[-8:], e)
+                
+                if regen_count > 0:
+                    await self._save_registered_devices()
+                    _LOGGER.info("✅ Regenerated entity specs for %d devices", regen_count)
+                
+                # Clear the list after processing
+                self._devices_needing_entity_spec_regen.clear()
             
             # Set telegram callback
             self.transceiver.set_telegram_callback(self._handle_telegram)
@@ -4019,7 +4157,7 @@ class EldatCoordinator(DataUpdateCoordinator):
                         device_info.get("type"),
                         device_info.get("registration_id"))
                         
-            entity_specs = create_entity_specs_for_device(serial_number, device_info)
+            entity_specs = create_entity_specs_for_device(serial_number, device_info, coordinator=self)
             _LOGGER.debug("Entity specs result: %s platforms, entity_specs=%s", 
                          len(entity_specs) if entity_specs else 0, bool(entity_specs))
                          

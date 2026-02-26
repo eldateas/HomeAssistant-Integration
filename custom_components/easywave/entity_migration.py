@@ -536,9 +536,4 @@ async def migrate_entities_if_needed(
     legacy_battery_removed = await cleanup_legacy_battery_sensors(hass, config_entry_id, managed_devices)
     report["legacy_battery_sensors_removed"] = legacy_battery_removed
     
-    # Cleanup orphaned entities
-    valid_serials = set(managed_devices.keys())
-    orphaned_count = await helper.cleanup_orphaned_entities(config_entry_id, valid_serials)
-    report["orphaned_entities_removed"] = orphaned_count
-    
     return report

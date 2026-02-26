@@ -266,10 +266,9 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             # Add translation_key for proper HA translation
             entity_spec["translation_key"] = sensor_type  # "temperature", "humidity", etc.
             
-            # Override unique_id to include sensor_type and registration_id for uniqueness
-            reg_id_suffix = self._get_registration_id_suffix()
-            from .....helpers_unique_id import make_unique_id
-            entity_spec["unique_id"] = make_unique_id(self.serial_number, sensor_type, None, reg_id_suffix)
+            # For Neo sensors, use ALWAYS a deterministic unique_id basedonly on serial + sensor_type
+            # NO registration_id suffix - this ensures entities remain stable across re-learning
+            entity_spec["unique_id"] = f"{self.serial_number}_{sensor_type}"
             
             # Add sensor type identifier for value retrieval
             entity_spec["sensor_type"] = sensor_type
@@ -285,10 +284,9 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         )
         # Add translation_key for proper HA translation
         battery_warning_spec["translation_key"] = "battery_warning"
-        # Override unique_id for battery warning with registration_id suffix
-        reg_id_suffix = self._get_registration_id_suffix()
-        from .....helpers_unique_id import make_unique_id
-        battery_warning_spec["unique_id"] = make_unique_id(self.serial_number, "battery_warning", None, reg_id_suffix)
+        # For Neo sensors, use ALWAYS a deterministic unique_id based only on serial + sensor_type
+        # NO registration_id suffix - this ensures entities remain stable across re-learning
+        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning"
         battery_warning_spec["sensor_type"] = "battery_warning"
         specs["binary_sensor"].append(battery_warning_spec)
         
@@ -673,7 +671,7 @@ def create_ewneo_sensor(
     
     # Default to temperature if nothing specified
     if not sensor_types:
-        _LOGGER.warning("No sensor_types specified for %s, defaulting to temperature", 
+        _LOGGER.debug("No sensor_types specified for %s, defaulting to temperature", 
                        serial_number)
         sensor_types = ["temperature"]
     

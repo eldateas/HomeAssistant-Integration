@@ -76,11 +76,14 @@ def _get_registration_id(device_info: Dict[str, Any]) -> str:
     return hash_hex  # Return WITHOUT leading underscore - make_unique_id() will add it
 
 
-def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, Any], coordinator=None) -> Dict[str, List[Dict[str, Any]]]:
     """Create entity specifications for a device based on its type and configuration.
     
     LEGACY FUNCTION: Versucht zuerst, die Device-Klasse zu verwenden.
     Falls nicht verfügbar, fällt auf alte Logik zurück.
+    
+    Args:
+        coordinator: Optional coordinator instance to store device instances
     
     Returns a dictionary with entity platform names as keys and lists of entity specs as values.
     """
@@ -88,7 +91,7 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     extra_data = device_info.get("extra_data", {})
     
     # Try to get specs from device class if available
-    device_class_specs = _try_get_specs_from_device_class(serial_number, device_info)
+    device_class_specs = _try_get_specs_from_device_class(serial_number, device_info, coordinator)
     if device_class_specs:
         _LOGGER.info("✅ Using device class specs for %s", serial_number)
         return device_class_specs
@@ -128,8 +131,12 @@ def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, An
     return _empty_entity_dict()
 
 
-def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, Any]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-    """Try to get entity specs from the device class using transceivers registry."""
+def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, Any], coordinator=None) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """Try to get entity specs from the device class using transceivers registry.
+    
+    Args:
+        coordinator: Optional coordinator to store device instances
+    """
     device_type = device_info.get("type") or device_info.get("device_type")
 
     try:
@@ -146,6 +153,20 @@ def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, 
             # Pass registration_id for unique entity IDs on re-learning
             # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
             registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
+            
+            # BUGFIX: If no registration_id exists, generate a DETERMINISTIC one for ALL device types
+            # This ensures unique_id stability across restarts and re-learning
+            if not registration_id:
+                import hashlib
+                # Use deterministic ID based on device_type + serial_number
+                registration_id = hashlib.md5(f"{device_type}_{serial_number}".encode('utf-8')).hexdigest()
+                device_info["registration_id"] = registration_id
+                # Also store in extra_data if it exists
+                if "extra_data" in device_info and isinstance(device_info["extra_data"], dict):
+                    device_info["extra_data"]["registration_id"] = registration_id
+                _LOGGER.info("🔧 Generated deterministic registration_id for %s %s: %s", 
+                            device_type, serial_number[-8:], registration_id[:6])
+            
             if registration_id:
                 init_kwargs["registration_id"] = registration_id
             
@@ -175,6 +196,15 @@ def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, 
             # Instantiate device temporarily to get specs
             device_instance = device_class(serial_number, **init_kwargs)
             specs = device_instance.get_entity_specs()
+            
+            # CRITICAL FIX: Store the device instance in the coordinator's transceiver
+            # so that entities can find it later
+            if coordinator and hasattr(coordinator, 'transceiver'):
+                if not hasattr(coordinator.transceiver, '_device_instances'):
+                    coordinator.transceiver._device_instances = {}
+                coordinator.transceiver._device_instances[serial_number] = device_instance
+                _LOGGER.info("💾 Stored device instance for %s in transceiver: %s", 
+                           serial_number[-8:], type(device_instance).__name__)
             
             _LOGGER.debug("Device class returned specs: %s", {k: len(v) for k, v in specs.items() if v})
             
@@ -579,6 +609,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "unique_id": make_unique_id(serial_number, "state", None, reg_id),
                     "state_key": "transmitter_state_1",
                     "channel": 0,
+                    "device_class": "opening",  # Shows 'Geöffnet'/'Geschlossen' in logbook
                     "options": state_options,
                     "button_map": get_button_map_keys("2", "cover"),
                     "icon": icon,
@@ -596,6 +627,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "unique_id": make_unique_id(serial_number, "state", 0, reg_id),
                     "state_key": "transmitter_state_1",
                     "channel": 0,
+                    "device_class": "opening",  # Shows 'Geöffnet'/'Geschlossen' in logbook
                     "options": state_options,
                     "button_map": {
                         0: "up",
@@ -616,6 +648,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "unique_id": make_unique_id(serial_number, "state", 1, reg_id),
                     "state_key": "transmitter_state_2",
                     "channel": 1,
+                    "device_class": "opening",  # Shows 'Geöffnet'/'Geschlossen' in logbook
                     "options": state_options,
                     "button_map": {
                         2: "up",
@@ -694,6 +727,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     
     For EWneo-Sensoren, tries to use the new universal sensor class specs.
     """
+    import hashlib
     entities = _empty_entity_dict()
     # Get registration ID for unique entity creation on re-learning
     # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
@@ -702,6 +736,22 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     if not reg_id:
         reg_id = _get_registration_id(extra_data)
     registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
+    
+    # BUGFIX: If no registration_id exists, generate one based on serial_number
+    # This ensures unique_id stability - the same sensor always gets the same unique_ids
+    # even if registration_id wasn't set at entity creation time
+    if not registration_id and device_info.get("type") == "ewneo_sensor":
+        # Generate deterministic registration_id from serial number
+        registration_id = hashlib.md5(f"neo_sensor_{serial_number}".encode('utf-8')).hexdigest()
+        # Store it so future calls use the same value
+        device_info["registration_id"] = registration_id
+        # Also store in extra_data if it exists
+        if "extra_data" in device_info and isinstance(device_info["extra_data"], dict):
+            device_info["extra_data"]["registration_id"] = registration_id
+        # Now re-calculate reg_id from the new registration_id using same logic as _get_registration_id()
+        reg_id = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
+        _LOGGER.info("🔧 Generated deterministic registration_id for neo_sensor %s: %s", 
+                    serial_number[-8:], registration_id[:6])
     
     # Check if this is an EWneo-Sensoren (new format)
     device_type = device_info.get("type") or extra_data.get("type", "unknown")
@@ -770,12 +820,14 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     base_name = device_info.get('name', 'Sensor')
     
     # Temperature sensor - use translation_key for HA translation
+    # For Neo sensors, use DETERMINISTIC unique_id without registration_id suffix
+    # This ensures entities remain stable across re-learning
     if device_info.get("has_temperature", True):
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "temperature",
             "translation_key": "temperature",  # HA looks up entity.sensor.temperature.name
-            "unique_id": make_unique_id(serial_number, "temperature", None, reg_id),
+            "unique_id": f"{serial_number}_temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
             "icon": "mdi:thermometer",
@@ -789,7 +841,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
             "type": "sensor",
             "sensor_type": "humidity",
             "translation_key": "humidity",  # HA looks up entity.sensor.humidity.name
-            "unique_id": make_unique_id(serial_number, "humidity", None, reg_id),
+            "unique_id": f"{serial_number}_humidity",
             "device_class": "humidity",
             "unit_of_measurement": "%",
             "icon": "mdi:water-percent",
@@ -802,7 +854,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
         "type": "binary_sensor",
         "sensor_type": "battery_warning",
         "translation_key": "battery_warning",  # HA looks up entity.binary_sensor.battery_warning.name
-        "unique_id": make_unique_id(serial_number, "battery_warning", None, reg_id),
+        "unique_id": f"{serial_number}_battery_warning",
         "device_class": "battery",
         "icon": "mdi:battery",
         "has_entity_name": True

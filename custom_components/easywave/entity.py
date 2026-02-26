@@ -202,3 +202,11 @@ class EldatEntity(CoordinatorEntity):
         """When entity will be removed from hass."""
         await super().async_will_remove_from_hass()
         _LOGGER.debug("Removing entity: %s (%s)", self.name, self._serial_number)
+        
+        # Purge history/recorder data for this entity when it's removed
+        try:
+            if self.entity_id:
+                await self.coordinator._purge_entity_history([self.entity_id])
+                _LOGGER.info("🧹 Entity history purged: %s", self.entity_id)
+        except Exception as e:
+            _LOGGER.debug("Could not purge history for entity %s: %s", self.entity_id, e)

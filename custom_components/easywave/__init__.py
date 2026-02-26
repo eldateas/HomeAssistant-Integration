@@ -296,10 +296,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         duplicates = migration_report.get("duplicate_entities_removed", 0)
         legacy_battery = migration_report.get("legacy_battery_sensors_removed", 0)
-        orphaned = migration_report.get("orphaned_entities_removed", 0)
-        if duplicates > 0 or legacy_battery > 0 or orphaned > 0:
-            _LOGGER.info("🧹 Entity cleanup: %d duplicates, %d legacy battery sensors, %d orphaned entities removed",
-                        duplicates, legacy_battery, orphaned)
+        if duplicates > 0 or legacy_battery > 0:
+            _LOGGER.warning("🧹 Entity cleanup: %d duplicates, %d legacy battery sensors removed",
+                        duplicates, legacy_battery)
     except Exception as e:
         _LOGGER.warning("⚠️ Entity migration check failed (non-fatal): %s", e)
     

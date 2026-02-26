@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import RestoreEntity, ExtraStoredData
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -456,15 +456,15 @@ def _create_configured_sensor(coordinator: EldatCoordinator, serial_number: str,
     device_type = device_info.get("type", device_info.get("device_type", "unknown"))
     device_class = entity_spec.get("device_class")
     
-    # Use dedicated EWneoSensorEntity for ewneo_sensor devices
-    if device_type == "ewneo_sensor":
+    # EWneoSensorEntity is the universal sensor class for all ewneo/ew_sensor devices
+    if device_type in ("ewneo_sensor", "ew_sensor"):
         return EWneoSensorEntity(coordinator, serial_number, device_info, entity_spec)
     
     # Handle enum sensors (Last Button sensor for Easywave Transmitters in grouped mode)
     if device_class == "enum":
         return EldatLastButtonSensor(coordinator, serial_number, device_info, entity_spec)
     
-    # Legacy sensor entities for other types
+    # Easywave Receiver sensor entities (unidirectional receivers, not EWneo)
     if sensor_type == "temperature":
         return EldatEWReceiverTemperatureSensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "humidity":
@@ -617,12 +617,21 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
     # Legacy sensor creation for old EWneo-Sensoren only (not Easywave Transmitters!)
     elif device_info.get("supports_sensors", False) and device_type not in ["ew_transmitter"]:
         if "temperature" in str(device_info.get("info_type", "")).lower():
-            sensors.append(EldatTemperatureSensor(
+            sensors.append(EWneoSensorEntity(
                 coordinator=coordinator,
                 serial_number=serial_number,
                 device_info=device_info,
+                entity_spec={
+                    "unique_id": f"{serial_number}_temperature",
+                    "sensor_type": "temperature",
+                    "translation_key": "temperature",
+                    "device_class": SensorDeviceClass.TEMPERATURE,
+                    "unit_of_measurement": UnitOfTemperature.CELSIUS,
+                    "icon": "mdi:thermometer",
+                    "has_entity_name": True,
+                },
             ))
-            _LOGGER.info("🌡️ Created legacy temperature sensor for %s", serial_number[-8:])
+            _LOGGER.info("🌡️ Created EWneo temperature sensor for %s", serial_number[-8:])
         
     # Easywave Transmitter devices get optionally a "Last Button" sensor for grouped mode
     # Battery warning is now handled by binary_sensor platform
@@ -887,279 +896,6 @@ class EldatGatewaySensor(SensorEntity):
         )
 
 
-class EldatTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity):
-    """Temperature sensor for ELDAT devices."""
-
-    def __init__(
-        self,
-        coordinator: EldatCoordinator,
-        serial_number: str,
-        device_info: Dict[str, Any],
-    ) -> None:
-        """Initialize temperature sensor."""
-        super().__init__(coordinator, serial_number, device_info)
-        
-        self._attr_unique_id = f"{serial_number}_temperature"
-        self._attr_has_entity_name = True
-        # Use translation_key for HA automatic translation instead of hardcoded name
-        self._attr_translation_key = "temperature"  # Uses translations/*.json entity.sensor.temperature.name
-        self._attr_device_class = SensorDeviceClass.TEMPERATURE
-        self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        
-        # Value tracking
-        self._last_reading: Optional[float] = None
-        self._last_update: Optional[datetime] = None
-        
-        # Get device-specific configuration
-        device_type = device_info.get("type", "unknown")
-        device_config = get_entity_config_for_device(
-            device_type=device_type,
-            sensor_type="temperature",
-            entity_type="sensor"
-        )
-        
-        if device_config.get("icon"):
-            self._attr_icon = device_config["icon"]
-        
-        # Event listeners will be setup in async_added_to_hass
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        # Sensors need active coordinator AND transceiver connection for live data
-        if not self.coordinator.last_update_success:
-            return False
-        
-        # Check if transceiver is connected for live sensor readings
-        if not hasattr(self.coordinator, 'transceiver') or not self.coordinator.transceiver:
-            return False
-            
-        return self.coordinator.transceiver.is_connected
-
-    def _setup_event_listeners(self):
-        """Setup event listeners for telegram updates."""
-        from .const import EVENT_DEVICE_UPDATED, EVENT_TELEGRAM_RECEIVED, DOMAIN
-        
-        def handle_device_update(event):
-            if event.data.get("serial_number") == self._serial_number:
-                telegram_data = event.data.get("telegram_data", {})
-                if "temperature" in telegram_data:
-                    self._last_reading = telegram_data["temperature"]
-                    self._last_update = datetime.now()
-                    _LOGGER.debug("Temperature sensor %s updated via EVENT_DEVICE_UPDATED: %.1f°C", 
-                                self._serial_number, self._last_reading)
-                    self.async_schedule_update_ha_state()
-        
-        def handle_telegram(event):
-            if event.data.get("serial_number") == self._serial_number:
-                telegram_data = event.data.get("telegram_data", {})
-                if "temperature" in telegram_data:
-                    self._last_reading = telegram_data["temperature"]
-                    self._last_update = datetime.now()
-                    _LOGGER.debug("Temperature sensor %s updated via EVENT_TELEGRAM_RECEIVED: %.1f°C", 
-                                self._serial_number, self._last_reading)
-                    self.async_schedule_update_ha_state()
-        
-        # Also listen for sensor_update events
-        def handle_sensor_update(event):
-            event_data = event.data
-            if (event_data.get("serial_number") == self._serial_number and 
-                event_data.get("measurement_type") == "temperature"):
-                temperature = event_data.get("value")
-                if temperature is not None:
-                    self._last_reading = temperature
-                    self._last_update = datetime.now()
-                    _LOGGER.info("📡 Temperature sensor %s updated via sensor_update: %.1f°C", 
-                               self._serial_number, self._last_reading)
-                    self.async_schedule_update_ha_state()
-        
-        # Register listeners and store removal functions
-        self._device_update_listener = self.coordinator.hass.bus.async_listen(EVENT_DEVICE_UPDATED, handle_device_update)
-        self._telegram_listener = self.coordinator.hass.bus.async_listen(EVENT_TELEGRAM_RECEIVED, handle_telegram)
-        self._sensor_update_listener = self.coordinator.hass.bus.async_listen("eldat_sensor_update", handle_sensor_update)
-        
-        _LOGGER.debug("🎯 Temperature sensor %s event listeners registered for serial %s", 
-                     self._attr_unique_id, self._serial_number[-8:])
-
-    async def async_added_to_hass(self) -> None:
-        """Called when entity is added to Home Assistant."""
-        await super().async_added_to_hass()
-        
-        # Restore previous state
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state not in (None, "unknown", "unavailable"):
-                try:
-                    self._last_reading = float(last_state.state)
-                    _LOGGER.debug("Restored temperature sensor %s with value %.1f°C", 
-                                self._serial_number, self._last_reading)
-                except (ValueError, TypeError):
-                    pass
-        
-        # Ensure event listeners are set up
-        if not hasattr(self, '_device_update_listener'):
-            self._setup_event_listeners()
-            _LOGGER.info("🔄 Temperature sensor %s: Event listeners registered after restart", self.name)
-    
-    async def async_will_remove_from_hass(self) -> None:
-        """Called when entity will be removed from Home Assistant."""
-        await super().async_will_remove_from_hass()
-        
-        # Clean up event listeners
-        if hasattr(self, '_device_update_listener') and self._device_update_listener:
-            self._device_update_listener()
-        if hasattr(self, '_telegram_listener') and self._telegram_listener:
-            self._telegram_listener()
-        if hasattr(self, '_sensor_update_listener') and self._sensor_update_listener:
-            self._sensor_update_listener()
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current temperature."""
-        return self._last_reading
-
-    async def async_update(self) -> None:
-        """Update sensor state from coordinator data."""
-        try:
-            # Get latest data from coordinator
-            device_data = self.coordinator.devices.get(self._serial_number, {})
-            if "temperature" in device_data:
-                self._last_reading = device_data["temperature"]
-                if "last_seen" in device_data:
-                    self._last_update = datetime.fromtimestamp(device_data["last_seen"])
-        except Exception as e:
-            _LOGGER.error("Error updating temperature sensor %s: %s", 
-                         self._serial_number, e)
-
-
-class EldatHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
-    """Humidity sensor for ELDAT devices."""
-
-    def __init__(
-        self,
-        coordinator: EldatCoordinator,
-        serial_number: str,
-        device_info: Dict[str, Any],
-    ) -> None:
-        """Initialize humidity sensor."""
-        super().__init__(coordinator, serial_number, device_info)
-        
-        self._attr_unique_id = f"{serial_number}_humidity"
-        self._attr_has_entity_name = True
-        # Use translation_key for HA automatic translation instead of hardcoded name
-        self._attr_translation_key = "humidity"  # Uses translations/*.json entity.sensor.humidity.name
-        self._attr_device_class = SensorDeviceClass.HUMIDITY
-        self._attr_state_class = SensorStateClass.MEASUREMENT
-        self._attr_native_unit_of_measurement = PERCENTAGE
-        self._attr_icon = "mdi:water-percent"
-        
-        # Value tracking
-        self._last_reading: Optional[float] = None
-        self._last_update: Optional[datetime] = None
-        
-        # Event listeners will be setup in async_added_to_hass
-
-    @property
-    def available(self) -> bool:
-        """Return True if entity is available.
-        
-        Humidity sensors inherit the RX11 transceiver connection status 
-        via via_device linkage.
-        """
-        return self._is_rx11_connected()
-
-    async def async_added_to_hass(self) -> None:
-        """Setup event listeners when entity is added to hass."""
-        await super().async_added_to_hass()
-        
-        # Restore previous state
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state not in (None, "unknown", "unavailable"):
-                try:
-                    self._last_reading = float(last_state.state)
-                    _LOGGER.debug("Restored humidity sensor %s with value %.1f%%", 
-                                self._serial_number, self._last_reading)
-                except (ValueError, TypeError):
-                    pass
-        
-        self._setup_event_listeners()
-
-    def _setup_event_listeners(self):
-        """Setup event listeners for telegram updates."""
-        from .const import EVENT_DEVICE_UPDATED, EVENT_TELEGRAM_RECEIVED, DOMAIN
-        
-        def handle_device_update(event):
-            if event.data.get("serial_number") == self._serial_number:
-                telegram_data = event.data.get("telegram_data", {})
-                if "humidity" in telegram_data:
-                    self._last_reading = telegram_data["humidity"]
-                    self._last_update = datetime.now()
-                    _LOGGER.debug("Humidity sensor %s updated via EVENT_DEVICE_UPDATED: %.1f%%", 
-                                self._serial_number, self._last_reading)
-                    self.async_schedule_update_ha_state()
-        
-        def handle_telegram(event):
-            if event.data.get("serial_number") == self._serial_number:
-                telegram_data = event.data.get("telegram_data", {})
-                if "humidity" in telegram_data:
-                    self._last_reading = telegram_data["humidity"]
-                    self._last_update = datetime.now()
-                    _LOGGER.debug("Humidity sensor %s updated via EVENT_TELEGRAM_RECEIVED: %.1f%%", 
-                                self._serial_number, self._last_reading)
-                    self.async_schedule_update_ha_state()
-        
-        # Also listen for sensor_update events
-        def handle_sensor_update(event):
-            event_data = event.data
-            if (event_data.get("serial_number") == self._serial_number and 
-                event_data.get("measurement_type") == "humidity"):
-                humidity = event_data.get("value")
-                if humidity is not None:
-                    self._last_reading = humidity
-                    self._last_update = datetime.now()
-                    _LOGGER.info("📡 Humidity sensor %s updated via sensor_update: %.1f%%", 
-                               self._serial_number, self._last_reading)
-                    self.async_schedule_update_ha_state()
-        
-        # Register listeners and store removal functions
-        self._device_update_listener = self.coordinator.hass.bus.async_listen(EVENT_DEVICE_UPDATED, handle_device_update)
-        self._telegram_listener = self.coordinator.hass.bus.async_listen(EVENT_TELEGRAM_RECEIVED, handle_telegram)
-        self._sensor_update_listener = self.coordinator.hass.bus.async_listen("eldat_sensor_update", handle_sensor_update)
-        
-        _LOGGER.debug("🎯 Humidity sensor %s event listeners registered for serial %s", 
-                     self._attr_unique_id, self._serial_number[-8:])
-    
-    async def async_will_remove_from_hass(self) -> None:
-        """Called when entity will be removed from Home Assistant."""
-        await super().async_will_remove_from_hass()
-        
-        # Clean up event listeners
-        if hasattr(self, '_device_update_listener') and self._device_update_listener:
-            self._device_update_listener()
-        if hasattr(self, '_telegram_listener') and self._telegram_listener:
-            self._telegram_listener()
-        if hasattr(self, '_sensor_update_listener') and self._sensor_update_listener:
-            self._sensor_update_listener()
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current humidity."""
-        return self._last_reading
-
-    async def async_update(self) -> None:
-        """Update sensor state from coordinator data."""
-        try:
-            # Get latest data from coordinator
-            device_data = self.coordinator.devices.get(self._serial_number, {})
-            if "humidity" in device_data:
-                self._last_reading = device_data["humidity"]
-                if "last_seen" in device_data:
-                    self._last_update = datetime.fromtimestamp(device_data["last_seen"])
-        except Exception as e:
-            _LOGGER.error("Error updating humidity sensor %s: %s", 
-                         self._serial_number, e)
-
-
 class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
     """Sensor showing the last pressed button for Easywave Transmitters in grouped mode.
     
@@ -1214,8 +950,8 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True - sensor is always available even without a button press."""
-        return True
+        """Return if entity is available - follows RX11 connection status."""
+        return self._is_rx11_connected()
 
     @property
     def native_value(self) -> str | None:
@@ -1413,8 +1149,8 @@ class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity)
 
     @property
     def available(self) -> bool:
-        """Return True - sensor is always available."""
-        return True
+        """Return if entity is available - follows RX11 connection status."""
+        return self._is_rx11_connected()
 
     @property
     def native_value(self) -> str | None:
@@ -1598,7 +1334,8 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return True
+        """Return if entity is available - follows RX11 connection status."""
+        return self._is_rx11_connected()
 
     @property
     def native_value(self) -> str | None:
@@ -1734,8 +1471,7 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
             return False
         
         # Battery info comes from telegrams, so consider available if we have recent data
-        if self._last_update is None:
-            return False
+        if self._last_update is None:            return False
         
         return (datetime.now() - self._last_update) < timedelta(days=1)
 
@@ -2015,12 +1751,30 @@ class EldatDiagnosticSensor(EldatEntity, SensorEntity):
         self.schedule_update_ha_state()
 
 
-class EWneoSensorEntity(EldatEntity, SensorEntity):
+class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
     """Universal sensor entity for EWneo-Sensoren.
     
     Communicates directly with EWneoSensor device class for readings.
     Does NOT store history - only shows current/last received value.
     """
+
+    class _ExtraData(ExtraStoredData):
+        """Extra data to persist the last numeric reading across restarts."""
+        __slots__ = ("last_reading",)
+
+        def __init__(self, last_reading: float | None) -> None:
+            self.last_reading = last_reading
+
+        def as_dict(self) -> dict:
+            return {"last_reading": self.last_reading}
+
+        @classmethod
+        def from_dict(cls, data: dict) -> "EWneoSensorEntity._ExtraData | None":
+            try:
+                raw = data.get("last_reading")
+                return cls(float(raw) if raw is not None else None)
+            except (TypeError, ValueError):
+                return None
     
     # Disable history recording for this entity
     _unrecorded_attributes = frozenset({"last_seen", "max_telegram_interval"})
@@ -2077,13 +1831,25 @@ class EWneoSensorEntity(EldatEntity, SensorEntity):
         self._last_reading = None
         self._last_update = None
         self._entity_created_at = None  # Set when entity is added to hass
+        self._restored_reading = None   # Value restored from previous HA session
+
+    @property
+    def extra_restore_state_data(self) -> "EWneoSensorEntity._ExtraData":
+        """Return extra data to persist across restarts.
+
+        Stores the last numeric reading independently of the entity state,
+        so it survives restarts even when the entity was 'unavailable'.
+        """
+        return EWneoSensorEntity._ExtraData(self._last_reading)
 
     @property
     def native_value(self) -> float | int | datetime | None:
         """Return the sensor value from current session only.
         
-        Only returns values from telegrams received AFTER the entity was created.
-        This prevents showing old/stale values after device re-learning.
+        Tries multiple sources in order:
+        1. EWneoSensor device object (if available) - most current data
+        2. coordinator.devices dict - fallback if device exists but has no data yet
+        3. Restored value from previous session
         """
         try:
             # Special handling for timestamp sensors (last_seen)
@@ -2100,38 +1866,62 @@ class EWneoSensorEntity(EldatEntity, SensorEntity):
                         return dt
                 return None
             
-            # Get device data from coordinator
-            device_data = self.coordinator.devices.get(self._serial_number, {})
+            # PRIMARY SOURCE: Try to get value from EWneoSensor device object (most current)
+            device = self.coordinator.get_device_instance(self._serial_number)
+            if device and hasattr(device, 'get_sensor_data'):
+                try:
+                    sensor_data = device.get_sensor_data()
+                    if sensor_data:
+                        # Map sensor_type to the correct key in sensor_data
+                        lookup_key = self._sensor_type
+                        if lookup_key == "battery_warning":
+                            lookup_key = "battery_warning"
+                        
+                        value = sensor_data.get(lookup_key)
+                        if value is not None:
+                            self._last_reading = value
+                            self._last_update = datetime.now()
+                            self._restored_reading = None  # Live data received
+                            return value
+                except Exception as e:
+                    _LOGGER.debug("Could not get data from device object for %s: %s", 
+                                 self._sensor_type, e)
             
+            # SECONDARY SOURCE: Fall back to coordinator.devices (for devices without object)
+            device_data = self.coordinator.devices.get(self._serial_number, {})
+
             # Check if we have a last_seen timestamp that is AFTER entity creation
             last_seen = device_data.get("last_seen")
-            if last_seen is None:
-                return None  # No data received yet
-            
-            # Convert last_seen to timestamp for comparison
-            if self._entity_created_at:
-                if isinstance(last_seen, (int, float)):
-                    if last_seen < self._entity_created_at:
-                        return None  # Data is from before entity creation
-                elif isinstance(last_seen, str):
-                    # ISO format timestamp
-                    try:
-                        from datetime import datetime as dt_class
-                        last_seen_dt = dt_class.fromisoformat(last_seen.replace('Z', '+00:00'))
-                        if last_seen_dt.timestamp() < self._entity_created_at:
-                            return None  # Data is from before entity creation
-                    except:
-                        pass
-            
-            # Get the value
-            lookup_key = "battery_level" if self._sensor_type == "battery" else self._sensor_type
-            value = device_data.get(lookup_key)
-            
-            if value is not None:
-                self._last_reading = value
-                self._last_update = datetime.now()
-                return value
-            
+
+            if last_seen is not None:
+                # Live data available — check if it's fresh (after entity creation)
+                is_fresh = True
+                if self._entity_created_at:
+                    if isinstance(last_seen, (int, float)):
+                        if last_seen < self._entity_created_at:
+                            is_fresh = False  # Data is from before entity creation
+                    elif isinstance(last_seen, str):
+                        try:
+                            from datetime import datetime as dt_class
+                            last_seen_dt = dt_class.fromisoformat(last_seen.replace('Z', '+00:00'))
+                            if last_seen_dt.timestamp() < self._entity_created_at:
+                                is_fresh = False
+                        except:
+                            pass
+
+                if is_fresh:
+                    lookup_key = "battery_level" if self._sensor_type == "battery" else self._sensor_type
+                    value = device_data.get(lookup_key)
+                    if value is not None:
+                        self._last_reading = value
+                        self._last_update = datetime.now()
+                        self._restored_reading = None  # Live data received → discard restored fallback
+                        return value
+
+            # TERTIARY SOURCE: Return restored value from previous session if no current data
+            if self._restored_reading is not None:
+                return self._restored_reading
+
             return None  # No value available
             
         except Exception as e:
@@ -2141,31 +1931,54 @@ class EWneoSensorEntity(EldatEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available.
+
+        A Neo-Sensor entity is available if:
+        1. It has a current value in native_value OR
+        2. It has a restored value OR
+        3. The sensor device exists in coordinator AND RX11 is connected
         
-        EWneo sensors inherit the RX11 transceiver connection status via via_device 
-        linkage. Additionally, they use the device's telegram timeout logic:
-        - Available if last telegram was within 2x max_telegram_interval
-        - Unavailable if no telegram received for longer than 2x interval
-        - Reset on HA restart (no stored timestamp)
+        This ensures entities appear available immediately after learning.
         """
-        # Base: RX11 must be connected (inherited from base)
+        # Check if we have a value RIGHT NOW (before any initialization)
+        if self._last_reading is not None or self._restored_reading is not None:
+            return True
+
+        # RX11 not connected → definitely unavailable
         if not self._is_rx11_connected():
+            _LOGGER.debug(
+                "EWneoSensorEntity %s unavailable: RX11 not connected (last_update_success=%s)",
+                self.entity_id, self.coordinator.last_update_success
+            )
             return False
         
-        # Check device availability based on telegram timeout
-        device = self.coordinator.get_device_instance(self._serial_number)
-        if device and hasattr(device, 'is_available'):
-            # Use device's timeout-based availability check
-            return device.is_available()
-        
-        # Fallback: check if we have any data
+        # Check if device exists in coordinator devices dict → assume available
+        # (Even if no data yet, the device is known to the system)
         if self._serial_number in self.coordinator.devices:
             return True
         
-        if self._last_reading is not None:
+        # Check if device exists as an instance object
+        device = self.coordinator.get_device_instance(self._serial_number)
+        if device is not None:
+            # Device exists → available (even without data)
             return True
         
-        return device is not None and hasattr(device, 'get_sensor_data')
+        # Last resort: try to get value from device to see if it has sensor data
+        try:
+            if device is not None and hasattr(device, 'get_sensor_data'):
+                sensor_data = device.get_sensor_data()
+                if sensor_data and self._sensor_type in sensor_data:
+                    return True  # Device has data for this sensor type
+        except:
+            pass
+        
+        # No device, no data, no connection → unavailable
+        _LOGGER.debug(
+            "EWneoSensorEntity %s unavailable: no device (%s in devices: %s, instance: %s), no data",
+            self.entity_id, self._serial_number, 
+            self._serial_number in self.coordinator.devices,
+            device is not None
+        )
+        return False
 
     @property
     def extra_state_attributes(self) -> Dict[str, Any]:
@@ -2211,18 +2024,87 @@ class EWneoSensorEntity(EldatEntity, SensorEntity):
         # This is used to filter out old values from before entity creation
         import time
         self._entity_created_at = time.time()
+
+        # TRY TO GET CURRENT VALUE from the device immediately
+        # This ensures the entity is available as soon as it's added to HA
+        _LOGGER.debug(
+            "EWneoSensorEntity %s: async_added_to_hass - attempting to get current value",
+            self.entity_id
+        )
         
-        # DO NOT load initial values from stored data
-        # We only want to show values from actual telegrams received AFTER the entity was created
-        # This ensures that after re-learning, the sensor shows "unavailable" until a new telegram arrives
+        try:
+            # Try to get value from EWneoSensor device object
+            device = self.coordinator.get_device_instance(self._serial_number)
+            _LOGGER.debug("EWneoSensorEntity %s: device instance = %s", self.entity_id, device)
+            
+            if device and hasattr(device, 'get_sensor_data'):
+                try:
+                    sensor_data = device.get_sensor_data()
+                    _LOGGER.debug(
+                        "EWneoSensorEntity %s: sensor_data from device = %s",
+                        self.entity_id, sensor_data
+                    )
+                    
+                    if sensor_data:
+                        value = sensor_data.get(self._sensor_type)
+                        if value is not None:
+                            self._last_reading = value
+                            _LOGGER.info(
+                                "✅ EWneoSensorEntity %s: got current value %.4g from device",
+                                self.entity_id, self._last_reading,
+                            )
+                            # Force update state immediately
+                            self.async_write_ha_state()
+                except Exception as e:
+                    _LOGGER.debug("Could not get current value from device: %s", e)
+        except Exception as e:
+            _LOGGER.debug("Error getting device for current value: %s", e)
+
+        # Restore last known reading from ExtraStoredData (for restarts)
+        # Only restore if we don't have a current value already
+        if self._last_reading is None:
+            extra = await self.async_get_last_extra_data()
+            if extra is not None:
+                restored = EWneoSensorEntity._ExtraData.from_dict(extra.as_dict())
+                if restored and restored.last_reading is not None:
+                    self._restored_reading = restored.last_reading
+                    _LOGGER.info(
+                        "✅ EWneoSensorEntity %s: restored previous value %.4g from ExtraStoredData",
+                        self.entity_id, self._restored_reading,
+                    )
+
+        # Fallback: state recorder (only useful when last state was NOT 'unavailable')
+        if self._restored_reading is None and self._last_reading is None:
+            if (last_state := await self.async_get_last_state()) is not None:
+                if last_state.state not in (None, "unknown", "unavailable"):
+                    try:
+                        self._restored_reading = float(last_state.state)
+                        _LOGGER.info(
+                            "✅ EWneoSensorEntity %s: restored previous value %.4g from state recorder",
+                            self.entity_id, self._restored_reading,
+                        )
+                    except (ValueError, TypeError):
+                        pass
+        
+        # Diagnostic: print final state
+        _LOGGER.info(
+            "📊 EWneoSensorEntity %s: initialization complete - has_value=%s, RX11_connected=%s, "
+            "device_in_coordinator=%s, available=%s",
+            self.entity_id,
+            self._last_reading is not None or self._restored_reading is not None,
+            self._is_rx11_connected(),
+            self._serial_number in self.coordinator.devices,
+            self.available
+        )
         
         # Subscribe to coordinator updates
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
         
-        _LOGGER.info("✅ EWneoSensorEntity added: %s (created_at=%.0f, waiting for new telegram)", 
-                    self.entity_id, self._entity_created_at)
+        _LOGGER.info("✅ EWneoSensorEntity added: %s (created_at=%.0f, has_value=%s)", 
+                    self.entity_id, self._entity_created_at,
+                    self._last_reading is not None or self._restored_reading is not None)
 
     async def async_update(self) -> None:
         """Update the entity."""

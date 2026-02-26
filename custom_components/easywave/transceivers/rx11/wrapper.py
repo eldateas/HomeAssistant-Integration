@@ -674,7 +674,7 @@ class RX11Wrapper:
             # Step 1: Check if this serial is in _used_receivers (from persistent tracking)
             short_serial = serial_number[-8:].upper()
             receiver_index = None
-            receiver_serial = None
+            receiver_serial = serial_number  # Default to using the stored serial directly
             
             _LOGGER.debug("🔍 Searching for receiver with serial: %s (input: %s)", short_serial, serial_number)
             _LOGGER.debug("📋 Available in _used_receivers: %s", {k: v[-8:] for k, v in self._used_receivers.items()})
@@ -703,7 +703,7 @@ class RX11Wrapper:
                         receiver_serial = cached_serial
                         _LOGGER.debug("🎯 Using cached mapping for %s: index %d", short_serial, receiver_index)
             
-            # Step 3: If still not found, do efficient search through RX11 indices
+            # Step 3: If still not found, try RX11 indices to find the device
             if receiver_index is None:
                 # Search efficiently through known indices
                 for index in range(10):  # Limit to first 10 for performance
@@ -717,10 +717,11 @@ class RX11Wrapper:
                         self._device_index_cache[short_serial] = (index, cached_serial, time.time())
                         _LOGGER.debug("📌 Cached new mapping for %s: index %d", short_serial, index)
                         break
-                        
-            if receiver_index is None or not receiver_serial:
-                _LOGGER.error("❌ Could not find receiver %s in any index", short_serial)
-                return False
+            
+            # If we couldn't find index in RX11, use stored serial directly
+            if receiver_index is None:
+                _LOGGER.info("⚠️ Receiver not found in RX11 - using stored serial_number: %s", short_serial)
+                receiver_serial = serial_number
             
             # Step 3: Send command using receiver serial as gateway
             # For EW receivers, the gateway is the receiver's own serial
@@ -738,8 +739,9 @@ class RX11Wrapper:
             
             # Log command being sent
             button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
-            _LOGGER.info("📤 Sending command to receiver: %s (index %d, button %s)", 
-                          short_serial, receiver_index, button_letter)
+            index_str = f"index {receiver_index}" if receiver_index is not None else "direct serial (old RX11)"
+            _LOGGER.info("📤 Sending command to receiver: %s (%s, button %s)", 
+                          short_serial, index_str, button_letter)
             
             result = await asyncio.get_event_loop().run_in_executor(
                 None, self._module.ew_send_cmd_request, gateway_bytes, button, 5.0
