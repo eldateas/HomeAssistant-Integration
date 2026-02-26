@@ -629,7 +629,14 @@ class EldatCoordinator(DataUpdateCoordinator):
                     # Validate all devices and remove invalid ones
                     cleaned_devices, validation_changed = await self._validate_and_clean_devices(loaded_devices)
                     self._registered_devices = cleaned_devices
+                    loaded_devices = cleaned_devices  # Update loaded_devices reference too
                     devices_updated = devices_updated or validation_changed
+                    
+                    # IMPORTANT: Save immediately if validation removed devices, before any other operations
+                    if validation_changed:
+                        await self._save_registered_devices()
+                        _LOGGER.info("💾 Saved device list after validation (removed %d invalid devices)", 
+                                   len(loaded_devices) - len(data.get('devices', {})))
                     
                     # Initialize entity count tracking from loaded state
                     self._last_saved_entity_counts = {

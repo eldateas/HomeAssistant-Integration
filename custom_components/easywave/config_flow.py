@@ -398,33 +398,13 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_device_transmitter_switch_impulse(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle impulse switch mode selection."""
         self._device_config["switch_mode"] = "impulse"
-        # For 1-button mode with "single" grouping, skip button count selection
-        # and auto-detect button type during learning
-        operating_type = self._device_config.get("operating_type", "1")
-        grouping_mode = self._device_config.get("grouping_mode", "single")
-        
-        if operating_type == "1" and grouping_mode == "single":
-            # Auto-detect button type for 1-button single mode
-            self._device_config["button_count"] = 1
-            self._device_config["channels"] = 1
-            return await self.async_step_device_transmitter_description()
-        
+        # For impulse mode, always ask for button count
         return await self.async_step_device_transmitter_button_count()
 
     async def async_step_device_transmitter_switch_permanent(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle permanent switch mode selection."""
         self._device_config["switch_mode"] = "permanent"
-        # For 1-button mode with "single" grouping, skip button count selection
-        # and auto-detect button type during learning
-        operating_type = self._device_config.get("operating_type", "1")
-        grouping_mode = self._device_config.get("grouping_mode", "single")
-        
-        if operating_type == "1" and grouping_mode == "single":
-            # Auto-detect button type for 1-button single mode
-            self._device_config["button_count"] = 1
-            self._device_config["channels"] = 1
-            return await self.async_step_device_transmitter_description()
-        
+        # For permanent mode, always ask for button count
         return await self.async_step_device_transmitter_button_count()
 
     async def async_step_device_transmitter_button_count(self, user_input: dict[str, Any] | None = None) -> FlowResult:
