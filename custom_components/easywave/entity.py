@@ -94,7 +94,7 @@ class EasywaveEntity(CoordinatorEntity):
         existing_default_name = None
         # Derive the HA device identifier: UUID-based registration_id for new
         # devices, serial_number for legacy devices without registration_id.
-        device_identifier = current_device_info['registration_id']
+        device_identifier = current_device_info.get('registration_id') or self._serial_number
         if self.hass:
             from homeassistant.helpers import device_registry as dr
             device_registry = dr.async_get(self.hass)

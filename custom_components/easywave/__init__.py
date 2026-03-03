@@ -329,6 +329,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         migration_report = await migrate_entities_if_needed(hass, entry.entry_id, combined_devices)
         
+        # Log v0.6.4 migration results
+        v064_devices = migration_report.get("v064_devices_migrated", 0)
+        v064_entities = migration_report.get("v064_entities_migrated", 0)
+        if v064_devices > 0 or v064_entities > 0:
+            _LOGGER.info("🔄 v0.6.4 migration: %d devices, %d entities migrated to new identifier format",
+                        v064_devices, v064_entities)
+
         if migration_report.get("migrated_devices", 0) > 0:
             _LOGGER.info("🔄 Entity migration completed: %d devices, %d entities updated",
                         migration_report["migrated_devices"],

@@ -2,10 +2,18 @@
 
 This module provides a fallback mechanism to recreate devices with new unique_ids
 when breaking changes occur, preserving device names and configurations.
+
+v0.6.4 → current migration:
+- Device identifiers changed from (DOMAIN, serial_number) to (DOMAIN, registration_id).
+- Entity unique_ids changed from {serial}_{type}[_ch{n}][_{hash6}] to
+  {registration_id}_{type}[_ch{n}].
+The migrate_v064_to_current() function handles both transitions.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
 
@@ -132,9 +140,14 @@ class EntityMigrationHelper:
                 continue
             
             # Check if entity belongs to this device (match by UUID or legacy serial)
-            ha_identifier = device_info['registration_id']
+            ha_identifier = device_info.get('registration_id', '')
             uid = entity.unique_id
-            if not (uid.startswith(ha_identifier) or uid.startswith(serial_number)):
+            if not ha_identifier and not serial_number:
+                continue
+            if not (
+                (ha_identifier and uid.startswith(ha_identifier))
+                or uid.startswith(serial_number)
+            ):
                 continue
             
             # Check if unique_id matches expected format
@@ -419,7 +432,7 @@ async def cleanup_legacy_battery_sensors(
             # Check for exact battery sensor (not battery_warning)
             if entity.unique_id and entity.unique_id.endswith("_battery"):
                 # Make sure it's not battery_warning, and use startswith for safe matching
-                ha_identifier = device_info['registration_id']
+                ha_identifier = device_info.get('registration_id', '')
                 if (entity.unique_id.startswith(ha_identifier) or entity.unique_id.startswith(serial_number)) and "warning" not in entity.unique_id:
                     _LOGGER.info("🔋 Removing legacy battery percentage sensor: %s", entity.entity_id)
                     try:
@@ -516,6 +529,144 @@ async def cleanup_duplicate_entities(
     return removed_count
 
 
+# ══════════════════════════════════════════════════════════════
+# v0.6.4 → current migration
+# ══════════════════════════════════════════════════════════════
+
+async def migrate_v064_to_current(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    managed_devices: Dict[str, Dict[str, Any]],
+) -> Dict[str, int]:
+    """Migrate v0.6.4 devices and entities to the current identifier format.
+
+    v0.6.4 used:
+      - Device identifiers:  (DOMAIN, serial_number)
+      - Entity unique_ids:   {serial}_{type}[_ch{n}][_{hash6}]
+            where hash6 = MD5(registration_id)[:6]
+
+    Current uses:
+      - Device identifiers:  (DOMAIN, registration_id)   (UUID)
+      - Entity unique_ids:   {registration_id}_{type}[_ch{n}]
+
+    This function:
+    1. Updates HA device identifiers from serial → registration_id.
+    2. Updates HA entity unique_ids from serial-prefix → registration_id-prefix,
+       stripping the old hash suffix if present.
+
+    Both steps are idempotent: if an entry already has the new format it is
+    skipped, so calling this multiple times is safe.
+
+    Returns:
+        Dict with ``devices_migrated``, ``entities_migrated``, ``skipped`` counts.
+    """
+    from homeassistant.helpers import device_registry as dr
+
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+
+    result: Dict[str, int] = {
+        "devices_migrated": 0,
+        "entities_migrated": 0,
+        "skipped": 0,
+    }
+
+    for serial_number, device_info in managed_devices.items():
+        registration_id = device_info.get("registration_id")
+        if not registration_id:
+            continue
+
+        # ----------------------------------------------------------
+        # 1. Migrate HA device identifier  serial → registration_id
+        # ----------------------------------------------------------
+        new_device = device_registry.async_get_device(
+            identifiers={(DOMAIN, registration_id)}
+        )
+        if not new_device:
+            old_device = device_registry.async_get_device(
+                identifiers={(DOMAIN, serial_number)}
+            )
+            if old_device:
+                device_registry.async_update_device(
+                    old_device.id,
+                    new_identifiers={(DOMAIN, registration_id)},
+                )
+                result["devices_migrated"] += 1
+                _LOGGER.info(
+                    "🔄 Migrated device identifier for %s: serial → registration_id (%s)",
+                    serial_number[-8:],
+                    registration_id[:8],
+                )
+
+        # ----------------------------------------------------------
+        # 2. Migrate entity unique_ids  {serial}_X[_{hash6}] → {uuid}_X
+        # ----------------------------------------------------------
+        # Precompute the v0.6.4 hash suffix so we can strip it
+        hash6 = hashlib.md5(str(registration_id).encode("utf-8")).hexdigest()[:6]
+
+        # Collect new unique_ids that are already taken (avoid collisions)
+        taken_unique_ids: Set[str] = set()
+        for e in entity_registry.entities.values():
+            if e.config_entry_id == config_entry_id and e.unique_id:
+                taken_unique_ids.add(e.unique_id)
+
+        for entity in list(entity_registry.entities.values()):
+            if entity.config_entry_id != config_entry_id:
+                continue
+            uid = entity.unique_id
+            if not uid:
+                continue
+
+            # Only touch entities that still carry the old serial-number prefix
+            if not uid.startswith(serial_number + "_"):
+                continue
+            # Already migrated?
+            if uid.startswith(registration_id):
+                continue
+
+            # Extract the entity-type part:
+            #   "{serial}_{type}[_ch{n}][_{hash6}]"  →  "_{type}[_ch{n}]"
+            remainder = uid[len(serial_number):]
+
+            # Strip trailing hash suffix if present (_{6 hex chars} at end)
+            remainder = re.sub(r"_[0-9a-f]{6}$", "", remainder)
+
+            new_uid = registration_id + remainder
+
+            # Safety: skip if the new unique_id already exists
+            if new_uid in taken_unique_ids:
+                result["skipped"] += 1
+                continue
+
+            try:
+                entity_registry.async_update_entity(
+                    entity.entity_id,
+                    new_unique_id=new_uid,
+                )
+                taken_unique_ids.add(new_uid)
+                result["entities_migrated"] += 1
+                _LOGGER.info(
+                    "🔄 Migrated entity %s: …%s → …%s",
+                    entity.entity_id,
+                    uid[-20:],
+                    new_uid[-20:],
+                )
+            except Exception as exc:
+                _LOGGER.warning(
+                    "⚠️ Failed to migrate entity %s: %s", entity.entity_id, exc
+                )
+
+    if result["devices_migrated"] or result["entities_migrated"]:
+        _LOGGER.info(
+            "✅ v0.6.4 migration complete: %d devices, %d entities migrated, %d skipped",
+            result["devices_migrated"],
+            result["entities_migrated"],
+            result["skipped"],
+        )
+
+    return result
+
+
 async def migrate_entities_if_needed(
     hass: HomeAssistant,
     config_entry_id: str,
@@ -534,10 +685,17 @@ async def migrate_entities_if_needed(
     Returns:
         Migration report
     """
+    # ── v0.6.4 → current: device-identifier + entity-unique_id migration ──
+    v064_report = await migrate_v064_to_current(hass, config_entry_id, managed_devices)
+
     helper = EntityMigrationHelper(hass)
     
     # Check and migrate incompatible entities
     report = await helper.check_and_migrate_entities(config_entry_id, managed_devices)
+
+    # Merge v064 results into report
+    report["v064_devices_migrated"] = v064_report["devices_migrated"]
+    report["v064_entities_migrated"] = v064_report["entities_migrated"]
     
     # Cleanup duplicate entities (old format without registration_id suffix)
     duplicates_removed = await cleanup_duplicate_entities(hass, config_entry_id, managed_devices)

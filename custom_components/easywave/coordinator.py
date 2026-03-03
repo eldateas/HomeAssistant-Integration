@@ -455,8 +455,27 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                     loaded_devices = data.get('devices', {})
                     devices_updated = False
                     
+                    # ══════════════════════════════════════════════════════════
+                    # STEP 0: Ensure ALL devices have a registration_id.
+                    # Very old (pre-v0.6.4) devices may have been stored
+                    # without one.  Assigning a stable UUID here prevents
+                    # KeyError crashes in entity.py and allows the entity
+                    # migration below to produce correct new-format unique_ids.
+                    # ══════════════════════════════════════════════════════════
+                    import uuid as _uuid_mod
+                    for serial_number, device_info in loaded_devices.items():
+                        if not device_info.get("registration_id"):
+                            new_uuid = _uuid_mod.uuid4().hex
+                            device_info["registration_id"] = new_uuid
+                            devices_updated = True
+                            _LOGGER.info(
+                                "🆔 Assigned registration_id to legacy device %s: %s",
+                                serial_number[-8:], new_uuid[:8],
+                            )
+                    
                     # Validate entity specs for backwards compatibility
-                    # Ensures v6.4 entities that lack registration_id suffix get it added
+                    # Ensures v6.4 entities with serial-based unique_ids get regenerated
+                    # to registration_id-based unique_ids (current format).
                     for serial_number, device_info in loaded_devices.items():
                         registration_id = device_info.get("registration_id", "")
                         entities = device_info.get("entities", [])
@@ -464,17 +483,16 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                         if not registration_id or not entities:
                             continue
                         
-                        # Check if entities already have the registration_id suffix
-                        import hashlib
-                        hash_hex = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
-                        expected_suffix = f"_{hash_hex}"
-                        has_suffix = any(
-                            entity.get("unique_id", "").endswith(expected_suffix)
+                        # Check if entities already use registration_id as prefix.
+                        # v0.6.4 used serial_number as prefix; current uses registration_id.
+                        # Also check for old hash suffix (_{md5_6hex}) which v0.6.4 appended.
+                        uses_new_format = any(
+                            entity.get("unique_id", "").startswith(registration_id)
                             for entity in entities
                         )
                         
-                        if not has_suffix:
-                            _LOGGER.info("🔄 Device %s needs entity regeneration (registration_id present but no suffix in unique_ids)", 
+                        if not uses_new_format:
+                            _LOGGER.info("🔄 Device %s needs entity regeneration (serial-based unique_ids → registration_id-based)", 
                                        serial_number[-8:])
                             device_info = await self._regenerate_entity_specs(
                                 serial_number, device_info
