@@ -639,29 +639,28 @@ async def async_remove_config_entry_device(
         # Allow deletion anyway - this might be an orphaned device
         return True
     
+    # ── RX11 gateway protection ──────────────────────────────────
+    # Must be checked BEFORE serial resolution because the gateway
+    # identifier ("{entry_id}_gateway") is not in _registered_devices
+    # and get_serial_by_ha_identifier() would return None.
+    is_rx11_gateway = (
+        identifier_value.endswith("_gateway") or
+        "gateway" in identifier_value.lower() or
+        identifier_value == config_entry.entry_id
+    )
+    
+    if is_rx11_gateway:
+        _LOGGER.info("ℹ️ User tried to delete RX11 transceiver - this is not allowed via UI")
+        raise HomeAssistantError(
+            translate("error.cannot_delete_rx11", hass=hass)
+        )
+    
     # Resolve UUID-based identifier back to serial_number
     serial_number = coordinator.get_serial_by_ha_identifier(identifier_value)
     if not serial_number:
         _LOGGER.warning("⚠️ Could not resolve identifier %s to serial_number", identifier_value[-8:])
         # Allow deletion anyway — might be an orphaned device
         return True
-    
-    # Don't allow deletion of the main RX11 transceiver device
-    # The RX11 gateway identifier is "{config_entry.entry_id}_gateway"
-    is_rx11_gateway = (
-        serial_number.endswith("_gateway") or
-        "gateway" in serial_number.lower() or
-        serial_number == config_entry.entry_id or
-        "RX11" in (device_entry.name or "").upper()
-    )
-    
-    if is_rx11_gateway:
-        # RX11 gateway device cannot be deleted via the UI menu
-        # Users must remove the entire integration to remove the RX11
-        _LOGGER.info("ℹ️ User tried to delete RX11 transceiver - this is not allowed via UI")
-        raise HomeAssistantError(
-            translate("error.cannot_delete_rx11", hass=hass)
-        )
     
     try:
         # Use coordinator's removal method for proper cleanup
