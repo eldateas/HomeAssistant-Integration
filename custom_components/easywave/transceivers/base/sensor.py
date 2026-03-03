@@ -1,4 +1,4 @@
-"""Base sensor class for all ELDAT sensors."""
+"""Base sensor class for all EASYWAVE sensors."""
 from __future__ import annotations
 
 from abc import abstractmethod

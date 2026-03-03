@@ -1,4 +1,4 @@
-# ELDAT Integration - Native Dashboard Templates
+# EASYWAVE Integration - Native Dashboard Templates
 # Diese Vorlagen können direkt in Lovelace Dashboards verwendet werden
 
 # ================================
@@ -7,7 +7,7 @@
 # Die einfachste Lösung - jedes Gerät hat automatisch einen "Entfernen"-Button
 
 type: vertical-stack
-title: "🏠 ELDAT Geräte mit Entfernen-Buttons"
+title: "🏠 EASYWAVE Geräte mit Entfernen-Buttons"
 cards:
   # Automatische Button-Liste
   - type: auto-entities
@@ -28,12 +28,12 @@ cards:
     
   # Geräte-Übersicht
   - type: entities
-    title: "📊 ELDAT Geräte-Übersicht"
+    title: "📊 EASYWAVE Geräte-Übersicht"
     show_header_toggle: false
     entities:
       - type: custom:template-entity-row
-        name: "Anzahl ELDAT-Geräte"
-        state: "{{ device_entities(integration='eldat_plugin') | list | length }}"
+        name: "Anzahl EASYWAVE-Geräte"
+        state: "{{ device_entities(integration='easywave_plugin') | list | length }}"
         icon: mdi:counter
 
   # Schnelle Aktionen
@@ -45,7 +45,7 @@ cards:
         icon: mdi:radar
         tap_action:
           action: call-service
-          service: eldat_plugin.scan_devices
+          service: easywave_plugin.scan_devices
         hold_action:
           action: more-info
       - type: button
@@ -53,13 +53,13 @@ cards:
         icon: mdi:delete-sweep
         tap_action:
           action: call-service
-          service: eldat_plugin.remove_all_devices
+          service: easywave_plugin.remove_all_devices
           service_data:
             force: false
           confirmation:
-            text: "Wirklich alle ELDAT-Geräte entfernen?"
+            text: "Wirklich alle EASYWAVE-Geräte entfernen?"
 
-  # Device-Aktionen (funktioniert automatisch mit allen ELDAT-Geräten)
+  # Device-Aktionen (funktioniert automatisch mit allen EASYWAVE-Geräten)
   - type: entities
     title: "🔧 Geräte-Aktionen"
     show_header_toggle: false
@@ -72,12 +72,12 @@ cards:
       - type: custom:hui-element
         card_type: markdown
         content: |
-          **Verfügbare Aktionen für jedes ELDAT-Gerät:**
+          **Verfügbare Aktionen für jedes EASYWAVE-Gerät:**
           
-          🗑️ **Entfernen**: `eldat_plugin.device_remove`
-          🔄 **Neu erstellen**: `eldat_plugin.device_recreate`  
-          ⏸️ **Deaktivieren**: `eldat_plugin.device_disable`
-          ▶️ **Aktivieren**: `eldat_plugin.device_enable`
+          🗑️ **Entfernen**: `easywave_plugin.device_remove`
+          🔄 **Neu erstellen**: `easywave_plugin.device_recreate`  
+          ⏸️ **Deaktivieren**: `easywave_plugin.device_disable`
+          ▶️ **Aktivieren**: `easywave_plugin.device_enable`
           
           *Diese Services sind direkt in der Developer Tools > Services verfügbar.*
 
@@ -87,18 +87,18 @@ cards:
 # Erweiterte Karte mit individuellen Geräte-Aktionen:
 
 type: entities
-title: "📱 ELDAT Geräte mit Aktionen"
+title: "📱 EASYWAVE Geräte mit Aktionen"
 show_header_toggle: false
 entities:
-  # Dynamische Liste aller ELDAT-Geräte
+  # Dynamische Liste aller EASYWAVE-Geräte
   - type: custom:auto-entities
     filter:
       include:
-        - integration: eldat_plugin
+        - integration: easywave_plugin
           options:
             type: custom:button-entity-row
             action: call-service
-            service: eldat_plugin.device_remove
+            service: easywave_plugin.device_remove
             service_data:
               device_id: this.entity_id
               force: false
@@ -113,24 +113,24 @@ entities:
 # Für manuelle Service-Aufrufe in Developer Tools:
 
 # Gerät entfernen:
-service: eldat_plugin.device_remove
+service: easywave_plugin.device_remove
 target:
   device_id: "DEVICE_ID_HIER_EINFÜGEN"
 data:
   force: false
 
 # Gerät neu erstellen:
-service: eldat_plugin.device_recreate
+service: easywave_plugin.device_recreate
 target:
   device_id: "DEVICE_ID_HIER_EINFÜGEN"
 
 # Gerät deaktivieren:
-service: eldat_plugin.device_disable
+service: easywave_plugin.device_disable
 target:
   device_id: "DEVICE_ID_HIER_EINFÜGEN"
 
 # Gerät aktivieren:
-service: eldat_plugin.device_enable
+service: easywave_plugin.device_enable
 target:
   device_id: "DEVICE_ID_HIER_EINFÜGEN"
 
@@ -140,75 +140,75 @@ target:
 # Kopieren Sie diese in automations.yaml:
 
 # Benachrichtigung bei Gerätentfernung
-- id: eldat_device_removed_notification
-  alias: "ELDAT Gerät entfernt - Benachrichtigung"
+- id: easywave_device_removed_notification
+  alias: "EASYWAVE Gerät entfernt - Benachrichtigung"
   trigger:
     - platform: event
-      event_type: eldat_device_removed
+      event_type: easywave_device_removed
   action:
     - service: persistent_notification.create
       data:
-        title: "ELDAT Gerät entfernt"
+        title: "EASYWAVE Gerät entfernt"
         message: >
-          Das ELDAT-Gerät "{{ trigger.event.data.get('device_name', 'Unbekannt') }}" 
+          Das EASYWAVE-Gerät "{{ trigger.event.data.get('device_name', 'Unbekannt') }}" 
           wurde erfolgreich entfernt.
-        notification_id: "eldat_device_removed_{{ trigger.event.data.device_id }}"
+        notification_id: "easywave_device_removed_{{ trigger.event.data.device_id }}"
 
 # Automatische Reaktivierung nach Recreation
-- id: eldat_device_recreated_notification
-  alias: "ELDAT Gerät neu erstellt - Benachrichtigung"
+- id: easywave_device_recreated_notification
+  alias: "EASYWAVE Gerät neu erstellt - Benachrichtigung"
   trigger:
     - platform: event
-      event_type: eldat_device_recreated
+      event_type: easywave_device_recreated
   action:
     - service: persistent_notification.create
       data:
-        title: "ELDAT Gerät neu erstellt"
+        title: "EASYWAVE Gerät neu erstellt"
         message: >
-          Das ELDAT-Gerät "{{ trigger.event.data.get('device_name', 'Unbekannt') }}" 
+          Das EASYWAVE-Gerät "{{ trigger.event.data.get('device_name', 'Unbekannt') }}" 
           wurde erfolgreich neu erstellt und ist wieder verfügbar.
-        notification_id: "eldat_device_recreated_{{ trigger.event.data.device_id }}"
+        notification_id: "easywave_device_recreated_{{ trigger.event.data.device_id }}"
 
 # ================================
 # 5. SCRIPT-VORLAGEN
 # ================================
 # Kopieren Sie diese in scripts.yaml:
 
-eldat_emergency_cleanup:
-  alias: "🚨 ELDAT Notfall-Bereinigung"
+easywave_emergency_cleanup:
+  alias: "🚨 EASYWAVE Notfall-Bereinigung"
   icon: mdi:broom
   sequence:
-    - service: eldat_plugin.remove_all_devices
+    - service: easywave_plugin.remove_all_devices
       data:
         force: true
-    - service: eldat_plugin.scan_devices
+    - service: easywave_plugin.scan_devices
     - delay: 
         seconds: 5
     - service: persistent_notification.create
       data:
-        title: "ELDAT Bereinigung abgeschlossen"
-        message: "Alle ELDAT-Geräte wurden entfernt und ein neuer Scan gestartet."
+        title: "EASYWAVE Bereinigung abgeschlossen"
+        message: "Alle EASYWAVE-Geräte wurden entfernt und ein neuer Scan gestartet."
 
-eldat_device_health_check:
-  alias: "🔍 ELDAT Geräte-Gesundheitscheck"
+easywave_device_health_check:
+  alias: "🔍 EASYWAVE Geräte-Gesundheitscheck"
   icon: mdi:heart-pulse
   sequence:
-    - service: eldat_plugin.scan_devices
+    - service: easywave_plugin.scan_devices
     - delay:
         seconds: 10
     - service: persistent_notification.create
       data:
-        title: "ELDAT Gesundheitscheck"
+        title: "EASYWAVE Gesundheitscheck"
         message: >
           Gesundheitscheck abgeschlossen. 
-          Aktuelle Geräteanzahl: {{ device_entities(integration='eldat_plugin') | list | length }}
+          Aktuelle Geräteanzahl: {{ device_entities(integration='easywave_plugin') | list | length }}
 
 # ================================
 # INSTALLATION UND VERWENDUNG
 # ================================
 
 # 1. Integration installieren (Custom Repository oder HACS)
-# 2. ELDAT Integration hinzufügen (Konfiguration > Integrationen)
+# 2. EASYWAVE Integration hinzufügen (Konfiguration > Integrationen)
 # 3. USB-Gerät auswählen und konfigurieren
 # 4. Diese Dashboard-Vorlagen kopieren und verwenden
 # 5. Fertig! Keine weiteren Plugins oder Konfigurationen nötig

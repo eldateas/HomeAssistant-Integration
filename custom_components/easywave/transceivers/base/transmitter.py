@@ -1,4 +1,4 @@
-"""Base transmitter class for all ELDAT transmitters."""
+"""Base transmitter class for all EASYWAVE transmitters."""
 from __future__ import annotations
 
 from typing import Any, Dict

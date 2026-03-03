@@ -1,8 +1,8 @@
-# Services for ELDAT integration
+# Services for EASYWAVE integration
 
 add_device:
   name: Add Device
-  description: Manually add a device to the ELDAT integration
+  description: Manually add a device to the EASYWAVE integration
   fields:
     serial_number:
       name: Serial Number
@@ -67,7 +67,7 @@ remove_device_by_id:
   description: Remove a device from the device menu using Device ID
   target:
     device:
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     device_id:
       name: Device ID
@@ -190,7 +190,7 @@ export_devices:
       name: Export Path
       description: Path where to save the export file
       required: true
-      example: "/config/eldat_devices_export.json"
+      example: "/config/easywave_devices_export.json"
       selector:
         text:
     include_backup:
@@ -209,7 +209,7 @@ import_devices:
       name: Import Path
       description: Path to the import file
       required: true
-      example: "/config/eldat_devices_import.json"
+      example: "/config/easywave_devices_import.json"
       selector:
         text:
     merge:
@@ -246,7 +246,7 @@ ew_receiver_toggle:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -255,7 +255,7 @@ ew_receiver_toggle:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_ein:
@@ -264,7 +264,7 @@ ew_receiver_ein:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -273,7 +273,7 @@ ew_receiver_ein:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_aus:
@@ -282,7 +282,7 @@ ew_receiver_aus:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -291,7 +291,7 @@ ew_receiver_aus:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_motor_auf:
@@ -300,7 +300,7 @@ ew_receiver_motor_auf:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -309,7 +309,7 @@ ew_receiver_motor_auf:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_motor_zu:
@@ -318,7 +318,7 @@ ew_receiver_motor_zu:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -327,7 +327,7 @@ ew_receiver_motor_zu:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_motor_stopp:
@@ -336,7 +336,7 @@ ew_receiver_motor_stopp:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -345,7 +345,7 @@ ew_receiver_motor_stopp:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_dimmer_heller:
@@ -354,7 +354,7 @@ ew_receiver_dimmer_heller:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -363,7 +363,7 @@ ew_receiver_dimmer_heller:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_dimmer_dunkler:
@@ -372,7 +372,7 @@ ew_receiver_dimmer_dunkler:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -381,7 +381,7 @@ ew_receiver_dimmer_dunkler:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_hvac_heizen_kuehlen:
@@ -390,7 +390,7 @@ ew_receiver_hvac_heizen_kuehlen:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -399,7 +399,7 @@ ew_receiver_hvac_heizen_kuehlen:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 ew_receiver_hvac_aus:
@@ -408,7 +408,7 @@ ew_receiver_hvac_aus:
   target:
     entity:
       domain: button
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     entity_id:
       name: Button Entity
@@ -417,16 +417,16 @@ ew_receiver_hvac_aus:
       selector:
         entity:
           filter:
-            - integration: eldat_plugin
+            - integration: easywave_plugin
             - domain: button
 
 # Native Device Actions (einfach zu verwenden)
 device_remove:
   name: "🗑️ Gerät entfernen"
-  description: Entfernt ein ELDAT-Gerät vollständig aus Home Assistant
+  description: Entfernt ein EASYWAVE-Gerät vollständig aus Home Assistant
   target:
     device:
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     device_id:
       name: Device ID
@@ -434,7 +434,7 @@ device_remove:
       required: true
       selector:
         device:
-          integration: eldat_plugin
+          integration: easywave_plugin
     force:
       name: Erzwungene Entfernung
       description: Gerät auch entfernen, wenn es nicht manuell hinzugefügt wurde
@@ -453,7 +453,7 @@ device_recreate:
   description: Entfernt und erstellt das Gerät neu (bei Problemen)
   target:
     device:
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     device_id:
       name: Device ID
@@ -461,14 +461,14 @@ device_recreate:
       required: true
       selector:
         device:
-          integration: eldat_plugin
+          integration: easywave_plugin
 
 device_disable:
   name: "⏸️ Gerät deaktivieren"
   description: Deaktiviert alle Entitäten dieses Geräts
   target:
     device:
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     device_id:
       name: Device ID
@@ -476,14 +476,14 @@ device_disable:
       required: true
       selector:
         device:
-          integration: eldat_plugin
+          integration: easywave_plugin
 
 device_enable:
   name: "▶️ Gerät aktivieren"
   description: Aktiviert alle deaktivierten Entitäten dieses Geräts
   target:
     device:
-      integration: eldat_plugin
+      integration: easywave_plugin
   fields:
     device_id:
       name: Device ID
@@ -491,7 +491,7 @@ device_enable:
       required: true
       selector:
         device:
-          integration: eldat_plugin
+          integration: easywave_plugin
 
 update_translations:
   name: "🌐 Übersetzungen aktualisieren"

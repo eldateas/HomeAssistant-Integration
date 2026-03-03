@@ -193,10 +193,10 @@ class RX11ButtonTransmitter(ButtonBehaviorMixin, EntitySpecsMixin, BaseTransmitt
             device_class="battery",
             icon="mdi:battery"
         )
-        # Use registration_id suffix for unique entity on re-learning
-        reg_id_suffix = self._get_registration_id_suffix()
+        # Use registration_id (UUID) for unique entity ID
+        reg_id = self._get_registration_id()
         from .....helpers_unique_id import make_unique_id
-        battery_warning_spec["unique_id"] = make_unique_id(self.serial_number, "battery_warning", None, reg_id_suffix)
+        battery_warning_spec["unique_id"] = make_unique_id(reg_id, "battery_warning")
         battery_warning_spec["sensor_type"] = "battery_warning"
         specs["binary_sensor"].append(battery_warning_spec)
         

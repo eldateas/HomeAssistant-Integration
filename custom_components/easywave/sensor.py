@@ -1,4 +1,4 @@
-"""Sensor entities for ELDAT integration."""
+"""Sensor entities for EASYWAVE integration."""
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +16,7 @@ from homeassistant.helpers.restore_state import RestoreEntity, ExtraStoredData
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.const import (
     UnitOfTemperature,
@@ -34,8 +35,8 @@ from .const import (
     EVENT_GATEWAY_DISCONNECTED,
     EVENT_GATEWAY_STATUS_CHANGED,
 )
-from .coordinator import EldatCoordinator
-from .entity import EldatEntity
+from .coordinator import EasywaveCoordinator
+from .entity import EasywaveEntity
 from .entity_registry import get_entity_registry
 from .device_icons import get_entity_config_for_device
 from .translations import (
@@ -52,7 +53,7 @@ from .translations import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Global tracking to prevent duplicate entity creation
+# Module-level tracking — cleared at each platform (re)setup to avoid stale state.
 _processed_sensor_devices: set[str] = set()
 _created_sensor_entity_ids: set[str] = set()
 
@@ -109,8 +110,11 @@ async def _cleanup_duplicate_sensor_entities(
         hash_hex = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
         expected_suffix = f"_{hash_hex}"
         
-        # Find entities for this device (use startswith to avoid substring false-matches)
-        device_entities = [e for e in all_entities if e.unique_id and e.unique_id.startswith(serial_number)]
+        # Find entities for this device (match by UUID or legacy serial)
+        # NOTE: serial_number is UPPERCASE but unique_ids are lowercase — normalize both
+        serial_lower = serial_number.lower()
+        reg_id_lower = (registration_id).lower()
+        device_entities = [e for e in all_entities if e.unique_id and (e.unique_id.lower().startswith(reg_id_lower) or e.unique_id.lower().startswith(serial_lower))]
         
         # Pattern to detect ANY registration_id suffix (6 hex chars at the end)
         suffix_pattern = re.compile(r'^(.+)_([0-9a-f]{6})$')
@@ -162,19 +166,107 @@ async def _cleanup_duplicate_sensor_entities(
     return removed_count
 
 
+async def _cleanup_orphaned_sensor_entities(
+    hass: HomeAssistant,
+    config_entry_id: str,
+    coordinator
+) -> int:
+    """Remove sensor entities whose unique_id does NOT match any stored entity spec.
+    
+    This catches entities left over from a previous (corrupted) configuration,
+    e.g. individual button entities (button_0..3) when device is now in group mode (last_button).
+    
+    SAFETY: Only removes entities for devices that HAVE stored entities in registered_devices.json.
+    Entities for devices without stored specs are left untouched.
+    
+    Returns:
+        Number of entities removed
+    """
+    from homeassistant.helpers import entity_registry as er
+    
+    entity_registry = er.async_get(hass)
+    removed_count = 0
+    MAX_REMOVALS = 50
+    
+    # Get all sensor entities for this config entry
+    all_entities = [
+        entity for entity in entity_registry.entities.values()
+        if entity.config_entry_id == config_entry_id 
+        and entity.platform == DOMAIN 
+        and entity.domain == "sensor"
+    ]
+    
+    if not all_entities:
+        return 0
+    
+    registered_devices = coordinator.get_all_registered_devices()
+    
+    for serial_number, device_info in registered_devices.items():
+        stored_entities = device_info.get("entities", [])
+        if not stored_entities:
+            continue  # No stored specs — nothing to compare against
+        
+        # Build set of valid unique_ids from stored entity specs (sensor type only)
+        valid_sensor_uids = {
+            e.get("unique_id") for e in stored_entities 
+            if e.get("type") == "sensor" and e.get("unique_id")
+        }
+        
+        if not valid_sensor_uids:
+            continue
+        
+        # Find HA entity registry entries for this device
+        # NOTE: serial_number is UPPERCASE but unique_ids are lowercase — normalize both
+        serial_lower = serial_number.lower()
+        reg_id = device_info.get("registration_id") or device_info.get("extra_data", {}).get("registration_id", "")
+        reg_id_lower = (reg_id).lower()
+        device_entities = [
+            e for e in all_entities 
+            if e.unique_id and (e.unique_id.lower().startswith(reg_id_lower) or e.unique_id.lower().startswith(serial_lower))
+        ]
+        
+        for entity in device_entities:
+            if removed_count >= MAX_REMOVALS:
+                _LOGGER.warning("⚠️ Orphan cleanup safety limit reached: %d removals", MAX_REMOVALS)
+                return removed_count
+            
+            if entity.unique_id not in valid_sensor_uids:
+                try:
+                    entity_registry.async_remove(entity.entity_id)
+                    removed_count += 1
+                    _LOGGER.info("🧹 Removed orphaned sensor entity: %s (unique_id=%s not in stored specs)", 
+                               entity.entity_id, entity.unique_id[-25:])
+                except Exception as e:
+                    _LOGGER.warning("⚠️ Failed to remove orphaned entity %s: %s", entity.entity_id, e)
+    
+    if removed_count > 0:
+        _LOGGER.info("🧹 Cleaned up %d orphaned sensor entities (not matching stored specs)", removed_count)
+    
+    return removed_count
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ELDAT sensor entities with persistence support."""
+    """Set up EASYWAVE sensor entities with persistence support."""
     from .const import EVENT_DEVICE_ADDED
     from homeassistant.helpers import entity_registry as er
     
-    coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator: EasywaveCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    
+    # Reset module-level tracking sets so platform reloads start fresh
+    global _processed_sensor_devices, _created_sensor_entity_ids
+    _processed_sensor_devices = set()
+    _created_sensor_entity_ids = set()
     
     # Cleanup duplicate sensor entities (old format without registration_id suffix)
     await _cleanup_duplicate_sensor_entities(hass, config_entry.entry_id, coordinator)
+    
+    # Cleanup orphaned sensor entities that don't match stored entity specs
+    # (e.g. individual button entities left over when device is now in group mode)
+    await _cleanup_orphaned_sensor_entities(hass, config_entry.entry_id, coordinator)
     
     # Store async_add_entities for later use in event handlers
     _async_add_entities_callback = async_add_entities
@@ -182,7 +274,7 @@ async def async_setup_entry(
     sensors = []
     
     # Single gateway sensor entity representing RX11 USB transceiver state
-    gateway_entity = EldatGatewaySensor(coordinator)
+    gateway_entity = EasywaveGatewaySensor(coordinator)
     sensors.append(gateway_entity)
     
     # Only create device sensors if transceiver is connected
@@ -222,20 +314,16 @@ async def async_setup_entry(
             _LOGGER.warning("⚠️ No sensors created for device %s (%s) - checking registry...", 
                           device_name, device_type)
     
+    # The gateway sensor is always present, even without device sensors.
+    # Never call async_add_entities with an empty list.
     if sensors:
         async_add_entities(sensors)
         _LOGGER.info("✅ Added %d sensor entities (%d devices + gateway)", 
                     len(sensors), len(coordinator.get_all_devices()))
     else:
-        _LOGGER.warning("⚠️ No sensors to add during initial setup")
-        
-        sensors.append(gateway_entity)  # Re-add gateway
-        
-        if sensors:
-            async_add_entities(sensors)
-            _LOGGER.info("✅ Emergency recovery: Added %d sensor entities after registry reset", len(sensors))
-        else:
-            _LOGGER.error("❌ Emergency recovery failed - still no sensors created")
+        _LOGGER.warning("⚠️ No device sensors found — adding gateway sensor only")
+        async_add_entities([gateway_entity])
+        _LOGGER.info("✅ Added gateway sensor (no device sensors)")
     
     # Listen for new devices and create sensors dynamically
     async def _handle_device_added(event):
@@ -450,7 +538,7 @@ async def async_setup_entry(
                 EVENT_DEVICE_ADDED, f"{EVENT_DEVICE_ADDED}_sensor")
 
 
-def _create_configured_sensor(coordinator: EldatCoordinator, serial_number: str, device_info: Dict[str, Any], entity_spec: Dict[str, Any]) -> SensorEntity | None:
+def _create_configured_sensor(coordinator: EasywaveCoordinator, serial_number: str, device_info: Dict[str, Any], entity_spec: Dict[str, Any]) -> SensorEntity | None:
     """Create a sensor entity based on entity specification."""
     sensor_type = entity_spec.get("sensor_type")
     device_type = device_info.get("type", device_info.get("device_type", "unknown"))
@@ -462,25 +550,25 @@ def _create_configured_sensor(coordinator: EldatCoordinator, serial_number: str,
     
     # Handle enum sensors (Last Button sensor for Easywave Transmitters in grouped mode)
     if device_class == "enum":
-        return EldatLastButtonSensor(coordinator, serial_number, device_info, entity_spec)
+        return EasywaveLastButtonSensor(coordinator, serial_number, device_info, entity_spec)
     
     # Easywave Receiver sensor entities (unidirectional receivers, not EWneo)
     if sensor_type == "temperature":
-        return EldatEWReceiverTemperatureSensor(coordinator, serial_number, device_info, entity_spec)
+        return EasywaveEWReceiverTemperatureSensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "humidity":
-        return EldatEWReceiverHumiditySensor(coordinator, serial_number, device_info, entity_spec)
+        return EasywaveEWReceiverHumiditySensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "battery":
-        return EldatEWReceiverBatterySensor(coordinator, serial_number, device_info, entity_spec)
+        return EasywaveEWReceiverBatterySensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "rain":
-        return EldatEWReceiverRainSensor(coordinator, serial_number, device_info, entity_spec)
+        return EasywaveEWReceiverRainSensor(coordinator, serial_number, device_info, entity_spec)
     elif sensor_type == "wind":
-        return EldatEWReceiverWindSensor(coordinator, serial_number, device_info, entity_spec)
+        return EasywaveEWReceiverWindSensor(coordinator, serial_number, device_info, entity_spec)
     else:
         _LOGGER.warning("Unknown sensor type: %s (device_class: %s)", sensor_type, device_class)
         return None
 
 
-def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str, device_info: Dict[str, Any]) -> list:
+def _create_sensors_for_device(coordinator: EasywaveCoordinator, serial_number: str, device_info: Dict[str, Any]) -> list:
     """Create sensor entities for a device based on its capabilities."""
     from .entity_registry import get_entity_registry
     from homeassistant.helpers import entity_registry as er
@@ -539,8 +627,11 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
             # Create sensor entities for EW-Sensors (temperature, humidity only - battery is binary_sensor)
             default_sensors = ["temperature", "humidity"]
             
+            # Use registration_id (UUID) as unique_id base
+            uid_base = device_info["registration_id"]
+            
             for sensor_type in default_sensors:
-                unique_id = f"{serial_number}_{sensor_type}"
+                unique_id = f"{uid_base}_{sensor_type}"
                 
                 # Skip if we already created a sensor with this unique_id in this call
                 if unique_id in created_unique_ids:
@@ -607,7 +698,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
     # Battery sensor for devices that need battery monitoring (not Easywave Transmitter or EWneo-Sensor)
     # Note: ew_sensor, ewneo_sensor, and ew_transmitter get battery warnings via binary_sensor platform
     elif device_type in ["ew_transceiver", "ewneo_transceiver", "ewneo_bidi_transmitter"]:
-        sensors.append(EldatBatterySensor(
+        sensors.append(EasywaveBatterySensor(
             coordinator=coordinator,
             serial_number=serial_number,
             device_info=device_info,
@@ -617,12 +708,13 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
     # Legacy sensor creation for old EWneo-Sensoren only (not Easywave Transmitters!)
     elif device_info.get("supports_sensors", False) and device_type not in ["ew_transmitter"]:
         if "temperature" in str(device_info.get("info_type", "")).lower():
+            uid_base = device_info["registration_id"]
             sensors.append(EWneoSensorEntity(
                 coordinator=coordinator,
                 serial_number=serial_number,
                 device_info=device_info,
                 entity_spec={
-                    "unique_id": f"{serial_number}_temperature",
+                    "unique_id": f"{uid_base}_temperature",
                     "sensor_type": "temperature",
                     "translation_key": "temperature",
                     "device_class": SensorDeviceClass.TEMPERATURE,
@@ -639,10 +731,21 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
         _LOGGER.debug("📊 Creating sensors for Easywave Transmitter %s (grouping_mode=%s, switch_mode=%s)", 
                        serial_number[-8:], device_info.get("grouping_mode"), device_info.get("switch_mode"))
         
-        # Check if we need a "Last Button" sensor for grouped mode
-        from .entity_specs import create_entity_specs_for_device
-        entity_specs = create_entity_specs_for_device(serial_number, device_info)
-        sensor_specs = entity_specs.get("sensor", [])
+        # PRIORITY: Use stored entity specs from registered_devices.json (SINGLE SOURCE OF TRUTH)
+        # Only fall back to create_entity_specs_for_device() if no stored entities exist
+        stored_entities = device_info.get("entities", [])
+        sensor_specs = [e for e in stored_entities if e.get("type") == "sensor"]
+        
+        if sensor_specs:
+            _LOGGER.debug("📊 Using %d stored sensor specs for Easywave Transmitter %s", 
+                         len(sensor_specs), serial_number[-8:])
+        else:
+            # Fallback: regenerate (only for new devices without stored entities)
+            from .entity_specs import create_entity_specs_for_device
+            entity_specs = create_entity_specs_for_device(serial_number, device_info)
+            sensor_specs = entity_specs.get("sensor", [])
+            _LOGGER.debug("📊 Regenerated %d sensor specs for Easywave Transmitter %s (no stored entities)", 
+                         len(sensor_specs), serial_number[-8:])
         
         _LOGGER.debug("📊 Easywave Transmitter %s entity_specs returned %d sensor specs: %s", 
                        serial_number[-8:], len(sensor_specs), sensor_specs)
@@ -650,7 +753,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
         for spec in sensor_specs:
             sensor_type = spec.get("sensor_type")
             if sensor_type == "transmitter_state":
-                sensors.append(EldatTransmitterStateSensor(
+                sensors.append(EasywaveTransmitterStateSensor(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
@@ -659,7 +762,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                 _LOGGER.debug("✅ Created transmitter state sensor for Easywave Transmitter %s", serial_number[-8:])
             elif sensor_type == "transmitter_button":
                 # Create individual button sensor for single mode (1-Tast-Bedienung Einzelmodus)
-                sensors.append(EldatTransmitterButtonEnumSensor(
+                sensors.append(EasywaveTransmitterButtonEnumSensor(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
@@ -669,7 +772,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
                               serial_number[-8:], spec.get("button", "?"))
             elif spec.get("device_class") == "enum" and sensor_type is None:
                 # Create Last Button sensor for grouped mode (only if no sensor_type is set)
-                sensors.append(EldatLastButtonSensor(
+                sensors.append(EasywaveLastButtonSensor(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
@@ -681,7 +784,7 @@ def _create_sensors_for_device(coordinator: EldatCoordinator, serial_number: str
         _LOGGER.debug("✅ Created %d sensors for Easywave Transmitter %s", len(sensors), serial_number[-8:])
     
     return sensors
-class EldatGatewaySensor(SensorEntity):
+class EasywaveGatewaySensor(SensorEntity):
     """Represents the RX11 USB gateway connectivity/state."""
     
     # Constant status keys - these are the actual state values
@@ -693,7 +796,7 @@ class EldatGatewaySensor(SensorEntity):
     _attr_translation_key = "gateway_status"
     _attr_device_class = SensorDeviceClass.ENUM
 
-    def __init__(self, coordinator: EldatCoordinator) -> None:
+    def __init__(self, coordinator: EasywaveCoordinator) -> None:
         self.coordinator = coordinator
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_rx11_gateway"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -706,9 +809,14 @@ class EldatGatewaySensor(SensorEntity):
         hw_version = getattr(transceiver, '_hw_version', None) or "Unknown"
         sw_version = getattr(transceiver, '_fw_version', None) or "Unknown"
         
-        # Get USB device info from config entry
-        usb_manufacturer = coordinator.config_entry.data.get("usb_manufacturer", "ELDAT EaS GmbH")
-        usb_product = coordinator.config_entry.data.get("usb_product", "RX11")
+        # Get USB device info — always use the canonical lookup table so
+        # manufacturer/product stay in sync with const.py (the config entry
+        # may still hold a stale value from the initial setup).
+        from .const import usb_device_name
+        usb_manufacturer, usb_product = usb_device_name(
+            coordinator.config_entry.data.get("usb_vid"),
+            coordinator.config_entry.data.get("usb_pid"),
+        )
         usb_serial_number = coordinator.config_entry.data.get("usb_serial_number", "unknown")
         
         # Store version info for dynamic device_info and display
@@ -783,6 +891,63 @@ class EldatGatewaySensor(SensorEntity):
         else:  # disconnected, not_configured
             self._attr_icon = "mdi:close-thick"
 
+    @callback
+    def _update_gateway_device_info(self) -> None:
+        """Check if USB serial/version changed and update HA device registry."""
+        transceiver = self.coordinator.transceiver
+        if not transceiver:
+            return
+
+        # Read live values
+        live_serial = (
+            transceiver.get_usb_serial_number()
+            if hasattr(transceiver, "get_usb_serial_number")
+            else None
+        ) or "unknown"
+        live_hw = getattr(transceiver, "_hw_version", None) or "Unknown"
+        live_fw = getattr(transceiver, "_fw_version", None) or "Unknown"
+
+        changed = False
+        if live_serial != "unknown" and live_serial != self._usb_serial_number:
+            _LOGGER.info(
+                "🔄 Gateway USB serial changed: %s → %s",
+                self._usb_serial_number, live_serial,
+            )
+            self._usb_serial_number = live_serial
+            changed = True
+        if live_hw != "Unknown" and live_hw != self._hw_version:
+            _LOGGER.info(
+                "🔄 Gateway HW version changed: %s → %s",
+                self._hw_version, live_hw,
+            )
+            self._hw_version = live_hw
+            changed = True
+        if live_fw != "Unknown" and live_fw != self._sw_version:
+            _LOGGER.info(
+                "🔄 Gateway FW version changed: %s → %s",
+                self._sw_version, live_fw,
+            )
+            self._sw_version = live_fw
+            changed = True
+
+        if not changed:
+            return
+
+        # Push updated info to HA device registry
+        device_registry = dr.async_get(self.hass)
+        gateway_id = f"{self.coordinator.config_entry.entry_id}_gateway"
+        device_entry = device_registry.async_get_device(
+            identifiers={(DOMAIN, gateway_id)}
+        )
+        if device_entry:
+            device_registry.async_update_device(
+                device_entry.id,
+                serial_number=self._usb_serial_number if self._usb_serial_number != "unknown" else None,
+                hw_version=self._hw_version,
+                sw_version=self._sw_version,
+            )
+            _LOGGER.info("✅ Gateway device info updated in HA device registry")
+
     @property
     def available(self) -> bool:
         """Gateway sensor is always available to show status."""
@@ -856,6 +1021,9 @@ class EldatGatewaySensor(SensorEntity):
             # Update icon based on status
             self._update_icon_for_status(new_status)
             
+            # --- Refresh gateway device info on stick swap ---
+            self._update_gateway_device_info()
+            
             if new_status != self._last_status:
                 old_status = self._last_status
                 _LOGGER.info("🔌 Gateway connection status changed: %s -> %s", old_status, new_status)
@@ -896,7 +1064,7 @@ class EldatGatewaySensor(SensorEntity):
         )
 
 
-class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
+class EasywaveLastButtonSensor(EasywaveEntity, RestoreEntity, SensorEntity):
     """Sensor showing the last pressed button for Easywave Transmitters in grouped mode.
     
     Supports two switch modes:
@@ -906,7 +1074,7 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -922,7 +1090,7 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         if self._unknown_value is None:
             self._unknown_value = next((opt for opt in self._options if opt in get_all_off_values()), None)
         
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_last_button")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_last_button")
         self._attr_has_entity_name = True
         
         # Store translation_key for HA automatic state translation (ENUM sensors)
@@ -1071,13 +1239,13 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         
         # Listen for button press events
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press", _handle_button_press)
+            self.hass.bus.async_listen("easywave_button_press", _handle_button_press)
         )
         
         # Listen for button release events (for impulse mode reset)
         if self._switch_mode == "impulse":
             self.async_on_remove(
-                self.hass.bus.async_listen("eldat_button_release", _handle_button_release)
+                self.hass.bus.async_listen("easywave_button_release", _handle_button_release)
             )
         
         _LOGGER.info("📍 Last Button sensor %s registered for events", self.name)
@@ -1099,7 +1267,7 @@ class EldatLastButtonSensor(EldatEntity, RestoreEntity, SensorEntity):
         return attrs
 
 
-class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity):
+class EasywaveTransmitterButtonEnumSensor(EasywaveEntity, RestoreEntity, SensorEntity):
     """Enum sensor for individual button state in Easywave Transmitter single mode.
     
     Each button gets its own sensor with "pressed"/"released" states (translated to "Betätigt"/"Nicht betätigt").
@@ -1113,7 +1281,7 @@ class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity)
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1127,7 +1295,7 @@ class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity)
         self._switch_mode = entity_spec.get("switch_mode", "impulse")
         self._options = entity_spec.get("options", ["pressed", "released"])
         
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_button_{self._button_index}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_button_{self._button_index}")
         self._attr_has_entity_name = True
         
         # Store translation_key for HA automatic state translation
@@ -1257,13 +1425,13 @@ class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity)
         
         # Listen for button press events
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press", _handle_button_press)
+            self.hass.bus.async_listen("easywave_button_press", _handle_button_press)
         )
         
         # Listen for button release events (for impulse mode reset)
         if self._switch_mode == "impulse":
             self.async_on_remove(
-                self.hass.bus.async_listen("eldat_button_release", _handle_button_release)
+                self.hass.bus.async_listen("easywave_button_release", _handle_button_release)
             )
         
         _LOGGER.info("📍 Button enum sensor %s registered for events", self.name)
@@ -1283,7 +1451,7 @@ class EldatTransmitterButtonEnumSensor(EldatEntity, RestoreEntity, SensorEntity)
         return attrs
 
 
-class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
+class EasywaveTransmitterStateSensor(EasywaveEntity, RestoreEntity, SensorEntity):
     """State sensor for Easywave Transmitters in 2/3-button modes.
 
     Updates its enum state based on button press events.
@@ -1291,7 +1459,7 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1304,7 +1472,7 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
         # Use channel-specific state_key to keep A/B and C/D states independent
         self._state_key = entity_spec.get("state_key", "transmitter_state")
 
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_state")
         
         # Store translation_key for HA automatic state translation (ENUM sensors)
         # This allows HA to translate state values like "on", "off", "up", "down" via translations/*.json
@@ -1381,21 +1549,24 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
                 else:
                     return
 
-            if event_button in self._button_map:
-                new_state = self._button_map[event_button]
-                if new_state != self._current_state:
-                    self._current_state = new_state
-                    self._last_press_time = datetime.now()
-                    self._last_button = event_button
-                    self.async_write_ha_state()
-                    _LOGGER.debug("📍 Transmitter state %s -> %s (key=%s)", entity_label, new_state, self._state_key)
-                    # Use channel-specific state_key to keep A/B and C/D states independent
-                    self.coordinator.set_device_state(
-                        self._serial_number, {self._state_key: new_state}
-                    )
+            # JSON keys are always strings, but telegram sends int button IDs
+            # Try both the original key and its string representation
+            new_state = self._button_map.get(event_button)
+            if new_state is None:
+                new_state = self._button_map.get(str(event_button))
+            if new_state is not None and new_state != self._current_state:
+                self._current_state = new_state
+                self._last_press_time = datetime.now()
+                self._last_button = event_button
+                self.async_write_ha_state()
+                _LOGGER.debug("📍 Transmitter state %s -> %s (key=%s)", entity_label, new_state, self._state_key)
+                # Use channel-specific state_key to keep A/B and C/D states independent
+                self.coordinator.set_device_state(
+                    self._serial_number, {self._state_key: new_state}
+                )
 
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press", _handle_button_event)
+            self.hass.bus.async_listen("easywave_button_press", _handle_button_event)
         )
 
     @property
@@ -1432,19 +1603,19 @@ class EldatTransmitterStateSensor(EldatEntity, RestoreEntity, SensorEntity):
 
 
 
-class EldatBatterySensor(EldatEntity, SensorEntity):
-    """Battery level sensor for ELDAT devices."""
+class EasywaveBatterySensor(EasywaveEntity, SensorEntity):
+    """Battery level sensor for EASYWAVE devices."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
     ) -> None:
         """Initialize battery sensor."""
         super().__init__(coordinator, serial_number, device_info)
         
-        self._attr_unique_id = f"{serial_number}_battery"
+        self._attr_unique_id = f"{device_info['registration_id']}_battery"
         self._attr_name = "Battery"
         self._attr_device_class = SensorDeviceClass.BATTERY
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -1520,18 +1691,18 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
         
         # Listen for button events (Easywave Transmitter battery updates)
         self._button_press_listener = self.hass.bus.async_listen(
-            "eldat_button_press",
+            "easywave_button_press",
             self._handle_button_event
         )
         
         self._button_release_listener = self.hass.bus.async_listen(
-            "eldat_button_release",
+            "easywave_button_release",
             self._handle_button_event
         )
         
         # Also listen for sensor update events (EW-Sensor battery updates)
         self._sensor_update_listener = self.hass.bus.async_listen(
-            "eldat_sensor_update",
+            "easywave_sensor_update",
             self._handle_sensor_update
         )
         
@@ -1654,19 +1825,19 @@ class EldatBatterySensor(EldatEntity, SensorEntity):
             _LOGGER.error("Error handling sensor update in battery sensor %s: %s", self.entity_id, e, exc_info=True)
 
 
-class EldatSignalStrengthSensor(EldatEntity, SensorEntity):
-    """Signal strength sensor for ELDAT devices."""
+class EasywaveSignalStrengthSensor(EasywaveEntity, SensorEntity):
+    """Signal strength sensor for EASYWAVE devices."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
     ) -> None:
         """Initialize signal strength sensor."""
         super().__init__(coordinator, serial_number, device_info)
         
-        self._attr_unique_id = f"{serial_number}_signal_strength"
+        self._attr_unique_id = f"{device_info['registration_id']}_signal_strength"
         self._attr_name = "Signal Strength"
         self._attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -1721,19 +1892,19 @@ class EldatSignalStrengthSensor(EldatEntity, SensorEntity):
             self.schedule_update_ha_state()
 
 
-class EldatDiagnosticSensor(EldatEntity, SensorEntity):
-    """Diagnostic sensor for ELDAT integration status."""
+class EasywaveDiagnosticSensor(EasywaveEntity, SensorEntity):
+    """Diagnostic sensor for EASYWAVE integration status."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
     ) -> None:
         """Initialize diagnostic sensor."""
         super().__init__(coordinator, serial_number, device_info)
         
-        self._attr_unique_id = f"{serial_number}_last_seen"
+        self._attr_unique_id = f"{device_info['registration_id']}_last_seen"
         self._attr_name = "Last Seen"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:clock"
@@ -1751,7 +1922,7 @@ class EldatDiagnosticSensor(EldatEntity, SensorEntity):
         self.schedule_update_ha_state()
 
 
-class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
+class EWneoSensorEntity(EasywaveEntity, RestoreEntity, SensorEntity):
     """Universal sensor entity for EWneo-Sensoren.
     
     Communicates directly with EWneoSensor device class for readings.
@@ -1781,7 +1952,7 @@ class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1791,7 +1962,7 @@ class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
         
         self._entity_spec = entity_spec
         self._sensor_type = entity_spec.get("sensor_type", "unknown")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{self._sensor_type}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_{self._sensor_type}")
         
         # Use has_entity_name for proper HA naming convention
         self._attr_has_entity_name = entity_spec.get("has_entity_name", True)
@@ -1832,6 +2003,9 @@ class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
         self._last_update = None
         self._entity_created_at = None  # Set when entity is added to hass
         self._restored_reading = None   # Value restored from previous HA session
+        # Default True: block stale data until async_added_to_hass determines
+        # whether this is a restart (→ False) or fresh learning (→ stays True)
+        self._is_freshly_learned = True
 
     @property
     def extra_restore_state_data(self) -> "EWneoSensorEntity._ExtraData":
@@ -1869,54 +2043,70 @@ class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
             # PRIMARY SOURCE: Try to get value from EWneoSensor device object (most current)
             device = self.coordinator.get_device_instance(self._serial_number)
             if device and hasattr(device, 'get_sensor_data'):
-                try:
-                    sensor_data = device.get_sensor_data()
-                    if sensor_data:
-                        # Map sensor_type to the correct key in sensor_data
-                        lookup_key = self._sensor_type
-                        if lookup_key == "battery_warning":
-                            lookup_key = "battery_warning"
-                        
-                        value = sensor_data.get(lookup_key)
+                # For freshly learned entities, only accept data from telegrams
+                # received AFTER the entity was created (skip stale learning data)
+                if self._is_freshly_learned:
+                    device_ts = getattr(device, '_last_telegram_timestamp', None)
+                    if device_ts and self._entity_created_at and device_ts > self._entity_created_at:
+                        self._is_freshly_learned = False
+                        _LOGGER.info(
+                            "🆕→✅ EWneoSensorEntity %s: first post-creation telegram received",
+                            self.entity_id,
+                        )
+                    else:
+                        device = None  # Skip primary source — no fresh data yet
+
+                if device:
+                    try:
+                        sensor_data = device.get_sensor_data()
+                        if sensor_data:
+                            # Map sensor_type to the correct key in sensor_data
+                            lookup_key = self._sensor_type
+                            if lookup_key == "battery_warning":
+                                lookup_key = "battery_warning"
+
+                            value = sensor_data.get(lookup_key)
+                            if value is not None:
+                                self._last_reading = value
+                                self._last_update = datetime.now()
+                                self._restored_reading = None  # Live data received
+                                return value
+                    except Exception as e:
+                        _LOGGER.debug("Could not get data from device object for %s: %s",
+                                     self._sensor_type, e)
+            
+            # SECONDARY SOURCE: Fall back to coordinator.devices (for devices without object)
+            # For freshly learned entities, skip until a post-creation telegram is received
+            if not self._is_freshly_learned:
+                device_data = self.coordinator.devices.get(self._serial_number, {})
+
+                # Check if we have a last_seen timestamp that is AFTER entity creation
+                last_seen = device_data.get("last_seen")
+
+                if last_seen is not None:
+                    # Live data available — check if it's fresh (after entity creation)
+                    is_fresh = True
+                    if self._entity_created_at:
+                        if isinstance(last_seen, (int, float)):
+                            if last_seen < self._entity_created_at:
+                                is_fresh = False  # Data is from before entity creation
+                        elif isinstance(last_seen, str):
+                            try:
+                                from datetime import datetime as dt_class
+                                last_seen_dt = dt_class.fromisoformat(last_seen.replace('Z', '+00:00'))
+                                if last_seen_dt.timestamp() < self._entity_created_at:
+                                    is_fresh = False
+                            except:
+                                pass
+
+                    if is_fresh:
+                        lookup_key = "battery_level" if self._sensor_type == "battery" else self._sensor_type
+                        value = device_data.get(lookup_key)
                         if value is not None:
                             self._last_reading = value
                             self._last_update = datetime.now()
-                            self._restored_reading = None  # Live data received
+                            self._restored_reading = None  # Live data received → discard restored fallback
                             return value
-                except Exception as e:
-                    _LOGGER.debug("Could not get data from device object for %s: %s", 
-                                 self._sensor_type, e)
-            
-            # SECONDARY SOURCE: Fall back to coordinator.devices (for devices without object)
-            device_data = self.coordinator.devices.get(self._serial_number, {})
-
-            # Check if we have a last_seen timestamp that is AFTER entity creation
-            last_seen = device_data.get("last_seen")
-
-            if last_seen is not None:
-                # Live data available — check if it's fresh (after entity creation)
-                is_fresh = True
-                if self._entity_created_at:
-                    if isinstance(last_seen, (int, float)):
-                        if last_seen < self._entity_created_at:
-                            is_fresh = False  # Data is from before entity creation
-                    elif isinstance(last_seen, str):
-                        try:
-                            from datetime import datetime as dt_class
-                            last_seen_dt = dt_class.fromisoformat(last_seen.replace('Z', '+00:00'))
-                            if last_seen_dt.timestamp() < self._entity_created_at:
-                                is_fresh = False
-                        except:
-                            pass
-
-                if is_fresh:
-                    lookup_key = "battery_level" if self._sensor_type == "battery" else self._sensor_type
-                    value = device_data.get(lookup_key)
-                    if value is not None:
-                        self._last_reading = value
-                        self._last_update = datetime.now()
-                        self._restored_reading = None  # Live data received → discard restored fallback
-                        return value
 
             # TERTIARY SOURCE: Return restored value from previous session if no current data
             if self._restored_reading is not None:
@@ -2025,86 +2215,122 @@ class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
         import time
         self._entity_created_at = time.time()
 
-        # TRY TO GET CURRENT VALUE from the device immediately
-        # This ensures the entity is available as soon as it's added to HA
-        _LOGGER.debug(
-            "EWneoSensorEntity %s: async_added_to_hass - attempting to get current value",
-            self.entity_id
-        )
-        
-        try:
-            # Try to get value from EWneoSensor device object
-            device = self.coordinator.get_device_instance(self._serial_number)
-            _LOGGER.debug("EWneoSensorEntity %s: device instance = %s", self.entity_id, device)
-            
-            if device and hasattr(device, 'get_sensor_data'):
+        # STEP 1: Check if RestoreEntity has previous data (restart vs fresh learning)
+        # This MUST happen before reading device data to distinguish the two cases
+        extra = await self.async_get_last_extra_data()
+        last_state = await self.async_get_last_state()
+
+        restored_value = None
+
+        # Try ExtraStoredData first (most reliable)
+        if extra is not None:
+            restored = EWneoSensorEntity._ExtraData.from_dict(extra.as_dict())
+            if restored and restored.last_reading is not None:
+                restored_value = restored.last_reading
+                _LOGGER.info(
+                    "✅ EWneoSensorEntity %s: restored previous value %.4g from ExtraStoredData",
+                    self.entity_id, restored_value,
+                )
+
+        # Fallback: state recorder
+        if restored_value is None and last_state is not None:
+            if last_state.state not in (None, "unknown", "unavailable"):
                 try:
-                    sensor_data = device.get_sensor_data()
-                    _LOGGER.debug(
-                        "EWneoSensorEntity %s: sensor_data from device = %s",
-                        self.entity_id, sensor_data
+                    restored_value = float(last_state.state)
+                    _LOGGER.info(
+                        "✅ EWneoSensorEntity %s: restored previous value %.4g from state recorder",
+                        self.entity_id, restored_value,
                     )
-                    
-                    if sensor_data:
-                        value = sensor_data.get(self._sensor_type)
-                        if value is not None:
-                            self._last_reading = value
-                            _LOGGER.info(
-                                "✅ EWneoSensorEntity %s: got current value %.4g from device",
-                                self.entity_id, self._last_reading,
-                            )
-                            # Force update state immediately
-                            self.async_write_ha_state()
+                except (ValueError, TypeError):
+                    pass
+
+        if restored_value is not None:
+            # RestoreEntity has previous data - but is this a TRUE restart or a re-learned device?
+            # Check registered_at: if device was registered very recently (within 120s of entity creation),
+            # it's a fresh learning even though HA still has old RestoreEntity data from a previous
+            # registration (delete + re-learn scenario).
+            is_recently_registered = False
+            try:
+                registered_at_str = self._device_info.get("registered_at")
+                # Fallback: check coordinator's registered_devices dict
+                if not registered_at_str:
+                    reg_dev = self.coordinator._registered_devices.get(self._serial_number, {})
+                    registered_at_str = reg_dev.get("registered_at")
+                if registered_at_str:
+                    from datetime import datetime as dt_class
+                    reg_dt = dt_class.fromisoformat(registered_at_str)
+                    reg_ts = reg_dt.timestamp()
+                    # If registered within the last 120 seconds, treat as freshly learned
+                    if self._entity_created_at and abs(self._entity_created_at - reg_ts) < 120:
+                        is_recently_registered = True
+                        _LOGGER.info(
+                            "🆕 EWneoSensorEntity %s: device registered_at %s is recent "
+                            "(%.1fs ago) - treating as freshly learned despite RestoreEntity data",
+                            self.entity_id, registered_at_str,
+                            self._entity_created_at - reg_ts,
+                        )
+            except Exception as e:
+                _LOGGER.debug("Could not parse registered_at for freshness check: %s", e)
+
+            if is_recently_registered:
+                # *** RE-LEARNED DEVICE ***
+                # RestoreEntity has OLD data from a previous registration — ignore it
+                self._is_freshly_learned = True
+                _LOGGER.info(
+                    "🆕 EWneoSensorEntity %s: freshly re-learned device - showing unknown until first telegram",
+                    self.entity_id,
+                )
+            else:
+                # *** RESTART SCENARIO ***
+                # Previous data exists and device was registered long ago → restore it
+                self._is_freshly_learned = False  # Confirmed: not fresh, allow device data
+                self._restored_reading = restored_value
+
+                try:
+                    device = self.coordinator.get_device_instance(self._serial_number)
+                    if device and hasattr(device, 'get_sensor_data'):
+                        sensor_data = device.get_sensor_data()
+                        if sensor_data:
+                            value = sensor_data.get(self._sensor_type)
+                            if value is not None:
+                                self._last_reading = value
+                                self._restored_reading = None  # Live data supersedes
+                                _LOGGER.info(
+                                    "✅ EWneoSensorEntity %s: got current live value %.4g from device",
+                                    self.entity_id, value,
+                                )
+                                self.async_write_ha_state()
                 except Exception as e:
                     _LOGGER.debug("Could not get current value from device: %s", e)
-        except Exception as e:
-            _LOGGER.debug("Error getting device for current value: %s", e)
+        else:
+            # *** FRESH LEARNING SCENARIO ***
+            # No previous data → device was just learned for the first time
+            # Show "unknown" until the first real measurement telegram arrives
+            self._is_freshly_learned = True
+            _LOGGER.info(
+                "🆕 EWneoSensorEntity %s: freshly learned device - showing unknown until first telegram",
+                self.entity_id,
+            )
 
-        # Restore last known reading from ExtraStoredData (for restarts)
-        # Only restore if we don't have a current value already
-        if self._last_reading is None:
-            extra = await self.async_get_last_extra_data()
-            if extra is not None:
-                restored = EWneoSensorEntity._ExtraData.from_dict(extra.as_dict())
-                if restored and restored.last_reading is not None:
-                    self._restored_reading = restored.last_reading
-                    _LOGGER.info(
-                        "✅ EWneoSensorEntity %s: restored previous value %.4g from ExtraStoredData",
-                        self.entity_id, self._restored_reading,
-                    )
-
-        # Fallback: state recorder (only useful when last state was NOT 'unavailable')
-        if self._restored_reading is None and self._last_reading is None:
-            if (last_state := await self.async_get_last_state()) is not None:
-                if last_state.state not in (None, "unknown", "unavailable"):
-                    try:
-                        self._restored_reading = float(last_state.state)
-                        _LOGGER.info(
-                            "✅ EWneoSensorEntity %s: restored previous value %.4g from state recorder",
-                            self.entity_id, self._restored_reading,
-                        )
-                    except (ValueError, TypeError):
-                        pass
-        
         # Diagnostic: print final state
         _LOGGER.info(
-            "📊 EWneoSensorEntity %s: initialization complete - has_value=%s, RX11_connected=%s, "
-            "device_in_coordinator=%s, available=%s",
+            "📊 EWneoSensorEntity %s: initialization complete - freshly_learned=%s, has_value=%s, "
+            "RX11_connected=%s, device_in_coordinator=%s, available=%s",
             self.entity_id,
+            self._is_freshly_learned,
             self._last_reading is not None or self._restored_reading is not None,
             self._is_rx11_connected(),
             self._serial_number in self.coordinator.devices,
             self.available
         )
-        
+
         # Subscribe to coordinator updates
         self.async_on_remove(
             self.coordinator.async_add_listener(self.async_write_ha_state)
         )
-        
-        _LOGGER.info("✅ EWneoSensorEntity added: %s (created_at=%.0f, has_value=%s)", 
-                    self.entity_id, self._entity_created_at,
-                    self._last_reading is not None or self._restored_reading is not None)
+
+        _LOGGER.info("✅ EWneoSensorEntity added: %s (created_at=%.0f, freshly_learned=%s)",
+                    self.entity_id, self._entity_created_at, self._is_freshly_learned)
 
     async def async_update(self) -> None:
         """Update the entity."""
@@ -2112,12 +2338,12 @@ class EWneoSensorEntity(EldatEntity, RestoreEntity, SensorEntity):
         await self.coordinator.async_request_refresh()
 
 
-class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity):
+class EasywaveEWReceiverTemperatureSensor(EasywaveEntity, RestoreEntity, SensorEntity):
     """Temperature sensor created from entity specification with Easywave Receiver support."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -2126,7 +2352,7 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
         super().__init__(coordinator, serial_number, device_info)
         
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_temperature")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_temperature")
         self._attr_has_entity_name = True
         
         # Use translation_key for HA automatic translation
@@ -2187,7 +2413,7 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
         
         # Listen for sensor_update events for this device
         self._remove_listener = self.hass.bus.async_listen(
-            "eldat_sensor_update",
+            "easywave_sensor_update",
             self._handle_sensor_update
         )
         
@@ -2269,7 +2495,7 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
         # Store listener removal functions
         self._device_update_listener = self.coordinator.hass.bus.async_listen(EVENT_DEVICE_UPDATED, handle_device_update)
         self._telegram_listener = self.coordinator.hass.bus.async_listen(EVENT_TELEGRAM_RECEIVED, handle_telegram)
-        self._sensor_update_listener = self.coordinator.hass.bus.async_listen("eldat_sensor_update", handle_sensor_update)
+        self._sensor_update_listener = self.coordinator.hass.bus.async_listen("easywave_sensor_update", handle_sensor_update)
         
         _LOGGER.debug("🎯 Configured temperature sensor %s event listeners registered for serial %s", 
                      self._attr_unique_id, self._serial_number[-8:])
@@ -2374,9 +2600,9 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
         return (datetime.now() - self._last_update) < timedelta(hours=24)
 
     def _convert_temperature(self, raw_value: Any, telegram_data: Dict[str, Any] = None) -> float:
-        """Convert raw temperature value to Celsius according to ELDAT specification.
+        """Convert raw temperature value to Celsius according to EASYWAVE specification.
         
-        ELDAT specification:
+        EASYWAVE specification:
         - 2 bytes unsigned integer, big-endian
         - Range: 0 to 65535
         - Formula: T = n / 20 (result in Kelvin)
@@ -2396,14 +2622,14 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
                     
                     return round(float(raw_value), 1)
                 
-                # Otherwise, treat as raw ELDAT value for conversion
+                # Otherwise, treat as raw EASYWAVE value for conversion
                 n = int(raw_value)
                 if n < 0 or n > 65535:
                     _LOGGER.warning("⚠️ Temperature value %d outside valid range (0-65535)", n)
                     # Clamp to valid range
                     n = max(0, min(65535, n))
                 
-                # Convert according to ELDAT specification
+                # Convert according to EASYWAVE specification
                 # T = n / 20 (Kelvin)
                 temp_kelvin = n / 20.0
                 
@@ -2429,7 +2655,7 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
             return 0.0
 
     def _process_additional_data(self, telegram_data: Dict[str, Any]) -> None:
-        """Process additional ELDAT telegram data (reference value, telegram interval)."""
+        """Process additional EASYWAVE telegram data (reference value, telegram interval)."""
         try:
             # Extract raw telegram bytes if available
             raw_data = telegram_data.get("raw_data") or telegram_data.get("payload")
@@ -2506,19 +2732,19 @@ class EldatEWReceiverTemperatureSensor(EldatEntity, RestoreEntity, SensorEntity)
 
     def update_value(self, value: float) -> None:
         """Update sensor value synchronously."""
-        # Convert raw value using ELDAT specification
+        # Convert raw value using EASYWAVE specification
         converted_value = self._convert_temperature(value)
         self._last_reading = converted_value
         self._last_update = datetime.now()
         self.schedule_update_ha_state()
 
 
-class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
+class EasywaveEWReceiverHumiditySensor(EasywaveEntity, RestoreEntity, SensorEntity):
     """Humidity sensor created from entity specification with Easywave Receiver support."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -2527,7 +2753,7 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
         super().__init__(coordinator, serial_number, device_info)
         
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_humidity")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_humidity")
         self._attr_has_entity_name = True
         
         # Use translation_key for HA automatic translation
@@ -2571,7 +2797,7 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
         
         # Listen for sensor_update events for this device
         self._remove_listener = self.hass.bus.async_listen(
-            "eldat_sensor_update",
+            "easywave_sensor_update",
             self._handle_sensor_update
         )
         
@@ -2625,7 +2851,7 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
         
         # Store listener removal functions
         self._device_update_listener = self.coordinator.hass.bus.async_listen(EVENT_DEVICE_UPDATED, handle_device_update)
-        self._sensor_update_listener = self.coordinator.hass.bus.async_listen("eldat_sensor_update", handle_sensor_update)
+        self._sensor_update_listener = self.coordinator.hass.bus.async_listen("easywave_sensor_update", handle_sensor_update)
         
         _LOGGER.debug("🎯 Configured humidity sensor %s event listeners registered for serial %s", 
                      self._attr_unique_id, self._serial_number[-8:])
@@ -2720,9 +2946,9 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
         self.coordinator.hass.bus.async_listen(EVENT_TELEGRAM_RECEIVED, handle_telegram)
         
     def _convert_humidity(self, raw_value: Any, telegram_data: Dict[str, Any] = None) -> float:
-        """Convert raw humidity value to percentage according to ELDAT specification.
+        """Convert raw humidity value to percentage according to EASYWAVE specification.
         
-        ELDAT specification:
+        EASYWAVE specification:
         - 2 bytes unsigned integer, big-endian  
         - Range: 0 to 4095
         - Formula: φ = n * (100/4095) (result in %)
@@ -2736,7 +2962,7 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
                     # Clamp to valid range
                     n = max(0, min(4095, n))
                 
-                # Convert according to ELDAT specification
+                # Convert according to EASYWAVE specification
                 # φ = n * (100/4095) %
                 humidity_percent = n * (100.0 / 4095.0)
                 
@@ -2761,7 +2987,7 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
             return 0.0
 
     def _process_additional_data(self, telegram_data: Dict[str, Any]) -> None:
-        """Process additional ELDAT telegram data (reference value, telegram interval)."""
+        """Process additional EASYWAVE telegram data (reference value, telegram interval)."""
         try:
             # Extract raw telegram bytes if available
             raw_data = telegram_data.get("raw_data") or telegram_data.get("payload")
@@ -2842,7 +3068,7 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
         
         # Listen for sensor_update events for this device (contains processed values)
         self._remove_listener = self.hass.bus.async_listen(
-            "eldat_sensor_update",
+            "easywave_sensor_update",
             self._handle_sensor_update
         )
         
@@ -2963,12 +3189,12 @@ class EldatEWReceiverHumiditySensor(EldatEntity, RestoreEntity, SensorEntity):
         asyncio.create_task(self.async_write_ha_state())
 
 
-class EldatEWReceiverBatterySensor(EldatEntity, SensorEntity):
+class EasywaveEWReceiverBatterySensor(EasywaveEntity, SensorEntity):
     """Battery sensor created from entity specification with Easywave Receiver support."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -2977,7 +3203,7 @@ class EldatEWReceiverBatterySensor(EldatEntity, SensorEntity):
         super().__init__(coordinator, serial_number, device_info)
         
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_battery")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_battery")
         self._attr_name = entity_spec.get("name", "Battery")
         self._attr_device_class = SensorDeviceClass.BATTERY
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -3012,18 +3238,18 @@ class EldatEWReceiverBatterySensor(EldatEntity, SensorEntity):
         
         # Listen for sensor_update events (EW-Sensor) and button events (Easywave Transmitter)
         self._remove_listener = self.hass.bus.async_listen(
-            "eldat_sensor_update",
+            "easywave_sensor_update",
             self._handle_sensor_update
         )
         
         # Also listen for button press events (Easywave Transmitter battery updates)
         self._button_press_listener = self.hass.bus.async_listen(
-            "eldat_button_press",
+            "easywave_button_press",
             self._handle_button_event
         )
         
         self._button_release_listener = self.hass.bus.async_listen(
-            "eldat_button_release",
+            "easywave_button_release",
             self._handle_button_event
         )
         
@@ -3150,7 +3376,7 @@ class EldatEWReceiverBatterySensor(EldatEntity, SensorEntity):
             _LOGGER.warning("🔋 Invalid battery level %s for sensor %s", level, self.entity_id)
 
     def _process_additional_data(self, telegram_data: Dict[str, Any]) -> None:
-        """Process additional ELDAT telegram data (telegram interval)."""
+        """Process additional EASYWAVE telegram data (telegram interval)."""
         try:
             # Extract raw telegram bytes if available
             raw_data = telegram_data.get("raw_data") or telegram_data.get("payload")
@@ -3202,12 +3428,12 @@ class EldatEWReceiverBatterySensor(EldatEntity, SensorEntity):
             _LOGGER.error("❌ Error processing additional telegram data: %s", e)
 
 
-class EldatEWReceiverRainSensor(EldatEntity, SensorEntity):
+class EasywaveEWReceiverRainSensor(EasywaveEntity, SensorEntity):
     """Rain sensor created from entity specification."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -3216,7 +3442,7 @@ class EldatEWReceiverRainSensor(EldatEntity, SensorEntity):
         super().__init__(coordinator, serial_number, device_info)
         
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_rain")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_rain")
         self._attr_name = entity_spec.get("name", "Rain")
         self._attr_device_class = SensorDeviceClass.PRECIPITATION
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -3254,12 +3480,12 @@ class EldatEWReceiverRainSensor(EldatEntity, SensorEntity):
         self.schedule_update_ha_state()
 
 
-class EldatEWReceiverWindSensor(EldatEntity, SensorEntity):
+class EasywaveEWReceiverWindSensor(EasywaveEntity, SensorEntity):
     """Wind sensor created from entity specification."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -3268,7 +3494,7 @@ class EldatEWReceiverWindSensor(EldatEntity, SensorEntity):
         super().__init__(coordinator, serial_number, device_info)
         
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_wind")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_wind")
         self._attr_name = entity_spec.get("name", "Wind Speed")
         self._attr_device_class = SensorDeviceClass.WIND_SPEED
         self._attr_state_class = SensorStateClass.MEASUREMENT

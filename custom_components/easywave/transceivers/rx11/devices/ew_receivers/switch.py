@@ -66,6 +66,8 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             "button": []
         }
         
+        reg_id = self._get_registration_id()
+        
         # Create switch entities for each channel
         for channel in range(self.channel_count):
             channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
@@ -73,7 +75,7 @@ class RX11SwitchReceiver(SwitchBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             specs["switch"].append({
                 "type": "switch",
                 "name": f"{self.name}{channel_suffix}",
-                "unique_id": make_unique_id(self.serial_number, "switch", channel if self.channel_count > 1 else None),
+                "unique_id": make_unique_id(reg_id, "switch", channel if self.channel_count > 1 else None),
                 "device_class": "switch",
                 "icon": "mdi:light-switch",
                 "channel": channel,

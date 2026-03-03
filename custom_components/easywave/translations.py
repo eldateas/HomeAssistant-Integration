@@ -1,4 +1,4 @@
-"""Translations helper for ELDAT integration.
+"""Translations helper for EASYWAVE integration.
 
 Provides utility functions for language detection and state checking.
 All translations are loaded from translations/*.json files at module import time.

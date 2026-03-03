@@ -1,4 +1,4 @@
-"""Generic learning helper module for ELDAT integration.
+"""Generic learning helper module for EASYWAVE integration.
 
 Centralizes device learning logic so ConfigFlow, OptionsFlow and services
 can reuse the same implementation and benefit from cancellation support.
@@ -20,7 +20,7 @@ async def async_perform_device_learning(
     """Perform device learning via EWB_RCV with optional cancellation.
 
     Args:
-        coordinator: EldatCoordinator instance.
+        coordinator: EasywaveCoordinator instance.
         device_type: Expected device type selected by user.
         timeout: Max seconds to wait for first telegram/device.
         cancel_event: If provided and set() is called, abort early.
@@ -95,8 +95,6 @@ async def async_perform_device_learning(
         if hasattr(transceiver, 'set_telegram_callback') and hasattr(coordinator, '_handle_telegram'):
             _LOGGER.info("🔗 Restoring coordinator telegram callback after learning")
             transceiver.set_telegram_callback(coordinator._handle_telegram)
-        return None
-    finally:
         # Always disable learning mode
         await transceiver.stop_learning_mode()
         elapsed = asyncio.get_event_loop().time() - start

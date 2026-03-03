@@ -1,4 +1,4 @@
-"""Base receiver class for all ELDAT receivers."""
+"""Base receiver class for all EASYWAVE receivers."""
 from __future__ import annotations
 
 from abc import abstractmethod

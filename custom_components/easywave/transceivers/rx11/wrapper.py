@@ -1,4 +1,4 @@
-"""Python wrapper for ELDAT RX11."""
+"""Python wrapper for EASYWAVE RX11."""
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class RX11Wrapper:
-    """Python wrapper for ELDAT RX11 RxModule.
+    """Python wrapper for EASYWAVE RX11 RxModule.
     
     Provides high-level async interface to the RX11 transceiver.
     
@@ -47,8 +47,10 @@ class RX11Wrapper:
         self._connected = False
         self._lock = asyncio.Lock()
         
-        # USB device information
-        self._usb_serial_number = None  # Will be set from config or detected
+        # USB device identity — tracks which physical stick is connected
+        self._usb_serial_number: Optional[str] = None  # Will be set from config or detected
+        self._usb_vid: Optional[int] = None
+        self._usb_pid: Optional[int] = None
         
         # Device tracking
         self._used_receivers: dict[int, str] = {}  # {index: serial} for used receivers
@@ -60,10 +62,11 @@ class RX11Wrapper:
         self._cache_timestamp: dict[int, float] = {}
         self._cache_max_age = 300.0  # 5 minutes
         
-        # Version caching
+        # Version caching — tied to a specific device identity
         self._hw_version_cache: Optional[str] = None
         self._fw_version_cache: Optional[str] = None
         self._versions_fetched = False
+        self._versions_fetched_for: Optional[str] = None  # device identity key
         
         # Continuous receive loop for EWB sensors
         self._ewb_receive_task: Optional[asyncio.Task] = None
@@ -113,9 +116,7 @@ class RX11Wrapper:
         self._module = RxModule(port=device_path, baudrate=115200, debug=True)
         
         # Reset version cache to force re-fetch
-        self._hw_version_cache = None
-        self._fw_version_cache = None
-        self._versions_fetched = False
+        self._invalidate_version_cache("device path changed")
     
     # ================================================================================================
     # CONNECTION MANAGEMENT
@@ -152,22 +153,14 @@ class RX11Wrapper:
                     # Wait for serial interface to be fully ready (avoid race conditions)
                     await asyncio.sleep(0.8)  # Increased settle time to prevent startup errors
                     
-                    if not self._versions_fetched:
-                        # Retry hardware version query with exponential backoff
-                        hw_version = None
-                        for attempt in range(3):
-                            hw_version = await self.get_hardware_version()
-                            if hw_version:
-                                _LOGGER.info("✅ Connection verified - Hardware: %s", hw_version)
-                                self._versions_fetched = True
-                                break
-                            else:
-                                if attempt < 2:
-                                    wait_time = 0.5 * (attempt + 1)
-                                    _LOGGER.debug("Hardware version query failed (attempt %d/3), retrying in %.1fs...", attempt + 1, wait_time)
-                                    await asyncio.sleep(wait_time)
-                                else:
-                                    _LOGGER.warning("⚠️ Hardware version query failed after 3 attempts")
+                    # Fetch HW + FW versions BEFORE starting the EWB receive loop.
+                    # Both queries use synchronous request/response matching and must
+                    # complete before the long-poll EWB_RCV is sent (FIFO race condition).
+                    versions_ok = await self._ensure_versions_fetched()
+                    if versions_ok:
+                        _LOGGER.info("✅ Connection verified with RX11")
+                    else:
+                        _LOGGER.warning("⚠️ Could not fully verify connection (version query incomplete)")
                     
                     # Start continuous EWB receive loop for background telegram monitoring
                     _LOGGER.info("🚀 Starting continuous EWB receive loop...")
@@ -268,6 +261,10 @@ class RX11Wrapper:
                                     await self.rx11_ewb_sensor_add_filter(gateway_serial)
                                 _LOGGER.info("✅ %d EWB-Filter neu gesetzt", len(gateway_serials))
                             
+                            # Fetch HW + FW versions before EWB loop (FIFO race prevention)
+                            self._invalidate_version_cache("reconnect after disconnect")
+                            await self._ensure_versions_fetched()
+                            
                             # Restart EWB receive loop
                             await self.rx11_ewb_sensor_start_receive_loop()
                             
@@ -330,6 +327,10 @@ class RX11Wrapper:
                             _LOGGER.info("✅ %d EWB-Filter erfolgreich neu gesetzt", len(gateway_serials))
                         else:
                             _LOGGER.debug("Keine Gateway-Seriennummern für EWB-Filter gefunden")
+                        
+                        # Fetch HW + FW versions before EWB loop (FIFO race prevention)
+                        self._invalidate_version_cache("module-level reconnect")
+                        await self._ensure_versions_fetched()
                         
                         # Start fresh EWB receive loop (already stopped by disconnect handler)
                         _LOGGER.info("🚀 Starting fresh EWB receive loop after reconnect...")
@@ -456,14 +457,150 @@ class RX11Wrapper:
         """Alias for get_firmware_version() for coordinator compatibility."""
         return await self.get_firmware_version()
     
+    @property
+    def _device_identity_key(self) -> str:
+        """Return a key identifying the currently connected physical USB device.
+        
+        Used to detect stick swaps (different serial number or VID/PID).
+        When the key changes, cached version information is invalidated.
+        """
+        vid = self._usb_vid or 0
+        pid = self._usb_pid or 0
+        sn = self._usb_serial_number or "unknown"
+        return f"{vid:04X}:{pid:04X}:{sn}"
+    
+    def _invalidate_version_cache(self, reason: str = "") -> None:
+        """Clear all cached version info and force re-fetch on next connect."""
+        self._hw_version_cache = None
+        self._fw_version_cache = None
+        self._versions_fetched = False
+        self._versions_fetched_for = None
+        if reason:
+            _LOGGER.debug("Version cache invalidated (%s)", reason)
+    
+    async def _ensure_versions_fetched(self) -> bool:
+        """Ensure hardware and firmware versions are fetched.
+        
+        Both version queries use synchronous request/response matching.
+        They MUST complete before the long-poll EWB_RCV command is sent,
+        because the FIFO-based request matching in the RX11 protocol would
+        otherwise cause size-mismatch errors when short management responses
+        are matched to the 28-byte EWB_RCV request.
+        
+        Also detects device identity changes (different serial number or PID)
+        and forces a re-fetch when a different physical stick is connected.
+        
+        Returns True if both versions were obtained successfully.
+        """
+        current_key = self._device_identity_key
+        
+        # Check if we already have versions for THIS specific device
+        if self._versions_fetched and self._versions_fetched_for == current_key:
+            return bool(self._hw_version_cache and self._fw_version_cache)
+        
+        # Device changed since last fetch → discard stale version info
+        if self._versions_fetched_for and self._versions_fetched_for != current_key:
+            _LOGGER.info(
+                "🔄 Device identity changed (%s → %s) — re-fetching versions",
+                self._versions_fetched_for, current_key,
+            )
+            self._hw_version_cache = None
+            self._fw_version_cache = None
+        
+        # Query hardware version with retry and exponential backoff
+        hw_version = None
+        for attempt in range(3):
+            hw_version = await self.get_hardware_version()
+            if hw_version:
+                break
+            if attempt < 2:
+                wait_time = 0.5 * (attempt + 1)
+                _LOGGER.debug(
+                    "Hardware version query failed (attempt %d/3), retrying in %.1fs...",
+                    attempt + 1, wait_time,
+                )
+                await asyncio.sleep(wait_time)
+        
+        if hw_version:
+            _LOGGER.info("✅ Hardware: %s", hw_version)
+        else:
+            _LOGGER.warning("⚠️ Hardware version query failed after 3 attempts")
+        
+        # Query firmware version with retry and exponential backoff
+        fw_version = None
+        for attempt in range(3):
+            fw_version = await self.get_firmware_version()
+            if fw_version:
+                break
+            if attempt < 2:
+                wait_time = 0.5 * (attempt + 1)
+                _LOGGER.debug(
+                    "Firmware version query failed (attempt %d/3), retrying in %.1fs...",
+                    attempt + 1, wait_time,
+                )
+                await asyncio.sleep(wait_time)
+        
+        if fw_version:
+            _LOGGER.info("✅ Firmware: %s", fw_version)
+        else:
+            _LOGGER.warning("⚠️ Firmware version query failed after 3 attempts")
+        
+        self._versions_fetched = True
+        self._versions_fetched_for = current_key
+        
+        if hw_version and fw_version:
+            _LOGGER.info("✅ Version info complete: HW=%s, FW=%s (device %s)", hw_version, fw_version, current_key)
+        
+        return bool(hw_version and fw_version)
+    
     def set_usb_serial_number(self, serial_number: str) -> None:
         """Set USB serial number for identification."""
-        self._usb_serial_number = serial_number
-        _LOGGER.debug("📋 USB Serial Number: %s", serial_number)
+        self.update_usb_identity(serial_number=serial_number)
+    
+    def update_usb_identity(
+        self,
+        serial_number: Optional[str] = None,
+        vid: Optional[int] = None,
+        pid: Optional[int] = None,
+    ) -> None:
+        """Update USB device identity and invalidate caches on device change.
+        
+        Call this whenever the connected device may have changed (reconnect,
+        port change, stick swap).  If the identity actually differs from the
+        last known one, all version caches are cleared so that
+        _ensure_versions_fetched() will re-query the hardware.
+        """
+        old_key = self._device_identity_key
+        
+        if serial_number is not None:
+            self._usb_serial_number = serial_number
+        if vid is not None:
+            self._usb_vid = vid
+        if pid is not None:
+            self._usb_pid = pid
+        
+        new_key = self._device_identity_key
+        if old_key != new_key:
+            _LOGGER.info(
+                "🔄 USB device identity changed: %s → %s",
+                old_key, new_key,
+            )
+            self._invalidate_version_cache("device identity changed")
+        else:
+            _LOGGER.debug("📋 USB identity confirmed: %s", new_key)
     
     def get_usb_serial_number(self) -> Optional[str]:
         """Get USB serial number for identification."""
         return self._usb_serial_number
+    
+    def get_usb_identity(self) -> dict:
+        """Get full USB device identity."""
+        return {
+            "serial_number": self._usb_serial_number,
+            "vid": self._usb_vid,
+            "pid": self._usb_pid,
+            "identity_key": self._device_identity_key,
+        }
     
     def get_device_info(self) -> dict:
         """Get complete device information including USB details.
@@ -473,6 +610,8 @@ class RX11Wrapper:
         return {
             "device_path": self.device_path,
             "usb_serial_number": self._usb_serial_number,
+            "usb_vid": self._usb_vid,
+            "usb_pid": self._usb_pid,
             "hw_version": self._hw_version_cache,
             "fw_version": self._fw_version_cache,
             "connected": self._connected,
@@ -637,7 +776,7 @@ class RX11Wrapper:
     async def rx11_ew_receiver_send_command(self, serial_number: str, command: bytes) -> bool:
         """Send command to specific EW receiver using optimized cached index lookup."""
         if not self._connected:
-            _LOGGER.error("❌ Cannot send command - RX11 not connected")
+            _LOGGER.debug("Cannot send command — RX11 not connected")
             return False
         
         # Check RX11 internal state
@@ -937,7 +1076,7 @@ class RX11Wrapper:
                             parsed_state = self._convert_motor_data_to_parsed_state(motor_data, device_type)
                             if parsed_state and self._coordinator:
                                 self._coordinator.hass.bus.async_fire(
-                                    "eldat_ewneo_state_update",
+                                    "easywave_ewneo_state_update",
                                     {
                                         "serial_number": device_serial,
                                         "device_id": device_serial,
@@ -1424,12 +1563,21 @@ class RX11Wrapper:
                 
                 _LOGGER.info("🔄 Reconnection attempt %d - scanning for RX11 device...", attempt)
                 
-                # Try to find the RX11 device (may be at different port)
-                new_device_path = await self._find_rx11_device()
+                # Try to find the RX11 device (may be at different port or different stick)
+                found = await self._find_rx11_device()
                 
-                if not new_device_path:
+                if not found:
                     _LOGGER.info("⚠️ No RX11 device found - will retry...")
                     continue
+                
+                new_device_path = found["path"]
+                
+                # Update USB identity — detects stick swaps automatically
+                self.update_usb_identity(
+                    serial_number=found["serial_number"],
+                    vid=found["vid"],
+                    pid=found["pid"],
+                )
                 
                 # Device found - update path if changed
                 if new_device_path != self.device_path:
@@ -1464,8 +1612,10 @@ class RX11Wrapper:
                             self._consecutive_errors = 0
                             self._last_successful_communication = time.time()
                             
-                            # Clear version cache to force re-fetch
-                            self._hw_version_cache = None
+                            # Mark versions as not yet fetched — the caller will
+                            # run _ensure_versions_fetched() before starting the
+                            # EWB receive loop (HW cache is already warm,
+                            # identity-aware fetch will still re-query if stick changed).
                             self._fw_version_cache = None
                             self._versions_fetched = False
                             
@@ -1512,9 +1662,7 @@ class RX11Wrapper:
         # Reset caches
         self._serial_cache.clear()
         self._cache_timestamp.clear()
-        self._hw_version_cache = None
-        self._fw_version_cache = None
-        self._versions_fetched = False
+        self._invalidate_version_cache("dispose and reset")
         
         # Reset used receiver tracking
         self._used_receivers.clear()
@@ -1523,11 +1671,12 @@ class RX11Wrapper:
         
         _LOGGER.debug("State reset complete")
     
-    async def _find_rx11_device(self) -> Optional[str]:
+    async def _find_rx11_device(self) -> Optional[dict]:
         """Find RX11 device, potentially at a new port after USB replug.
         
         Returns:
-            Device path if found, None otherwise
+            Dict with keys 'path', 'vid', 'pid', 'serial_number' if found,
+            None otherwise.
         """
         try:
             import serial.tools.list_ports
@@ -1537,15 +1686,20 @@ class RX11Wrapper:
                 None, serial.tools.list_ports.comports
             )
             
-            # RX11 USB identifiers
-            RX11_VID = 0x155A
-            RX11_PIDS = [0x1014]
+            from ...const import is_supported_usb_device
             
             for port in all_ports:
-                if port.vid == RX11_VID and port.pid in RX11_PIDS:
-                    _LOGGER.debug("Found RX11 at %s (VID: 0x%04X, PID: 0x%04X)", 
-                                port.device, port.vid, port.pid)
-                    return port.device
+                if is_supported_usb_device(port.vid, port.pid):
+                    _LOGGER.debug(
+                        "Found Easywave device at %s (VID:0x%04X PID:0x%04X SN:%s)",
+                        port.device, port.vid, port.pid, port.serial_number or "?",
+                    )
+                    return {
+                        "path": port.device,
+                        "vid": port.vid,
+                        "pid": port.pid,
+                        "serial_number": port.serial_number or "unknown",
+                    }
             
             return None
             

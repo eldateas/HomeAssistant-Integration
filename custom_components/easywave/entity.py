@@ -1,4 +1,4 @@
-"""Base entity for ELDAT integration."""
+"""Base entity for EASYWAVE integration."""
 from __future__ import annotations
 
 import logging
@@ -8,19 +8,19 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, DEVICE_ICONS, DEVICE_TYPE_CODE_MAP
-from .coordinator import EldatCoordinator
+from .coordinator import EasywaveCoordinator
 from .helpers import build_model_description
 from .translations import get_language, t_receiver, t_transmitter, t_sensor_device, DEFAULT_LANGUAGE
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class EldatEntity(CoordinatorEntity):
-    """Base class for ELDAT entities."""
+class EasywaveEntity(CoordinatorEntity):
+    """Base class for EASYWAVE entities."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
     ) -> None:
@@ -92,10 +92,16 @@ class EldatEntity(CoordinatorEntity):
         # If the device exists and has a name_by_user, keep the original default name
         # so that HA continues to use the user-defined override
         existing_default_name = None
+        # Derive the HA device identifier: UUID-based registration_id for new
+        # devices, serial_number for legacy devices without registration_id.
+        device_identifier = current_device_info['registration_id']
         if self.hass:
             from homeassistant.helpers import device_registry as dr
             device_registry = dr.async_get(self.hass)
-            existing_device = device_registry.async_get_device(identifiers={(DOMAIN, self._serial_number)})
+            existing_device = device_registry.async_get_device(identifiers={(DOMAIN, device_identifier)})
+            if not existing_device:
+                # Fallback: try legacy serial-based identifier (migration)
+                existing_device = device_registry.async_get_device(identifiers={(DOMAIN, self._serial_number)})
             if existing_device:
                 # Device exists - use the existing default name to preserve name_by_user
                 existing_default_name = existing_device.name
@@ -124,8 +130,13 @@ class EldatEntity(CoordinatorEntity):
         gateway_identifier = self._get_gateway_identifier()
         
         # Return device_info with via_device to link to RX11 gateway
+        # Use registration_id (UUID) as device identifier so that each
+        # learn cycle creates a brand new HA device entry — no tombstone
+        # collision with previously deleted/disabled devices.
+        # The serial_number is passed as a separate DeviceInfo field for display.
         return DeviceInfo(
-            identifiers={(DOMAIN, self._serial_number)},
+            identifiers={(DOMAIN, device_identifier)},
+            serial_number=self._serial_number,
             name=device_name,
             model=model_description,
             via_device=gateway_identifier,

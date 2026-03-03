@@ -1,4 +1,4 @@
-"""Switch entities for ELDAT integration."""
+"""Switch entities for EASYWAVE integration."""
 from __future__ import annotations
 
 import asyncio
@@ -15,8 +15,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, EVENT_DEVICE_ADDED, EVENT_FORCE_CREATE
-from .coordinator import EldatCoordinator
-from .entity import EldatEntity
+from .coordinator import EasywaveCoordinator
+from .entity import EasywaveEntity
 from .device_icons import get_entity_config_for_device
 from .translations import get_language, translate, DEFAULT_LANGUAGE
 
@@ -28,15 +28,54 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ELDAT switch entities."""
-    coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
-
-    switches: List[SwitchEntity] = []
+    """Set up EASYWAVE switch entities."""
+    from homeassistant.helpers import entity_registry as er
     
-    # Track which devices have had entities created to prevent duplicates
-    created_device_serials = set()
+    coordinator: EasywaveCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    # Restore switches from saved devices (both legacy and registered)
+    # Get entity registry to prevent duplicate unique_ids
+    entity_registry = er.async_get(hass)
+    existing_unique_ids = set()
+    
+    # Collect all existing unique_ids for switches in this integration
+    if entity_registry:
+        for entity_entry in entity_registry.entities.values():
+            if (entity_entry.platform == "easywave" and 
+                entity_entry.config_entry_id == config_entry.entry_id and
+                entity_entry.domain == "switch"):
+                if entity_entry.unique_id:
+                    existing_unique_ids.add(entity_entry.unique_id)
+
+    # ═══ CENTRAL DISPATCHER ═══
+    # Create async handler for this platform to be called by central dispatcher
+    async def _handle_switch_from_dispatcher(serial_number: str, device_info: Dict[str, Any], entity_specs: List[Dict[str, Any]]) -> None:
+        """Handle switch entity creation for a device.
+        
+        Called by central dispatcher with entity specs already prepared.
+        This replaces all the old event listener logic.
+        """
+        switches = []
+        is_neo_device = device_info.get("neo_device", False) or device_info.get("type", "").startswith("ewneo_")
+        
+        for entity_spec in entity_specs:
+            unique_id = entity_spec.get("unique_id")
+            if unique_id and unique_id in existing_unique_ids:
+                continue
+            
+            if is_neo_device:
+                switches.append(EasywaveEWneoSwitch(coordinator, serial_number, device_info, entity_spec))
+            else:
+                switches.append(EasywaveEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
+        
+        if switches:
+            async_add_entities(switches)
+            _LOGGER.debug("Added %d switch entities for %s", len(switches), serial_number[-8:])
+    
+    # Register handler with central dispatcher
+    coordinator.register_platform_handler("switch", _handle_switch_from_dispatcher)
+    
+    # Restore switches from saved devices (initial startup only)
+    switches = []
     for serial_number, device_info in coordinator.get_all_devices().items():
         device_entities = device_info.get("entities", [])
         
@@ -44,349 +83,28 @@ async def async_setup_entry(
                     serial_number, device_info.get("type"), 
                     device_info.get("receiver_kind"), len(device_entities))
         
-        # Determine if this is an EWneo device
+        # Create switches from entity specs
         is_neo_device = device_info.get("neo_device", False) or device_info.get("type", "").startswith("ewneo_")
         
-        # Create switches from entity specs
         for entity_spec in device_entities:
             if entity_spec.get("type") == "switch":
-                _LOGGER.info("✅ Creating switch from entity_spec for %s (neo_device: %s)", serial_number, is_neo_device)
-                # Use the correct switch class based on device type
+                _LOGGER.info("✅ Creating switch from entity_spec for %s", serial_number[-8:])
                 if is_neo_device:
-                    switches.append(EldatEWneoSwitch(coordinator, serial_number, device_info, entity_spec))
+                    switches.append(EasywaveEWneoSwitch(coordinator, serial_number, device_info, entity_spec))
                 else:
-                    switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
-                created_device_serials.add(serial_number)
-        
-        # Skip further processing if we created entities from specs
-        if serial_number in created_device_serials:
-            continue
-        
-        # Legacy fallback: check for heating_cooling devices
-        receiver_kind = device_info.get("receiver_kind")
-        if receiver_kind == "heating_cooling":
-            # Force creation of heating_cooling switches if not already created
-            from .entity_specs import create_entity_specs_for_device
-            entity_specs = create_entity_specs_for_device(serial_number, device_info)
-            switch_entities = entity_specs.get("switch", [])
-            
-            for entity_spec in switch_entities:
-                switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
-            
-            created_device_serials.add(serial_number)
-            _LOGGER.info("🌡️ Created %d heating/cooling switch entities for device %s", 
-                       len(switch_entities), serial_number[-8:])
-            continue
-        
-        # Skip devices that already have configured entities of any type (non-heating_cooling and non-EWneo)
-        is_neo_device = device_info.get("neo_device", False) or device_info.get("device_type_code") in [0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B]
-        has_configured_entities = any(entity.get("type") in ["button", "light", "cover", "switch"] for entity in device_entities)
-        
-        # Create EWneo switches during setup - they need to be created here for startup
-        if is_neo_device:
-            device_switches = _create_switches_for_device(coordinator, serial_number, device_info)
-            switches.extend(device_switches)
-            created_device_serials.add(serial_number)
-            if device_switches:
-                _LOGGER.info("🔧 Created %d EWneo switch entities for device %s during setup", len(device_switches), serial_number[-8:])
-            continue
-        
-        # For non-EWneo devices without configured entities, use legacy creation
-        if not has_configured_entities:
-            device_switches = _create_switches_for_device(coordinator, serial_number, device_info)
-            switches.extend(device_switches)
-        else:
-            _LOGGER.debug("Skipping legacy switch creation for %s - device has %d configured entities", serial_number[-8:], len(device_entities))
+                    switches.append(EasywaveEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
 
     if switches:
         async_add_entities(switches)
         _LOGGER.debug("Added %d switch entities", len(switches))
 
-    # Generic handler for devices added events (fallback)
-    async def _handle_device_added(event):
-        try:
-            serial_number = event.data.get("serial_number")
-            device_info = event.data.get("device_info")
-            entities = event.data.get("entities", [])
-            platforms = event.data.get("platforms", set())
 
-            if not serial_number or not device_info:
-                _LOGGER.debug("Device added event missing data, skipping")
-                return
-            
-            # Skip heating_cooling devices - they are created during async_setup_platform()
-            receiver_kind = device_info.get("receiver_kind")
-            if receiver_kind == "heating_cooling":
-                _LOGGER.debug("⏭️ Skipping heating_cooling device %s - already created during setup", serial_number[-8:])
-                return
-
-            # Check if we have switch entities in the entities list
-            switch_entities = [e for e in entities if e.get("type") == "switch"]
-            
-            if not switch_entities and "switch" not in platforms:
-                _LOGGER.debug("No switch entities or platform for device %s, skipping", serial_number[-8:])
-                return
-
-            # Check if this is an EWneo device - skip here, will be handled by platform-specific handler
-            device_type_code = device_info.get("device_type_code", 0)
-            is_neo_device = device_type_code in [0x03, 0x06, 0x07] or device_info.get("neo_device", False)
-            
-            if is_neo_device:
-                _LOGGER.debug("Skipping EWneo device %s in generic handler - will be handled by platform-specific handler", serial_number[-8:])
-                return
-            
-            _LOGGER.info("🔧 Creating switch entities for device %s: neo=%s, entities=%d", 
-                        serial_number[-8:], is_neo_device, len(switch_entities))
-
-            new_switches = []
-            if switch_entities:
-                # Use entity specs from the event (non-EWneo devices only)
-                for entity_spec in switch_entities:
-                    new_switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, entity_spec))
-            else:
-                # Fallback to legacy creation
-                new_switches = _create_switches_for_device(coordinator, serial_number, device_info)
-
-            if new_switches:
-                async_add_entities(new_switches)
-                _LOGGER.info("✅ Added %d switch entities for device %s", len(new_switches), serial_number[-8:])
-
-        except Exception:
-            _LOGGER.exception("Error handling device added event for switches")
-
-    # Platform-specific handler
-    async def _handle_switch_device_added(event):
-        try:
-            serial_number = event.data.get("serial_number")
-            device_info = event.data.get("device_info")
-            entities = event.data.get("entities", [])
-            force_create = event.data.get("force_create", False)
-
-            if not serial_number or not entities:
-                _LOGGER.debug("Switch-specific device added event missing data")
-                return
-            
-            # Skip if this device already had entities created during setup
-            if serial_number in created_device_serials and not force_create:
-                _LOGGER.debug("Skipping switch creation for %s - already created during setup", serial_number[-8:])
-                return
-
-            # Check if this is an EWneo device - if so, create EWneo switch entities
-            device_type_code = device_info.get("device_type_code", 0)
-            is_neo_device = device_type_code in [0x03, 0x06, 0x07] or device_info.get("neo_device", False)
-            
-            if is_neo_device:
-                _LOGGER.info("🔧 Creating EWneo switch entities from event for device %s", serial_number[-8:])
-                new_switches = []
-                for entity_spec in entities:
-                    if entity_spec.get("type") == "switch":
-                        new_switches.append(EldatEWneoSwitch(coordinator, serial_number, device_info, entity_spec))
-                
-                if new_switches:
-                    async_add_entities(new_switches)
-                    created_device_serials.add(serial_number)
-                    _LOGGER.info("✅ Created %d EWneo switch entities for device %s", len(new_switches), serial_number[-8:])
-                return
-
-            # Regular EW devices
-            new_switches: List[SwitchEntity] = []
-            for entity_spec in entities:
-                if entity_spec.get("type") == "switch":
-                    new_switches.append(
-                        EldatEWReceiverSwitch(
-                            coordinator=coordinator,
-                            serial_number=serial_number,
-                            device_info=device_info,
-                            entity_spec=entity_spec,
-                        )
-                    )
-
-            if new_switches:
-                async_add_entities(new_switches)
-                _LOGGER.info("Created %d switch entities for device %s (force: %s)", 
-                           len(new_switches), serial_number, force_create)
-
-        except Exception:
-            _LOGGER.exception("Error creating switch entities from event")
-
-    # Force create handler
-    async def _handle_force_create(event):
-        try:
-            serial_number = event.data.get("serial_number")
-            entity_type = event.data.get("entity_type")
-            device_info = event.data.get("device_info")
-            force_repair = event.data.get("force_repair", False)
-
-            if entity_type != "switch" or not serial_number or not device_info:
-                return
-
-            _LOGGER.info("🔧 Force creating switch entities for device %s (repair: %s)", 
-                       serial_number, force_repair)
-
-            # Create switch entities for this device using entity specs
-            from .entity_specs import create_entity_specs_for_device
-            entity_specs = create_entity_specs_for_device(serial_number, device_info)
-            switch_entities = entity_specs.get("switch", [])
-            
-            new_switches = []
-            for entity_spec in switch_entities:
-                new_switches.append(
-                    EldatEWReceiverSwitch(
-                        coordinator=coordinator,
-                        serial_number=serial_number,
-                        device_info=device_info,
-                        entity_spec=entity_spec,
-                    )
-                )
-            
-            if new_switches:
-                async_add_entities(new_switches)
-                _LOGGER.info("✅ Force-created %d switch entities for device %s", 
-                           len(new_switches), serial_number)
-            else:
-                _LOGGER.warning("⚠️ No switch entity specs found for device %s", serial_number)
-
-        except Exception:
-            _LOGGER.exception("Error force-creating switch entities")
-
-    # Also listen for registered device events
-    async def _handle_registered_device_added(event):
-        """Handle newly registered devices (added after setup).
-        
-        NOTE: This handler skips heating_cooling devices as they are already
-        created during async_setup_platform(). This prevents duplicate entity
-        creation with conflicting unique_ids.
-        
-        This handler is mainly for devices registered AFTER Home Assistant startup.
-        """
-        try:
-            serial_number = event.data.get("serial_number")
-            device_info = event.data.get("device_info")
-            
-            if not serial_number or not device_info:
-                return
-            
-            # Skip heating_cooling devices - they're created during async_setup_platform()
-            # Creating them here would result in duplicate entity IDs
-            receiver_kind = device_info.get("receiver_kind")
-            if device_info.get("type") == "ew_receiver" and receiver_kind == "heating_cooling":
-                _LOGGER.debug("⏭️ Skipping heating/cooling device %s - entities already created during setup", 
-                            serial_number[-8:])
-                return
-            
-            # Fall through to other platform-specific handlers if needed
-                
-        except Exception:
-            _LOGGER.exception("Error handling registered device for switches")
-
-    # Register event listeners (only once!)
-    config_entry.async_on_unload(hass.bus.async_listen(EVENT_DEVICE_ADDED, _handle_device_added))
-    config_entry.async_on_unload(hass.bus.async_listen(f"{EVENT_DEVICE_ADDED}_switch", _handle_switch_device_added))
-    config_entry.async_on_unload(hass.bus.async_listen(EVENT_FORCE_CREATE, _handle_force_create))
-    config_entry.async_on_unload(hass.bus.async_listen("eldat_device_registered", _handle_registered_device_added))
-
-
-def _create_switches_for_device(coordinator: EldatCoordinator, serial_number: str, device_info: Dict[str, Any]) -> List[SwitchEntity]:
-    """Create switch entities for a device based on stored device_info.
-    
-    Only creates switches for devices that have entities with type='switch' in their spec.
-    Dimmers (type='light') and Motors (type='cover') are handled by their respective platforms.
-    Sensors (ew_sensor) don't get switches at all - they only provide sensor data.
-    """
-    switches: List[SwitchEntity] = []
-    device_type = device_info.get("type", "unknown")
-    is_neo_device = device_info.get("neo_device", False)
-    
-    _LOGGER.info("🔍 Creating switches for device %s: type=%s, neo_device=%s", 
-                serial_number[-8:], device_type, is_neo_device)
-    
-    # Skip sensors entirely - they should not have switch entities
-    if device_type in ["ew_sensor", "ewneo_sensor"]:
-        _LOGGER.debug("Skipping switch creation for sensor device %s (type: %s)", serial_number[-8:], device_type)
-        return switches
-    
-    # For EW transmitters, use entity_specs to determine what to create
-    # Transmitters in "Dauer" (permanent) mode with single button mode get switch entities
-    if device_type == "ew_transmitter":
-        from .entity_specs import create_entity_specs_for_device
-        entity_specs = create_entity_specs_for_device(serial_number, device_info)
-        switch_specs = entity_specs.get("switch", [])
-        
-        if switch_specs:
-            for spec in switch_specs:
-                if spec.get("switch_type") == "transmitter_state":
-                    switches.append(EldatTransmitterStateSwitch(coordinator, serial_number, device_info, spec))
-                else:
-                    switches.append(EldatTransmitterSwitch(coordinator, serial_number, device_info, spec))
-            _LOGGER.info("✅ Created %d switch entities for transmitter %s (Dauer mode)", 
-                        len(switches), serial_number[-8:])
-        else:
-            _LOGGER.debug("No switch entities for transmitter %s (not in Dauer mode)", serial_number[-8:])
-        return switches
-    
-    # For Easywave Receivers, only create switches if explicitly configured as switches
-    if device_type == "ew_receiver":
-        entity_specs = device_info.get("entities", [])
-        
-        # Check if there are any configured entities
-        if entity_specs:
-            # Only create switch entities that are explicitly configured
-            for spec in entity_specs:
-                if spec.get("type") == "switch":
-                    switches.append(EldatEWReceiverSwitch(coordinator, serial_number, device_info, spec))
-                    
-            # For heating/cooling receivers, always create a switch even if not explicitly configured
-            # but only if no switch entities were already created
-            if not switches:
-                receiver_kind = device_info.get("receiver_kind", "switch")
-                if receiver_kind in ["heating", "cooling", "heating_cooling"]:
-                    switches.append(EldatSwitch(coordinator, serial_number, device_info, 0))
-                    _LOGGER.info("✅ Created default switch for configured Easywave Receiver %s (kind: %s)", serial_number, receiver_kind)
-            return switches
-        else:
-            # Legacy device without configured entities - create switch for switch type and heating/cooling receivers
-            receiver_kind = device_info.get("receiver_kind", "switch")
-            if receiver_kind in ["switch", "heating", "cooling", "heating_cooling"]:
-                switches.append(EldatSwitch(coordinator, serial_number, device_info, 0))
-                _LOGGER.info("✅ Created legacy switch for Easywave Receiver %s (kind: %s)", serial_number, receiver_kind)
-            return switches
-    
-    # Handle EWneo devices (bidirectional receivers)
-    is_neo_device = device_info.get("neo_device", False)
-    _LOGGER.info("🔍 Device %s: neo_device=%s, type=%s", serial_number[-8:], is_neo_device, device_info.get("type", "unknown"))
-    
-    if is_neo_device:
-        entity_specs = device_info.get("entities", [])
-        _LOGGER.info("📋 EWneo device %s: Found %d entity specs", serial_number[-8:], len(entity_specs))
-        
-        # Check if there are configured entities with type=switch
-        for spec in entity_specs:
-            entity_type = spec.get("type")
-            _LOGGER.info("🔧 Creating entity type '%s' for EWneo device %s", entity_type, serial_number[-8:])
-            if entity_type == "switch":
-                switch_entity = EldatEWneoSwitch(coordinator, serial_number, device_info, spec)
-                switches.append(switch_entity)
-                _LOGGER.info("✅ Created EWneo switch entity for device %s (total: %d)", serial_number[-8:], len(switches))
-            elif entity_type == "button":
-                _LOGGER.warning("⚠️ Button entity found for EWneo device %s - buttons should not send EW commands", serial_number[-8:])
-        
-        _LOGGER.info("📊 EWneo device %s: Created %d switch entities", serial_number[-8:], len(switches))
-        return switches
-    
-    # For other device types (legacy handling)
-    channels = int(device_info.get("channels", 1))
-    for channel in range(max(1, channels)):
-        switches.append(EldatSwitch(coordinator, serial_number, device_info, channel))
-
-    return switches
-
-
-class EldatEWneoSwitch(EldatEntity, SwitchEntity):
+class EasywaveEWneoSwitch(EasywaveEntity, SwitchEntity):
     """EWneo switch entity with bidirectional EWB_CHANGE_STATE control."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -429,7 +147,8 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
         self._translation_key = entity_spec.get("translation_key")
         self._static_name = entity_spec.get("name")
         from .helpers_unique_id import make_unique_id
-        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "ewneo_switch", self._channel)
+        reg_id = device_info["registration_id"]
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(reg_id, "ewneo_switch", self._channel)
         self._attr_device_class = SwitchDeviceClass.SWITCH
         
         # Store icons for state-based icon changes (like EW receivers)
@@ -570,7 +289,7 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
                     self.hass.add_job(self._async_update_state_from_parsed, parsed_state)
         
         # Register the event listener
-        self.hass.bus.async_listen("eldat_ewneo_state_update", handle_ewneo_state_update)
+        self.hass.bus.async_listen("easywave_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo switch %s: Registered state update event listener", self._serial_number[-8:])
         
         # Query initial state from device
@@ -1000,12 +719,12 @@ class EldatEWneoSwitch(EldatEntity, SwitchEntity):
     
 
 
-class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
+class EasywaveEWReceiverSwitch(EasywaveEntity, SwitchEntity):
     """Switch entity created from an entity specification saved in device store."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1067,7 +786,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
             self._last_command_code = None
 
         from .helpers_unique_id import make_unique_id
-        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "configured_switch", self._channel)
+        reg_id = device_info["registration_id"]
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(reg_id, "configured_switch", self._channel)
         
         # For heating/cooling switches, ensure they are always enabled by default
         if self._is_heating_cooling:
@@ -1086,7 +806,7 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
             entity_type="switch"
         )
         
-        # Use name directly from entity_spec (like EldatSwitch does)
+        # Use name directly from entity_spec (like EasywaveSwitch does)
         # This preserves the original entity name from entity_specs.py
         self._attr_name = entity_spec.get("name", device_info.get('name', serial_number))
         
@@ -1188,8 +908,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
                 _LOGGER.info("🔄 Sent repeat command %s to %s", 
                            self._last_command_code, self._serial_number[-8:])
             else:
-                _LOGGER.warning("⚠️ Failed to send repeat command %s to %s", 
-                              self._last_command_code, self._serial_number[-8:])
+                _LOGGER.debug("Repeat command %s to %s failed (offline?)", 
+                             self._last_command_code, self._serial_number[-8:])
         except Exception as e:
             _LOGGER.error("❌ Error sending repeat command: %s", e)
 
@@ -1603,8 +1323,8 @@ class EldatEWReceiverSwitch(EldatEntity, SwitchEntity):
         return attrs
 
 
-class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
-    """Switch entity for ELDAT transmitters in 'Dauer' (permanent) mode.
+class EasywaveTransmitterSwitch(EasywaveEntity, SwitchEntity):
+    """Switch entity for EASYWAVE transmitters in 'Dauer' (permanent) mode.
     
     This creates a persistent toggle switch for each button on a transmitter.
     When the button is pressed, the switch state toggles (On -> Off or Off -> On).
@@ -1613,7 +1333,7 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1630,7 +1350,8 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
         # Set up entity attributes
         self._attr_name = entity_spec.get("name", f"Transmitter {serial_number} Button {self._button}")
         from .helpers_unique_id import make_unique_id
-        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "transmitter_switch", self._button)
+        reg_id = device_info["registration_id"]
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(reg_id, "transmitter_switch", self._button)
         self._attr_icon = entity_spec.get("icon", self._icon_off)
         self._attr_device_class = SwitchDeviceClass.SWITCH
         self._attr_entity_registry_enabled_default = True
@@ -1644,7 +1365,7 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
         
         # Listen for button press events from this device
         # Multiple event types are fired for button presses, use the short_press event
-        EVENT_BUTTON_SHORT_PRESS = "eldat_button_press"
+        EVENT_BUTTON_SHORT_PRESS = "easywave_button_press"
         
         @callback
         def _handle_button_press(event):
@@ -1702,7 +1423,7 @@ class EldatTransmitterSwitch(EldatEntity, SwitchEntity):
         _LOGGER.debug("Transmitter switch %s manually turned OFF", self._attr_name)
 
 
-class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
+class EasywaveTransmitterStateSwitch(EasywaveEntity, RestoreEntity, SwitchEntity):
     """Switch entity for Easywave Transmitters in 2-button modes (Auf/Zu).
 
     Maintains persistent state mapped from button events.
@@ -1710,7 +1431,7 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1726,7 +1447,8 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
 
         self._attr_name = entity_spec.get("name", f"Transmitter {serial_number} State")
         from .helpers_unique_id import make_unique_id
-        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "state")
+        reg_id = device_info["registration_id"]
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(reg_id, "state")
         self._attr_icon = entity_spec.get("icon", "mdi:window-shutter")
         self._attr_device_class = SwitchDeviceClass.SWITCH
         self._attr_entity_registry_enabled_default = True
@@ -1784,7 +1506,7 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
 
             if not matches_device:
                 event_device_id = event.data.get("device_id")
-                if event_device_id == f"eldat_transmitter_{self._serial_number.lower()}":
+                if event_device_id == f"easywave_transmitter_{self._serial_number.lower()}":
                     matches_device = True
                 elif event_device_id and len(event_device_id) >= 8 and len(self._serial_number) >= 8:
                     matches_device = event_device_id[-8:] == self._serial_number[-8:]
@@ -1802,10 +1524,10 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
                     self.async_write_ha_state()
 
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press", _handle_button_event)
+            self.hass.bus.async_listen("easywave_button_press", _handle_button_event)
         )
         self.async_on_remove(
-            self.hass.bus.async_listen("eldat_button_press", _handle_button_event)
+            self.hass.bus.async_listen("easywave_button_press", _handle_button_event)
         )
 
     @property
@@ -1840,10 +1562,10 @@ class EldatTransmitterStateSwitch(EldatEntity, RestoreEntity, SwitchEntity):
         }
 
 
-class EldatSwitch(EldatEntity, SwitchEntity):
-    """Simple switch entity for ELDAT devices."""
+class EasywaveSwitch(EasywaveEntity, SwitchEntity):
+    """Simple switch entity for EASYWAVE devices."""
 
-    def __init__(self, coordinator: EldatCoordinator, serial_number: str, device_info: Dict[str, Any], channel: int = 0) -> None:
+    def __init__(self, coordinator: EasywaveCoordinator, serial_number: str, device_info: Dict[str, Any], channel: int = 0) -> None:
         super().__init__(coordinator, serial_number, device_info)
         self._channel = int(channel)
         
@@ -1890,11 +1612,12 @@ class EldatSwitch(EldatEntity, SwitchEntity):
         self._available = True
 
         from .helpers_unique_id import make_unique_id
+        reg_id = device_info["registration_id"]
         if channel > 0:
-            self._attr_unique_id = make_unique_id(serial_number, "switch", channel)
+            self._attr_unique_id = make_unique_id(reg_id, "switch", channel)
             self._attr_name = f"{device_info.get('name', serial_number)} Channel {channel + 1}"
         else:
-            self._attr_unique_id = make_unique_id(serial_number, "switch")
+            self._attr_unique_id = make_unique_id(reg_id, "switch")
             self._attr_name = f"{device_info.get('name', serial_number)} Switch"
 
         # Get device-specific icon
@@ -1919,7 +1642,7 @@ class EldatSwitch(EldatEntity, SwitchEntity):
     def available(self) -> bool:
         """Return if entity is available.
         
-        Eldat switches inherit the RX11 transceiver connection status via via_device 
+        Easywave switches inherit the RX11 transceiver connection status via via_device 
         linkage. Additionally, _available tracks device-specific reachability.
         """
         # Base: RX11 must be connected (inherited from base)
@@ -2116,7 +1839,7 @@ class EldatSwitch(EldatEntity, SwitchEntity):
                 # Restored state - send the last command
                 command_code = device_state.get("last_command_code")
                 if command_code:
-                    # For EldatSwitch, use bytes format
+                    # For EasywaveSwitch, use bytes format
                     command = bytes([0x01 if command_code == "A" else 0x00, self._channel, 0xFF])
                     await self.coordinator.send_command(self._serial_number, command)
                     _LOGGER.info("🔄 Restored state sent for %s: %s", self._attr_name, command_code)
@@ -2136,10 +1859,10 @@ class EldatSwitch(EldatEntity, SwitchEntity):
             self._cancel_repeat_timer()
 
 
-class EldatDimmerSwitch(EldatSwitch):
+class EasywaveDimmerSwitch(EasywaveSwitch):
     """Dimmer switch entity for devices that support brightness."""
 
-    def __init__(self, coordinator: EldatCoordinator, serial_number: str, device_info: Dict[str, Any], channel: int = 0) -> None:
+    def __init__(self, coordinator: EasywaveCoordinator, serial_number: str, device_info: Dict[str, Any], channel: int = 0) -> None:
         super().__init__(coordinator, serial_number, device_info, channel)
         self._brightness = 255
         self._attr_icon = "mdi:brightness-6"

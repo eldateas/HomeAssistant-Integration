@@ -1,4 +1,4 @@
-"""Konstanten für die ELDAT Integration."""
+"""Konstanten für die EASYWAVE Integration."""
 from __future__ import annotations
 
 import datetime
@@ -6,14 +6,56 @@ from typing import Final
 
 # Domain und Integration Info
 DOMAIN: Final = "easywave"
-INTEGRATION_NAME: Final = "Home Assistant Integration for ELDAT devices"
+INTEGRATION_NAME: Final = "Home Assistant Integration for EASYWAVE devices"
 
 # Documentation URL Base
 DOCS_URL_BASE: Final = "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs"
 
-# USB Device Information
-ELDAT_VID: Final = 0x155A  # Vendor ID
-ELDAT_PIDS: Final = [0x1014]  # Product ID - RX11 USB Transceiver
+# ═══════════════════════════════════════════════════════════════════════════
+# USB Device Registry — SINGLE SOURCE OF TRUTH
+# ═══════════════════════════════════════════════════════════════════════════
+# Add a new USB stick here and it will automatically be:
+#   • discovered by the config flow
+#   • matched at startup & reconnect
+#   • shown with the correct manufacturer / product name
+#   • listed in manifest.json (must be added there manually once)
+#
+# Key:   (VID, PID)  — both as int
+# Value: {"manufacturer": "…", "product": "…"}
+# ═══════════════════════════════════════════════════════════════════════════
+USB_DEVICE_NAMES: Final = {
+    (0x155A, 0x1014): {
+        "manufacturer": "ELDAT EaS GmbH",
+        "product": "RX11 USB Transceiver",
+    },
+    # (0x155A, 0x1015): {
+    #     "manufacturer": "ELDAT EaS GmbH",
+    #     "product": "RX21 USB Transceiver",
+    # },
+}
+
+# Derived set of all supported (VID, PID) tuples — used for device scanning.
+SUPPORTED_USB_IDS: Final = frozenset(USB_DEVICE_NAMES.keys())
+
+# Legacy aliases — kept for existing imports but now derived from the table.
+EASYWAVE_VID: Final = 0x155A
+EASYWAVE_PIDS: Final = sorted({pid for _, pid in SUPPORTED_USB_IDS})
+
+
+def is_supported_usb_device(vid: int | None, pid: int | None) -> bool:
+    """Return True when the VID/PID pair belongs to a supported stick."""
+    return (vid, pid) in SUPPORTED_USB_IDS
+
+
+def usb_device_name(vid: int | None, pid: int | None) -> tuple[str, str]:
+    """Return (manufacturer, product) for a VID/PID pair.
+
+    Falls back to generic strings when the combination is unknown.
+    """
+    entry = USB_DEVICE_NAMES.get((vid, pid))
+    if entry:
+        return entry["manufacturer"], entry["product"]
+    return "ELDAT EaS GmbH", "Unknown Easywave Device"
 
 # Config Entry Keys
 CONF_DEVICE_PATH: Final = "device_path"  # Legacy: optional fallback
@@ -163,8 +205,8 @@ SERVICE_IMPORT_DEVICES: Final = "import_devices"
 SERVICE_BACKUP_DEVICES: Final = "backup_devices"
 
 # Configuration File
-DEVICES_CONFIG_FILE: Final = "eldat_devices.json"
-DEVICES_BACKUP_FILE: Final = "eldat_devices_backup.json"
+DEVICES_CONFIG_FILE: Final = "easywave_devices.json"
+DEVICES_BACKUP_FILE: Final = "easywave_devices_backup.json"
 CONFIG_VERSION: Final = "1.0"
 
 # Entity Categories
@@ -273,22 +315,22 @@ UNIT_PERCENT: Final = "%"
 UNIT_DBM: Final = "dBm"
 
 # Coordinator Events
-EVENT_DEVICE_ADDED: Final = "eldat_device_added"
-EVENT_DEVICE_REMOVED: Final = "eldat_device_removed"
-EVENT_DEVICE_UPDATED: Final = "eldat_device_updated"
-EVENT_DEVICE_STATE_UPDATE: Final = "eldat_device_state_update"
-EVENT_TELEGRAM_RECEIVED: Final = "eldat_telegram_received"
-EVENT_SENSOR_UPDATE: Final = "eldat_sensor_update"
-EVENT_SENSOR_ADDED: Final = "eldat_sensor_added"
-EVENT_FORCE_CREATE: Final = "eldat_force_create"
+EVENT_DEVICE_ADDED: Final = "easywave_device_added"
+EVENT_DEVICE_REMOVED: Final = "easywave_device_removed"
+EVENT_DEVICE_UPDATED: Final = "easywave_device_updated"
+EVENT_DEVICE_STATE_UPDATE: Final = "easywave_device_state_update"
+EVENT_TELEGRAM_RECEIVED: Final = "easywave_telegram_received"
+EVENT_SENSOR_UPDATE: Final = "easywave_sensor_update"
+EVENT_SENSOR_ADDED: Final = "easywave_sensor_added"
+EVENT_FORCE_CREATE: Final = "easywave_force_create"
 
 # Gateway Connection Events
-EVENT_GATEWAY_CONNECTED: Final = "eldat_gateway_connected"
-EVENT_GATEWAY_DISCONNECTED: Final = "eldat_gateway_disconnected"
-EVENT_GATEWAY_STATUS_CHANGED: Final = "eldat_gateway_status_changed"
+EVENT_GATEWAY_CONNECTED: Final = "easywave_gateway_connected"
+EVENT_GATEWAY_DISCONNECTED: Final = "easywave_gateway_disconnected"
+EVENT_GATEWAY_STATUS_CHANGED: Final = "easywave_gateway_status_changed"
 
 # Button Events (basierend auf RX11 EWB_RCV Grundfunktionen)
 # Nur diese drei Events werden gefeuert:
-# 1. eldat_button_press - Taste gedrückt (vom RX11)
-# 2. eldat_button_release - Taste losgelassen (vom RX11)
-# 3. eldat_button_hold - Taste gedrückt halten (emuliert, > 1 Sekunde)
+# 1. easywave_button_press - Taste gedrückt (vom RX11)
+# 2. easywave_button_release - Taste losgelassen (vom RX11)
+# 3. easywave_button_hold - Taste gedrückt halten (emuliert, > 1 Sekunde)

@@ -1,6 +1,6 @@
-"""RX11 USB Transceiver implementation for ELDAT integration.
+"""RX11 USB Transceiver implementation for EASYWAVE integration.
 
-This package uses a Python implementation for the ELDAT RX11 transceiver.
+This package uses a Python implementation for the EASYWAVE RX11 transceiver.
 """
 
 from .transceiver import RX11Transceiver

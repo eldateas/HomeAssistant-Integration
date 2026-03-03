@@ -1,4 +1,4 @@
-"""Transceiver module for ELDAT integrations."""
+"""Transceiver module for EASYWAVE integrations."""
 
 from .base import BaseTransceiver, TransceiverCapabilities, TransceiverType, DeviceInfo
 from .factory import TransceiverFactory

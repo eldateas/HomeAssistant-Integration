@@ -1,4 +1,4 @@
-"""Support for Eldat select entities."""
+"""Support for Easywave select entities."""
 from __future__ import annotations
 
 import logging
@@ -11,13 +11,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN
-from .coordinator import EldatCoordinator
+from .coordinator import EasywaveCoordinator
 from .entity_specs import create_entity_specs_for_device
 
 _LOGGER = logging.getLogger(__name__)
 
 # Event name used for button presses (matches coordinator.py)
-EVENT_BUTTON_SHORT_PRESS = "eldat_button_press"
+EVENT_BUTTON_SHORT_PRESS = "easywave_button_press"
 
 
 async def async_setup_entry(
@@ -25,8 +25,27 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the Eldat select platform."""
-    coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    """Set up the Easywave select platform."""
+    from homeassistant.helpers import entity_registry as er
+    
+    coordinator: EasywaveCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+
+    # Get entity registry to prevent duplicate unique_ids
+    entity_registry = er.async_get(hass)
+    existing_unique_ids = set()
+    
+    # Collect all existing unique_ids for selects in this integration
+    if entity_registry:
+        for entity_entry in entity_registry.entities.values():
+            # Only look at selects for our integration and config entry
+            if (entity_entry.platform == "easywave" and 
+                entity_entry.config_entry_id == config_entry.entry_id and
+                entity_entry.domain == "select"):
+                if entity_entry.unique_id:
+                    existing_unique_ids.add(entity_entry.unique_id)
+                    _LOGGER.debug("Found existing select unique_id: %s", entity_entry.unique_id[-20:])
+    
+    _LOGGER.debug("Checking %d existing select unique_ids for duplicates", len(existing_unique_ids))
 
     selects = []
     
@@ -47,7 +66,7 @@ async def async_setup_entry(
             _LOGGER.info("📝 Creating %d select entities for device %s (%s)", 
                         len(select_specs), device_name, device_type)
             for entity_spec in select_specs:
-                selects.append(EldatSelect(coordinator, serial_number, device_info, entity_spec))
+                selects.append(EasywaveSelect(coordinator, serial_number, device_info, entity_spec))
     
     if selects:
         _LOGGER.info("📝 Adding %d select entities to Home Assistant", len(selects))
@@ -58,14 +77,14 @@ async def async_setup_entry(
     _LOGGER.info("✅ Select platform setup complete")
 
 
-class EldatSelect(SelectEntity):
-    """Representation of an Eldat select entity for grouped button state."""
+class EasywaveSelect(SelectEntity):
+    """Representation of an Easywave select entity for grouped button state."""
 
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: dict,
         entity_spec: dict,
@@ -81,14 +100,19 @@ class EldatSelect(SelectEntity):
         self._attr_current_option = None
         
         # Set up entity attributes
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_state_select")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_state_select")
         self._attr_name = entity_spec.get("name", f"{device_info.get('name', 'Transmitter')} State")
         self._attr_icon = entity_spec.get("icon", "mdi:form-select")
         
         # Device info for device registry - check if device exists to preserve user-defined names
+        # Use UUID-based identifier when available
+        device_identifier = device_info['registration_id']
         from homeassistant.helpers import device_registry as dr
         device_registry = dr.async_get(coordinator.hass)
-        existing_device = device_registry.async_get_device(identifiers={(DOMAIN, serial_number)})
+        existing_device = device_registry.async_get_device(identifiers={(DOMAIN, device_identifier)})
+        if not existing_device:
+            # Fallback: try legacy serial-based identifier
+            existing_device = device_registry.async_get_device(identifiers={(DOMAIN, serial_number)})
         
         if existing_device and existing_device.name:
             # Use existing name to preserve name_by_user
@@ -97,15 +121,18 @@ class EldatSelect(SelectEntity):
             # New device - use default name
             device_name = device_info.get("name", f"Easywave Transmitter {serial_number}")
         
+        from .const import usb_device_name
+        _mfr, _ = usb_device_name(0x155A, 0x1014)  # default manufacturer
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial_number)},
+            identifiers={(DOMAIN, device_identifier)},
+            serial_number=serial_number,
             name=device_name,
-            manufacturer="ELDAT",
+            manufacturer=_mfr,
             model="Easywave Transmitter",
         )
         
         _LOGGER.debug(
-            "EldatSelect initialized: %s with options %s",
+            "EasywaveSelect initialized: %s with options %s",
             self.unique_id,
             self.options,
         )

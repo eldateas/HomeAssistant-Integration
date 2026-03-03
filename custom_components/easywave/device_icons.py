@@ -1,4 +1,4 @@
-"""Device-specific icons and tooltips for ELDAT integration.
+"""Device-specific icons and tooltips for EASYWAVE integration.
 
 DEPRECATED: Diese Datei wird schrittweise durch Device-Klassen ersetzt.
 Neue Device-Klassen in transceivers/rx11/devices/ sollten Icons und

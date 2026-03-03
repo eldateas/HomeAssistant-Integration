@@ -1,4 +1,4 @@
-"""Device backup management for ELDAT integration.
+"""Device backup management for EASYWAVE integration.
 
 This module handles backup creation, restoration, and management
 for device configurations.
@@ -29,7 +29,7 @@ class DeviceBackup:
         self.config_entry_id = config_entry_id
         self.config_dir = Path(hass.config.config_dir) / DOMAIN
         self.backup_dir = self.config_dir / "backups"
-        self.config_file = self.config_dir / "eldat_devices.json"
+        self.config_file = self.config_dir / "easywave_devices.json"
         
         # Ensure directories exist
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +43,7 @@ class DeviceBackup:
         """
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = self.backup_dir / f"eldat_devices_manual_{timestamp}.json"
+            backup_file = self.backup_dir / f"easywave_devices_manual_{timestamp}.json"
             
             if self.config_file.exists():
                 await self._copy_file(self.config_file, backup_file)
@@ -64,7 +64,7 @@ class DeviceBackup:
             True if backup created successfully
         """
         try:
-            backup_file = self.backup_dir / "eldat_devices_auto.json"
+            backup_file = self.backup_dir / "easywave_devices_auto.json"
             
             if self.config_file.exists():
                 await self._copy_file(self.config_file, backup_file)

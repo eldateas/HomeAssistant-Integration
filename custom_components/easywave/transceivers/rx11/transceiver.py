@@ -13,33 +13,32 @@ from .wrapper import RX11Wrapper
 
 _LOGGER = logging.getLogger(__name__)
 
-# RX11 USB device identifiers
-RX11_VID = 0x155A  # Vendor ID
-RX11_PIDS = [0x1014]  # Product ID - RX11 USB Transceiver Easywave
+# USB device identifiers — derived from the central registry in const.py
+from ...const import SUPPORTED_USB_IDS, is_supported_usb_device, usb_device_name
 
 
 def find_rx11_devices():
-    """Find all connected RX11 USB devices with detailed information."""
+    """Find all connected Easywave USB devices with detailed information.
+    
+    Scans for every (VID, PID) pair registered in USB_DEVICE_NAMES.
+    """
     rx11_devices = []
     
     try:
-        _LOGGER.info("Scanning for RX11 USB devices...")
+        _LOGGER.info("Scanning for Easywave USB devices...")
         all_ports = serial.tools.list_ports.comports()
-        _LOGGER.debug("Found %d total USB devices", len(all_ports))
+        _LOGGER.debug("Found %d total USB ports", len(all_ports))
         
         for port in all_ports:
             _LOGGER.debug("Checking device: %s (VID: 0x%04X, PID: 0x%04X)", 
                          port.device, port.vid or 0, port.pid or 0)
             
-            # Check if device matches RX11 VID/PID
-            if port.vid == RX11_VID and port.pid in RX11_PIDS:
-                # Override manufacturer name for ELDAT devices (VID 0x155A)
-                # USB reports "ELDAT GmbH" but we want just "ELDAT"
-                manufacturer = "ELDAT"
+            if is_supported_usb_device(port.vid, port.pid):
+                mfr, prod = usb_device_name(port.vid, port.pid)
                 device_info = {
                     "device": port.device,
-                    "name": port.description or f"RX11 Device ({port.device})",
-                    "manufacturer": manufacturer,
+                    "name": prod,
+                    "manufacturer": mfr,
                     "serial_number": port.serial_number,
                     "vid": port.vid,
                     "pid": port.pid,
@@ -47,33 +46,33 @@ def find_rx11_devices():
                     "hwid": port.hwid if hasattr(port, 'hwid') else None
                 }
                 rx11_devices.append(device_info)
-                _LOGGER.info("Found RX11 device: %s at %s", device_info["name"], port.device)
+                _LOGGER.info("Found Easywave device: %s at %s", prod, port.device)
         
-        _LOGGER.info("Found %d RX11 device(s)", len(rx11_devices))
+        _LOGGER.info("Found %d Easywave USB device(s)", len(rx11_devices))
         return rx11_devices
         
     except Exception as e:
-        _LOGGER.error("Error scanning for RX11 devices: %s", e)
+        _LOGGER.error("Error scanning for Easywave USB devices: %s", e)
         return []
 
 
 def validate_rx11_device(device_path: str) -> bool:
-    """Validate that a device path points to an RX11 device."""
+    """Validate that a device path points to a supported Easywave USB device."""
     try:
         all_ports = serial.tools.list_ports.comports()
         
         for port in all_ports:
             if port.device == device_path:
-                is_rx11 = port.vid == RX11_VID and port.pid in RX11_PIDS
-                _LOGGER.debug("Device %s validation: VID=0x%04X, PID=0x%04X, is_RX11=%s", 
-                             device_path, port.vid or 0, port.pid or 0, is_rx11)
-                return is_rx11
+                is_valid = is_supported_usb_device(port.vid, port.pid)
+                _LOGGER.debug("Device %s validation: VID=0x%04X, PID=0x%04X, supported=%s", 
+                             device_path, port.vid or 0, port.pid or 0, is_valid)
+                return is_valid
         
         _LOGGER.debug("Device %s not found in system", device_path)
         return False
         
     except Exception as e:
-        _LOGGER.error("Error validating RX11 device %s: %s", device_path, e)
+        _LOGGER.error("Error validating device %s: %s", device_path, e)
         return False
 
 
@@ -158,6 +157,22 @@ class RX11Transceiver(BaseTransceiver):
             self._rx11_wrapper.set_usb_serial_number(serial_number)
         _LOGGER.debug("📋 RX11 USB Serial Number set: %s", serial_number)
     
+    def update_usb_identity(
+        self,
+        serial_number: Optional[str] = None,
+        vid: Optional[int] = None,
+        pid: Optional[int] = None,
+    ) -> None:
+        """Update full USB device identity (serial, VID, PID).
+        
+        Delegates to wrapper which detects stick swaps and invalidates
+        version caches when the physical device has changed.
+        """
+        if self._rx11_wrapper:
+            self._rx11_wrapper.update_usb_identity(
+                serial_number=serial_number, vid=vid, pid=pid,
+            )
+    
     def get_usb_serial_number(self) -> Optional[str]:
         """Get USB serial number for device identification."""
         if self._rx11_wrapper:
@@ -182,6 +197,44 @@ class RX11Transceiver(BaseTransceiver):
             device_info.update(wrapper_info)
         
         return device_info
+
+    def _update_usb_identity_from_device_info(self, device_info: dict) -> None:
+        """Update USB identity from a find_rx11_devices() result dict.
+        
+        Called after a successful VID/PID-based reconnect so the wrapper
+        (and therefore get_usb_serial_number()) reflects the actual stick.
+        """
+        self.update_usb_identity(
+            serial_number=device_info.get("serial_number"),
+            vid=device_info.get("vid"),
+            pid=device_info.get("pid"),
+        )
+
+    async def _refresh_usb_identity_for_connected_device(self) -> None:
+        """Read actual USB serial/VID/PID from the connected port and update identity.
+        
+        Handles the case where a different stick is plugged into the same
+        port — the device_path hasn't changed but the hardware has.
+        """
+        if not self.device_path or not self._hass:
+            return
+        try:
+            import serial.tools.list_ports
+            def _scan():
+                for port in serial.tools.list_ports.comports():
+                    if port.device == self.device_path:
+                        return port
+                return None
+
+            port = await self._hass.async_add_executor_job(_scan)
+            if port and port.vid and port.pid:
+                self.update_usb_identity(
+                    serial_number=port.serial_number,
+                    vid=port.vid,
+                    pid=port.pid,
+                )
+        except Exception as e:
+            _LOGGER.debug("Could not refresh USB identity: %s", e)
 
     def get_connection_health_stats(self) -> dict:
         """Get connection health and error statistics."""
@@ -218,8 +271,7 @@ class RX11Transceiver(BaseTransceiver):
         is_valid = await hass.async_add_executor_job(validate_rx11_device, self.device_path)
         
         if not is_valid:
-            _LOGGER.debug("Device %s is not a valid RX11 device (VID: 0x%04X, PIDs: %s)", 
-                          self.device_path, RX11_VID, [hex(pid) for pid in RX11_PIDS])
+            _LOGGER.debug("Device %s is not a supported Easywave USB device", self.device_path)
             return False
         
         _LOGGER.info("RX11 device %s validated successfully", self.device_path)
@@ -236,11 +288,9 @@ class RX11Transceiver(BaseTransceiver):
         
         If the configured device path is not available, this method will
         search for the device by VID/PID to handle USB port changes.
+        Also works when no device_path is set (offline start) — searches
+        by VID/PID directly.
         """
-        if not self.device_path:
-            _LOGGER.warning("No device path configured for RX11")
-            return False
-            
         # Always check actual connection status, don't trust cached state
         async with self._lock:
             # Add small delay if recently disconnected to allow device to reset
@@ -252,20 +302,26 @@ class RX11Transceiver(BaseTransceiver):
                     _LOGGER.debug("Waiting %.2fs for RX11 device to reset", delay)
                     await asyncio.sleep(delay)
             
-            # First, try the current device path
-            _LOGGER.info("🔌 Connecting to RX11 at %s...", self.device_path)
+            # First, try the current device path (if available)
+            if self.device_path:
+                _LOGGER.info("🔌 Connecting to RX11 at %s...", self.device_path)
             
-            success = await self._try_connect_to_path(self.device_path)
-            if success:
-                return True
+                success = await self._try_connect_to_path(self.device_path)
+                if success:
+                    # Refresh USB identity — a different stick may be on the same port
+                    await self._refresh_usb_identity_for_connected_device()
+                    return True
             
-            # If original path failed, search for device by VID/PID
-            if not hasattr(self, '_search_logged'):
-                _LOGGER.info("⚠️ Connection to %s failed, searching for RX11 device by VID/PID...", 
-                              self.device_path)
-                self._search_logged = True
+            # If original path failed (or no path set), search for device by VID/PID
+            if self.device_path:
+                if not hasattr(self, '_search_logged'):
+                    _LOGGER.info("⚠️ Connection to %s failed, searching for RX11 device by VID/PID...", 
+                                  self.device_path)
+                    self._search_logged = True
+                else:
+                    _LOGGER.debug("Connection to %s failed, searching for alternative device...", self.device_path)
             else:
-                _LOGGER.debug("Connection to %s failed, searching for alternative device...", self.device_path)
+                _LOGGER.debug("No device path configured — searching for RX11 device by VID/PID...")
             
             # Search for RX11 devices asynchronously
             if self._hass:
@@ -274,7 +330,7 @@ class RX11Transceiver(BaseTransceiver):
                 rx11_devices = find_rx11_devices()
             
             if not rx11_devices:
-                _LOGGER.debug("No RX11 USB device found (VID:0x%04X)", RX11_VID)
+                _LOGGER.debug("No supported Easywave USB device found")
                 return False
             
             # Try each found device
@@ -283,7 +339,7 @@ class RX11Transceiver(BaseTransceiver):
                 if new_path == self.device_path:
                     continue  # Already tried this path
                 
-                _LOGGER.info("🔄 USB port changed: %s → %s", self.device_path, new_path)
+                _LOGGER.info("🔄 USB device found: %s → %s", self.device_path or "(none)", new_path)
                 
                 # Update the device path in wrapper
                 old_path = self.device_path
@@ -294,7 +350,9 @@ class RX11Transceiver(BaseTransceiver):
                 
                 success = await self._try_connect_to_path(new_path)
                 if success:
-                    _LOGGER.info("✅ RX11 connected on new port %s (was %s)", new_path, old_path)
+                    # Update USB identity so serial/VID/PID reflect the actual stick
+                    self._update_usb_identity_from_device_info(device_info)
+                    _LOGGER.info("✅ RX11 connected on port %s (was %s)", new_path, old_path or "(none)")
                     return True
             
             _LOGGER.debug("No RX11 device found on any port")
@@ -314,11 +372,13 @@ class RX11Transceiver(BaseTransceiver):
                 
                 success = await self._rx11_wrapper.connect()
                 if success:
-                    # Get version information (cached by wrapper to avoid multiple queries)
-                    if not self._hw_version:
+                    # Always refresh version information after (re)connect
+                    # so that stick swaps are reflected correctly
+                    try:
                         self._hw_version = await self._rx11_wrapper.get_hw_version()
-                    if not self._fw_version:
                         self._fw_version = await self._rx11_wrapper.get_fw_version()
+                    except Exception as ver_err:
+                        _LOGGER.debug("Could not read versions after connect: %s", ver_err)
                     
                     _LOGGER.info("RX11 connected via C library at %s: HW=%s, FW=%s", 
                                device_path, self._hw_version, self._fw_version)
@@ -480,21 +540,21 @@ class RX11Transceiver(BaseTransceiver):
             _LOGGER.error("❌ Error in send_command_to_receiver: %s", e)
             return False
 
-    async def _send_eldat_protocol_command(self, serial_number: str, command: bytes) -> bool:
-        """Send ELDAT protocol command via serial fallback."""
+    async def _send_easywave_protocol_command(self, serial_number: str, command: bytes) -> bool:
+        """Send EASYWAVE protocol command via serial fallback."""
         try:
             if not self._serial_connection or not self._serial_connection.is_open:
-                _LOGGER.error("No serial connection available for ELDAT protocol")
+                _LOGGER.error("No serial connection available for EASYWAVE protocol")
                 return False
             
-            # Convert serial number to device ID for ELDAT protocol
+            # Convert serial number to device ID for EASYWAVE protocol
             try:
                 device_id = int(serial_number) if serial_number.isdigit() else int(serial_number, 16)
             except ValueError:
                 _LOGGER.error("Invalid serial number format: %s", serial_number)
                 return False
                 
-            # Create ELDAT protocol frame
+            # Create EASYWAVE protocol frame
             # Basic frame structure: [Start][Length][Command][DeviceID][Data][Checksum]
             frame = bytearray()
             frame.append(0xAA)  # Start byte
@@ -514,7 +574,7 @@ class RX11Transceiver(BaseTransceiver):
             frame.append(checksum)
             
             # Send frame
-            _LOGGER.debug("Sending ELDAT protocol frame: %s", frame.hex())
+            _LOGGER.debug("Sending EASYWAVE protocol frame: %s", frame.hex())
             self._serial_connection.write(frame)
             await asyncio.sleep(0.2)  # Wait for transmission
             
@@ -523,11 +583,11 @@ class RX11Transceiver(BaseTransceiver):
                 response = self._serial_connection.read(self._serial_connection.in_waiting)
                 _LOGGER.debug("Received response: %s", response.hex())
             
-            _LOGGER.info("✅ ELDAT protocol command sent to device %s", serial_number)
+            _LOGGER.info("✅ EASYWAVE protocol command sent to device %s", serial_number)
             return True
             
         except Exception as e:
-            _LOGGER.error("Error in ELDAT protocol communication: %s", e)
+            _LOGGER.error("Error in EASYWAVE protocol communication: %s", e)
             return False
 
     async def start_telegram_listening(self, callback: Callable) -> bool:
@@ -700,13 +760,13 @@ class RX11Transceiver(BaseTransceiver):
             _LOGGER.error("Error in continuous sending worker for %s: %s", serial_number, e)
 
     async def _setup_simple_serial_connection(self) -> bool:
-        """Set up simple serial connection as fallback with ELDAT protocol support."""
+        """Set up simple serial connection as fallback with EASYWAVE protocol support."""
         try:
-            _LOGGER.info("Setting up ELDAT protocol serial connection to %s", self.device_path)
+            _LOGGER.info("Setting up EASYWAVE protocol serial connection to %s", self.device_path)
             
             self._serial_connection = serial.Serial(
                 port=self.device_path,
-                baudrate=57600,  # Standard ELDAT baud rate
+                baudrate=57600,  # Standard EASYWAVE baud rate
                 timeout=1.0,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
@@ -718,13 +778,13 @@ class RX11Transceiver(BaseTransceiver):
             self._serial_connection.reset_output_buffer()
             
             # Send initialization sequence
-            await self._initialize_eldat_protocol()
+            await self._initialize_easywave_protocol()
             
-            _LOGGER.info("✅ ELDAT protocol serial connection established")
+            _LOGGER.info("✅ EASYWAVE protocol serial connection established")
             return True
             
         except Exception as e:
-            _LOGGER.debug("ELDAT protocol connection failed: %s", e)
+            _LOGGER.debug("EASYWAVE protocol connection failed: %s", e)
             return False
 
     def set_telegram_callback(self, callback: Callable) -> None:
@@ -1088,7 +1148,7 @@ class RX11Transceiver(BaseTransceiver):
                                 measurement_raw = int.from_bytes(info_data[3:5], byteorder='big')
                                 
                                 if measurement_type == 4:  # Temperatur
-                                    # Temperature formula from ELDAT specification:
+                                    # Temperature formula from EASYWAVE specification:
                                     # T = a * n where a = 1/20 K
                                     # Range: n = 0 to 65535
                                     a = 1.0 / 20.0  # K per unit
@@ -1222,7 +1282,7 @@ class RX11Transceiver(BaseTransceiver):
         """Send command to a specific device."""
         try:
             if not self.is_connected:
-                _LOGGER.error("Cannot send command - transceiver not connected")
+                _LOGGER.debug("Cannot send command — transceiver not connected")
                 return False
                 
             # Ensure command is bytes
@@ -1237,29 +1297,29 @@ class RX11Transceiver(BaseTransceiver):
                 # Use RX11 wrapper for command sending with device-specific targeting
                 return await self._rx11_wrapper.rx11_ew_receiver_send_command(serial_number, command)
             else:
-                # Fallback: Implement proper ELDAT protocol commands
-                _LOGGER.info("Using ELDAT protocol fallback for device %s", serial_number[-8:])
-                return await self._send_eldat_protocol_command(serial_number, command)
+                # Fallback: Implement proper EASYWAVE protocol commands
+                _LOGGER.info("Using EASYWAVE protocol fallback for device %s", serial_number[-8:])
+                return await self._send_easywave_protocol_command(serial_number, command)
                     
         except Exception as e:
             _LOGGER.error("Error sending command to device %s: %s", serial_number, e)
             return False
 
-    async def _send_eldat_protocol_command(self, serial_number: str, command: bytes) -> bool:
-        """Send ELDAT protocol command via serial fallback."""
+    async def _send_easywave_protocol_command(self, serial_number: str, command: bytes) -> bool:
+        """Send EASYWAVE protocol command via serial fallback."""
         try:
             if not self._serial_connection or not self._serial_connection.is_open:
-                _LOGGER.error("No serial connection available for ELDAT protocol")
+                _LOGGER.error("No serial connection available for EASYWAVE protocol")
                 return False
             
-            # Convert serial number to device ID for ELDAT protocol
+            # Convert serial number to device ID for EASYWAVE protocol
             try:
                 device_id = int(serial_number) if serial_number.isdigit() else int(serial_number, 16)
             except ValueError:
                 _LOGGER.error("Invalid serial number format: %s", serial_number)
                 return False
                 
-            # Create ELDAT protocol frame
+            # Create EASYWAVE protocol frame
             # Basic frame structure: [Start][Length][Command][DeviceID][Data][Checksum]
             frame = bytearray()
             frame.append(0xAA)  # Start byte
@@ -1279,7 +1339,7 @@ class RX11Transceiver(BaseTransceiver):
             frame.append(checksum)
             
             # Send frame
-            _LOGGER.debug("Sending ELDAT protocol frame: %s", frame.hex())
+            _LOGGER.debug("Sending EASYWAVE protocol frame: %s", frame.hex())
             self._serial_connection.write(frame)
             await asyncio.sleep(0.2)  # Wait for transmission
             
@@ -1288,15 +1348,15 @@ class RX11Transceiver(BaseTransceiver):
                 response = self._serial_connection.read(self._serial_connection.in_waiting)
                 _LOGGER.debug("Received response: %s", response.hex())
             
-            _LOGGER.info("✅ ELDAT protocol command sent to device %s", serial_number)
+            _LOGGER.info("✅ EASYWAVE protocol command sent to device %s", serial_number)
             return True
             
         except Exception as e:
-            _LOGGER.error("Error in ELDAT protocol communication: %s", e)
+            _LOGGER.error("Error in EASYWAVE protocol communication: %s", e)
             return False
 
-    async def _initialize_eldat_protocol(self) -> bool:
-        """Initialize ELDAT protocol communication."""
+    async def _initialize_easywave_protocol(self) -> bool:
+        """Initialize EASYWAVE protocol communication."""
         try:
             # Send Connect equivalent command
             connect_frame = bytearray([
@@ -1307,7 +1367,7 @@ class RX11Transceiver(BaseTransceiver):
                 0x16   # Checksum (XOR of bytes 1-6)
             ])
             
-            _LOGGER.debug("Sending ELDAT Connect command: %s", connect_frame.hex())
+            _LOGGER.debug("Sending EASYWAVE Connect command: %s", connect_frame.hex())
             self._serial_connection.write(connect_frame)
             await asyncio.sleep(0.2)  # Reduced wait for faster response
             
@@ -1317,14 +1377,14 @@ class RX11Transceiver(BaseTransceiver):
                 _LOGGER.debug("Connect response: %s", response.hex())
                 # Basic validation - should start with 0xAA
                 if response and response[0] == 0xAA:
-                    _LOGGER.info("✅ ELDAT protocol Connect successful")
+                    _LOGGER.info("✅ EASYWAVE protocol Connect successful")
                     return True
             
-            _LOGGER.warning("⚠️ ELDAT protocol Connect - no response received")
+            _LOGGER.warning("⚠️ EASYWAVE protocol Connect - no response received")
             return True  # Continue anyway, device might not respond to init
             
         except Exception as e:
-            _LOGGER.error("Error in ELDAT protocol initialization: %s", e)
+            _LOGGER.error("Error in EASYWAVE protocol initialization: %s", e)
             return False
 
     # EW Receiver Management Methods (Delegate to wrapper)
@@ -1537,7 +1597,7 @@ class RX11Transceiver(BaseTransceiver):
             device_info = {
                 "serial_number": serial_number,
                 "type": device_type,
-                "name": device_name or f"ELDAT {device_type} {serial_number}",
+                "name": device_name or f"EASYWAVE {device_type} {serial_number}",
                 "channels": channels,
                 "detected_via": detected_via,
                 "added_manually": True,

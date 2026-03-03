@@ -1,4 +1,4 @@
-"""Base classes for ELDAT transceivers and devices.
+"""Base classes for EASYWAVE transceivers and devices.
 
 DEPRECATED: This file is kept for backward compatibility.
 All classes have been moved to the 'base' and 'behaviors' submodules.
@@ -19,7 +19,7 @@ Hierarchy: transceiver -> type -> device_type -> button_type
 - button_type: A(0), B(1), C(2), D(3)
 
 This provides a clear, hierarchical naming structure for all operations
-across different ELDAT device types and transceivers.
+across different EASYWAVE device types and transceivers.
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ RX11 = "rx11"
 
 
 class DeviceType(Enum):
-    """Grundlegende Device-Typen basierend auf ELDAT Spezifikation."""
+    """Grundlegende Device-Typen basierend auf EASYWAVE Spezifikation."""
     # EasyWave (EW) Geräte - ohne Sensoren (nur EWneo hat Sensoren)
     EW_RECEIVER = "ew_receiver"
     EW_TRANSMITTER = "ew_transmitter"
@@ -191,7 +191,7 @@ class DeviceInfo:
 
 
 class BaseTransceiver(ABC):
-    """Abstract base class for ELDAT transceivers."""
+    """Abstract base class for EASYWAVE transceivers."""
     
     def __init__(self, device_path: str = None):
         """Initialize the transceiver."""
@@ -378,10 +378,15 @@ class BaseDevice(ABC):
     @property
     def device_info_dict(self) -> Dict[str, Any]:
         """Return device information for Home Assistant."""
+        try:
+            from ..const import usb_device_name
+            mfr, _ = usb_device_name(0x155A, 0x1014)
+        except Exception:
+            mfr = "EASYWAVE EaS GmbH"
         return {
             "identifiers": {("easywave", self.serial_number)},
             "name": self.name,
-            "manufacturer": "ELDAT",
+            "manufacturer": mfr,
             "model": self._get_model_name(),
             "serial_number": self.serial_number,
             "sw_version": self.properties.get("firmware_version"),
@@ -789,8 +794,8 @@ class EntitySpecsMixin:
         
         channel_num = channel if channel > 0 else None
         
-        # Get registration_id suffix for unique entity IDs on re-learning
-        reg_id_suffix = self._get_registration_id_suffix()
+        # Use registration_id (UUID) as unique_id base
+        reg_id = self._get_registration_id()
         
         # If name is explicitly None, don't set a default - HA will use device_class translation
         entity_name = kwargs.get("name")
@@ -801,7 +806,7 @@ class EntitySpecsMixin:
         spec = {
             "type": entity_type,
             "name": entity_name,
-            "unique_id": make_unique_id(self.serial_number, entity_type, channel_num, reg_id_suffix),
+            "unique_id": make_unique_id(reg_id, entity_type, channel_num),
             "channel": channel,
             "device_class": kwargs.get("device_class"),
             "icon": kwargs.get("icon"),
@@ -814,20 +819,9 @@ class EntitySpecsMixin:
         
         return spec
 
-    def _get_registration_id_suffix(self) -> str:
-        """Get registration ID suffix for unique_id generation.
+    def _get_registration_id(self) -> str:
+        """Get the full registration_id (UUID) for unique_id generation.
         
-        Returns a suffix like 'a1b2c3' based on registration_id (WITHOUT underscore),
-        or empty string for backwards compatibility with existing devices.
-        The caller is responsible for adding the underscore if needed (via make_unique_id).
+        Returns the UUID registration_id, or empty string if not available.
         """
-        import hashlib
-        
-        registration_id = self.properties.get("registration_id", "")
-        if not registration_id:
-            return ""
-        
-        # Create a short hash from the registration_id
-        hash_input = str(registration_id).encode('utf-8')
-        hash_hex = hashlib.md5(hash_input).hexdigest()[:6]
-        return hash_hex
+        return self.properties.get("registration_id", "")

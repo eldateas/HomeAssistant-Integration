@@ -1,4 +1,4 @@
-"""Base classes for ELDAT transceivers and devices.
+"""Base classes for EASYWAVE transceivers and devices.
 
 Structured Naming Convention:
 - transceiver_<type>_<device_type>_<operation>: Structured operation naming
@@ -11,7 +11,7 @@ Hierarchy: transceiver -> type -> device_type -> button_type
 - button_type: A(0), B(1), C(2), D(3)
 
 This provides a clear, hierarchical naming structure for all operations
-across different ELDAT device types and transceivers.
+across different EASYWAVE device types and transceivers.
 """
 
 # Export enums

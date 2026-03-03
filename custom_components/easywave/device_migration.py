@@ -60,10 +60,10 @@ async def migrate_to_device_manager(
     # Migrate from device_whitelist.json
     migrated_count += await _migrate_from_whitelist(device_manager, config_dir)
     
-    # Migrate from eldat_device_registry.json
+    # Migrate from easywave_device_registry.json
     migrated_count += await _migrate_from_registry(device_manager, config_dir)
     
-    # Migrate from eldat_devices.json
+    # Migrate from easywave_devices.json
     migrated_count += await _migrate_from_storage(device_manager, config_dir)
     
     # Save migrated data
@@ -90,8 +90,8 @@ async def _cleanup_old_files(config_dir: Path) -> None:
     
     old_files = [
         "device_whitelist.json",
-        "eldat_device_registry.json",
-        "eldat_devices.json",
+        "easywave_device_registry.json",
+        "easywave_devices.json",
         "used_ewb_indices.json",  # Now integrated in registered_devices.json
         "used_ew_receiver_indices.json",  # Now integrated in registered_devices.json
     ]
@@ -185,7 +185,7 @@ async def _migrate_from_registry(
     device_manager: DeviceManager,
     config_dir: Path
 ) -> int:
-    """Migrate devices from eldat_device_registry.json.
+    """Migrate devices from easywave_device_registry.json.
     
     Args:
         device_manager: DeviceManager instance
@@ -194,14 +194,14 @@ async def _migrate_from_registry(
     Returns:
         Number of devices migrated
     """
-    registry_file = config_dir / "eldat_device_registry.json"
+    registry_file = config_dir / "easywave_device_registry.json"
     
     if not registry_file.exists():
-        _LOGGER.debug("No eldat_device_registry.json found")
+        _LOGGER.debug("No easywave_device_registry.json found")
         return 0
     
     try:
-        _LOGGER.info("📋 Migrating from eldat_device_registry.json")
+        _LOGGER.info("📋 Migrating from easywave_device_registry.json")
         
         with open(registry_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -272,7 +272,7 @@ async def _migrate_from_registry(
         
         # Rename old file to indicate it was migrated
         if count > 0:
-            migrated_file = config_dir / "eldat_device_registry.json.migrated"
+            migrated_file = config_dir / "easywave_device_registry.json.migrated"
             registry_file.rename(migrated_file)
             _LOGGER.info("📁 Renamed registry file to .migrated")
         
@@ -287,7 +287,7 @@ async def _migrate_from_storage(
     device_manager: DeviceManager,
     config_dir: Path
 ) -> int:
-    """Migrate devices from eldat_devices.json.
+    """Migrate devices from easywave_devices.json.
     
     Args:
         device_manager: DeviceManager instance
@@ -296,14 +296,14 @@ async def _migrate_from_storage(
     Returns:
         Number of devices migrated
     """
-    storage_file = config_dir / "eldat_devices.json"
+    storage_file = config_dir / "easywave_devices.json"
     
     if not storage_file.exists():
-        _LOGGER.debug("No eldat_devices.json found")
+        _LOGGER.debug("No easywave_devices.json found")
         return 0
     
     try:
-        _LOGGER.info("📋 Migrating from eldat_devices.json")
+        _LOGGER.info("📋 Migrating from easywave_devices.json")
         
         with open(storage_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -354,7 +354,7 @@ async def _migrate_from_storage(
         
         # Rename old file to indicate it was migrated
         if count > 0:
-            migrated_file = config_dir / "eldat_devices.json.migrated"
+            migrated_file = config_dir / "easywave_devices.json.migrated"
             storage_file.rename(migrated_file)
             _LOGGER.info("📁 Renamed storage file to .migrated")
         

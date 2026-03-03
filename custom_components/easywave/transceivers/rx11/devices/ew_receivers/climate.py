@@ -66,6 +66,8 @@ class RX11ClimateReceiver(EntitySpecsMixin, BaseReceiver):
             "button": []
         }
         
+        reg_id = self._get_registration_id()
+        
         # Create button entities for each channel
         for channel in range(self.channel_count):
             channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
@@ -74,7 +76,7 @@ class RX11ClimateReceiver(EntitySpecsMixin, BaseReceiver):
             specs["button"].append({
                 "type": "button",
                 "name": f"{self.name}{channel_suffix} A - Ein/Aus",
-                "unique_id": make_unique_id(self.serial_number, "toggle", channel if self.channel_count > 1 else None),
+                "unique_id": make_unique_id(reg_id, "toggle", channel if self.channel_count > 1 else None),
                 "channel": channel,
                 "button_code": 0,  # TM_BUTTON_A
                 "action": "toggle",

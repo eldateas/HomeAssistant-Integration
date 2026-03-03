@@ -1,4 +1,4 @@
-"""ELDAT services for debugging and maintenance."""
+"""EASYWAVE services for debugging and maintenance."""
 from __future__ import annotations
 
 import logging
@@ -13,7 +13,7 @@ import voluptuous as vol
 from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN, DEVICE_TYPE_CODE_MAP
-from .coordinator import EldatCoordinator
+from .coordinator import EasywaveCoordinator
 from .entity_registry import get_entity_registry
 from .translations import get_language, t_receiver, DEFAULT_LANGUAGE
 from .helpers import build_model_description
@@ -21,12 +21,12 @@ from .helpers import build_model_description
 _LOGGER = logging.getLogger(__name__)
 
 
-def _get_coordinator(hass: HomeAssistant) -> Optional[EldatCoordinator]:
-    """Get the first available ELDAT coordinator."""
+def _get_coordinator(hass: HomeAssistant) -> Optional[EasywaveCoordinator]:
+    """Get the first available EASYWAVE coordinator."""
     if DOMAIN not in hass.data:
         return None
     for entry_id, data in hass.data[DOMAIN].items():
-        if isinstance(data, EldatCoordinator):
+        if isinstance(data, EasywaveCoordinator):
             return data
     return None
 
@@ -41,7 +41,7 @@ SERVICE_UPDATE_TRANSLATIONS = "update_translations"
 # Translation update function
 # ============================================================
 
-async def async_update_device_translations(hass: HomeAssistant, coordinator: EldatCoordinator) -> dict[str, Any]:
+async def async_update_device_translations(hass: HomeAssistant, coordinator: EasywaveCoordinator) -> dict[str, Any]:
     """Update all device names and models in the device registry based on current language.
     
     This function updates the Home Assistant device registry with translated device names
@@ -214,7 +214,7 @@ async def fix_transceiver_device(coordinator, serial_number: str) -> bool:
 # ============================================================
 
 async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Set up ELDAT services."""
+    """Set up EASYWAVE services."""
     
     async def handle_reset_entity_registry(call: ServiceCall) -> None:
         """Handle reset entity registry service call."""
@@ -229,11 +229,11 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
             force_reload = call.data.get("force_reload", True)
             if force_reload:
                 # Get the coordinator
-                coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
+                coordinator: EasywaveCoordinator = hass.data[DOMAIN][entry.entry_id]
                 
                 # Reload all platforms
                 await hass.config_entries.async_reload(entry.entry_id)
-                _LOGGER.info("✅ ELDAT integration reloaded after registry reset")
+                _LOGGER.info("✅ EASYWAVE integration reloaded after registry reset")
                 
         except Exception as e:
             _LOGGER.error("❌ Failed to reset entity registry: %s", e)
@@ -241,7 +241,7 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
     async def handle_reload_sensors(call: ServiceCall) -> None:
         """Handle reload sensors service call."""
         try:
-            coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
+            coordinator: EasywaveCoordinator = hass.data[DOMAIN][entry.entry_id]
             
             # Force reload device configuration and fire events
             await coordinator._load_device_configuration(fire_events=True)
@@ -253,7 +253,7 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
     async def handle_fix_transceiver(call: ServiceCall) -> None:
         """Handle fix transceiver service call."""
         try:
-            coordinator: EldatCoordinator = hass.data[DOMAIN][entry.entry_id]
+            coordinator: EasywaveCoordinator = hass.data[DOMAIN][entry.entry_id]
             serial_number = call.data.get("serial_number")
             
             if not serial_number:
@@ -372,7 +372,7 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
                         result["updated"], result["language"])
             
             # Fire event with results
-            hass.bus.async_fire("eldat_translations_updated", result)
+            hass.bus.async_fire("easywave_translations_updated", result)
         except Exception as e:
             _LOGGER.error("❌ Failed to update translations: %s", e)
     
@@ -383,17 +383,17 @@ async def async_setup_services(hass: HomeAssistant, entry: ConfigEntry) -> None:
         schema=None,
     )
     
-    _LOGGER.info("✅ Registered ELDAT services: %s, %s, %s, %s, %s, %s", 
+    _LOGGER.info("✅ Registered EASYWAVE services: %s, %s, %s, %s, %s, %s", 
                 SERVICE_RESET_ENTITY_REGISTRY, SERVICE_RELOAD_SENSORS, SERVICE_FIX_TRANSCEIVER, 
                 SERVICE_SAVE_DEVICES_TO_REGISTRY, "refresh_entity_specs", SERVICE_UPDATE_TRANSLATIONS)
 
 
 async def async_unload_services(hass: HomeAssistant) -> None:
-    """Unload ELDAT services."""
+    """Unload EASYWAVE services."""
     hass.services.async_remove(DOMAIN, SERVICE_RESET_ENTITY_REGISTRY)
     hass.services.async_remove(DOMAIN, SERVICE_RELOAD_SENSORS)
     hass.services.async_remove(DOMAIN, SERVICE_FIX_TRANSCEIVER)
     hass.services.async_remove(DOMAIN, "refresh_entity_specs")
     hass.services.async_remove(DOMAIN, SERVICE_SAVE_DEVICES_TO_REGISTRY)
     hass.services.async_remove(DOMAIN, SERVICE_UPDATE_TRANSLATIONS)
-    _LOGGER.info("🗑️ Unloaded ELDAT services")
+    _LOGGER.info("🗑️ Unloaded EASYWAVE services")

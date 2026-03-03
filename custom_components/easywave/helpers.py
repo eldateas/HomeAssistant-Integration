@@ -1,4 +1,4 @@
-"""Helper utilities for Eldat integration config flow.
+"""Helper utilities for Easywave integration config flow.
 
 Contains learning helper and device entity determination utilities extracted from config_flow.
 """
@@ -76,7 +76,7 @@ async def run_learning(coordinator, match_fn: Callable[[dict], Optional[dict]], 
 def battery_percentage_from_level(battery_level: int | None) -> int:
     """Convert the battery level (0-7) into a percentage (0-100%).
 
-    ELDAT devices report battery level as 0-7:
+    EASYWAVE devices report battery level as 0-7:
     - 0 = weak/low battery (~10%)
     - 7 = full battery (100%)
     - 1-6 = intermediate levels

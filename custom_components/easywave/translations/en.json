@@ -463,7 +463,7 @@
         "title": "Device Already Exists",
         "description": "**This Easywave transmitter is already learned!**\n\nThe transmitter code is already used as **{device_name}** in Home Assistant.\nPlease repeat the process and use a transmitter that has not been learned yet.",
         "menu_options": {
-          "device_transmitter_learn_start": "🔄 Learn Another Transmitter",
+          "device_transmitter_learn_start": "🔄 Restart Learning",
           "device_transmitter_description": "⬅️ Back"
         }
       },
@@ -582,7 +582,7 @@
         "title": "Operating Mode",
         "description": "Which operating mode would you like to use?",
         "menu_options": {
-          "device_receiver_mode_impulse": "⚪ IMPULSE (1-Button)",
+          "device_receiver_mode_impulse": "⚪ PULSE (1-Button)",
           "device_receiver_mode_on_off": "⚪ ON/OFF (2-Button)",
           "device_receiver_mode_up_down": "⚪ UP/DOWN (2-Button)",
           "device_receiver_mode_up_stop_down": "⚪ UP/STOP/DOWN (3-Button)",
@@ -710,15 +710,15 @@
       "_comment_manual_advanced": "===== MANUAL & ADVANCED OPTIONS =====",
       "show_all_devices": {
         "title": "Show All USB Devices",
-        "description": "Found: {total_devices} USB devices ({eldat_devices} Easywave devices).\n\n{warning}",
+        "description": "Found: {total_devices} USB devices ({easywave_devices} Easywave devices).\n\n{warning}",
         "data": {
           "device_path": "Select USB Device",
           "device_name": "Integration Name"
         }
       },
       "manual": {
-        "title": "Enter ELDAT USB Device Manually",
-        "description": "Enter the path to your ELDAT USB device:\n\n{example_paths}",
+        "title": "Enter EASYWAVE USB Device Manually",
+        "description": "Enter the path to your EASYWAVE USB device:\n\n{example_paths}",
         "data": {
           "device_path": "Device Path",
           "device_name": "Integration Name"
@@ -729,8 +729,8 @@
         }
       },
       "usb_confirm": {
-        "title": "Confirm ELDAT USB Device",
-        "description": "ELDAT USB device found at {device_path}. Would you like to add it?",
+        "title": "Confirm EASYWAVE USB Device",
+        "description": "EASYWAVE USB device found at {device_path}. Would you like to add it?",
         "data": {
           "device_name": "Integration Name"
         }
@@ -745,7 +745,7 @@
       "learning_failed": "Device learning failed.",
       "no_coordinator": "No coordinator available.",
       "no_rx11_found": "No RX11 USB Transceiver found. Please connect the RX11 to a USB port and click 'Search Again'.",
-      "no_devices_found": "No ELDAT USB devices found. Connect your device and refresh the list.",
+      "no_devices_found": "No EASYWAVE USB devices found. Connect your device and refresh the list.",
       "no_usb_devices_found": "No USB devices found.",
       "no_device_selected": "No device selected.",
       "device_type_mismatch": "Detected device type does not match selection.",
@@ -760,7 +760,7 @@
       "unknown": "Unknown error occurred"
     },
     "abort": {
-      "not_eldat_device": "Not an Easywave device",
+      "not_easywave_device": "Not an Easywave device",
       "already_configured": "Device is already configured",
       "device_already_exists": "This transmitter is already learned and cannot be overwritten.",
       "invalid_discovery_info": "Invalid discovery information",

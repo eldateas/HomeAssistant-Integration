@@ -1,4 +1,4 @@
-"""Enumerations for ELDAT transceivers and devices."""
+"""Enumerations for EASYWAVE transceivers and devices."""
 from __future__ import annotations
 
 from enum import Enum
@@ -19,7 +19,7 @@ class TransceiverType(Enum):
 
 
 class DeviceType(Enum):
-    """Grundlegende Device-Typen basierend auf ELDAT Spezifikation."""
+    """Grundlegende Device-Typen basierend auf EASYWAVE Spezifikation."""
     # EasyWave (EW) Geräte - ohne Sensoren (nur EWneo hat Sensoren)
     EW_RECEIVER = "ew_receiver"
     EW_TRANSMITTER = "ew_transmitter"

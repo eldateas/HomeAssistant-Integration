@@ -1,4 +1,4 @@
-"""Light (dimmer) entities for ELDAT receivers."""
+"""Light (dimmer) entities for EASYWAVE receivers."""
 from __future__ import annotations
 
 import asyncio
@@ -17,8 +17,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, EVENT_FORCE_CREATE
-from .coordinator import EldatCoordinator
-from .entity import EldatEntity
+from .coordinator import EasywaveCoordinator
+from .entity import EasywaveEntity
 from .device_icons import get_entity_config_for_device
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,10 +29,28 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up light entities for ELDAT devices."""
+    """Set up light entities for EASYWAVE devices."""
     from .const import EVENT_DEVICE_ADDED
+    from homeassistant.helpers import entity_registry as er
 
-    coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator: EasywaveCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+
+    # Get entity registry to prevent duplicate unique_ids
+    entity_registry = er.async_get(hass)
+    existing_unique_ids = set()
+    
+    # Collect all existing unique_ids for lights in this integration
+    if entity_registry:
+        for entity_entry in entity_registry.entities.values():
+            # Only look at lights for our integration and config entry
+            if (entity_entry.platform == "easywave" and 
+                entity_entry.config_entry_id == config_entry.entry_id and
+                entity_entry.domain == "light"):
+                if entity_entry.unique_id:
+                    existing_unique_ids.add(entity_entry.unique_id)
+                    _LOGGER.debug("Found existing light unique_id: %s", entity_entry.unique_id[-20:])
+    
+    _LOGGER.debug("Checking %d existing light unique_ids for duplicates", len(existing_unique_ids))
 
     lights: list[LightEntity] = []
 
@@ -46,12 +64,9 @@ async def async_setup_entry(
             if entity_spec.get("type") != "light":
                 continue
             try:
-                lt = EldatEWReceiverDimmer(coordinator, serial, device_info, entity_spec)
-                if not coordinator.is_entity_created(lt.unique_id):
-                    lights.append(lt)
-                    coordinator.mark_entity_created(lt.unique_id, lt.name)
-                else:
-                    _LOGGER.warning("Light: Skipping duplicate light with unique_id: %s", lt.unique_id)
+                lt = EasywaveEWReceiverDimmer(coordinator, serial, device_info, entity_spec)
+                lights.append(lt)
+                coordinator.mark_entity_created(lt.unique_id, lt.name)
             except Exception as e:
                 _LOGGER.error("Error creating light for %s: %s", serial, e)
 
@@ -59,106 +74,44 @@ async def async_setup_entry(
         async_add_entities(lights)
         _LOGGER.info("✅ Added %d light entities", len(lights))
 
-    async def _handle_device_added(event):
-        try:
-            serial = event.data.get("serial_number")
-            device_info = event.data.get("device_info")
-            
-            _LOGGER.debug("Light: Handling device added event for %s with device_info: %s", serial, device_info)
-            
-            # First try to get specs from event data (direct entities)
-            specs = [e for e in event.data.get("entities", []) if e.get("type") == "light"]
-            if not specs:
-                # Try from entity_info structure
-                entity_info = event.data.get("entity_info", {})
-                specs = [e for e in entity_info.get("entities", []) if e.get("type") == "light"]
-            if not specs:
-                # Fallback: get specs from device_info
-                specs = [e for e in device_info.get("entities", []) if e.get("type") == "light"]
-            
-            _LOGGER.debug("Light: Found %d light specs for %s: %s", len(specs), serial, specs)
-
-            new = []
-            for spec in specs:
-                try:
-                    # Check if this is an EWneo device
-                    if device_info.get("neo_device"):
-                        # EWneo light entity
-                        lt = EldatEWneoLight(coordinator, serial, device_info, spec)
-                        _LOGGER.info("🔧 Created EWneo light entity for device %s", serial[-8:])
-                    else:
-                        # Regular light entity
-                        lt = EldatEWReceiverDimmer(coordinator, serial, device_info, spec)
-                    
-                    _LOGGER.debug("Light: Created light entity with unique_id: %s", lt.unique_id)
-                    
-                    # Check if this entity already exists in Home Assistant
-                    entity_registry = er.async_get(hass)
-                    existing_entity = entity_registry.async_get_entity_id("light", DOMAIN, lt.unique_id)
-                    
-                    if existing_entity:
-                        _LOGGER.debug("Light: Entity with unique_id %s already exists as %s, skipping", lt.unique_id, existing_entity)
-                        continue
-                    
-                    if not coordinator.is_entity_created(lt.unique_id):
-                        new.append(lt)
-                        coordinator.mark_entity_created(lt.unique_id, lt.name)
-                        _LOGGER.debug("Light: Added new light entity with unique_id: %s", lt.unique_id)
-                    else:
-                        _LOGGER.warning("Light: Skipping duplicate light with unique_id: %s from event", lt.unique_id)
-                except Exception as e:
-                    _LOGGER.error("Light: Error creating light from event for %s: %s", serial, e)
-            
-            if new:
-                async_add_entities(new)
-                _LOGGER.info("Light: Added %d light entities for %s", len(new), serial)
-            else:
-                _LOGGER.debug("Light: No new light entities to add for %s", serial)
-        except Exception as e:
-            _LOGGER.error("Light: Error handling device added for lights: %s", e)
-
-    config_entry.async_on_unload(hass.bus.async_listen(EVENT_DEVICE_ADDED, _handle_device_added))
-    
-    # Force create handler
-    async def _handle_force_create(event):
-        try:
-            serial_number = event.data.get("serial_number")
-            entity_type = event.data.get("entity_type")
-            device_info = event.data.get("device_info")
-            
-            if entity_type != "light" or not serial_number or not device_info:
-                return
-                
-            _LOGGER.info("🔧 Force creating light entities for device %s", serial_number)
-            
-            # Create light entities from entity specs
-            from .entity_specs import create_entity_specs_for_device
-            entity_specs = create_entity_specs_for_device(serial_number, device_info)
-            light_entities = entity_specs.get("light", [])
-            
-            new_lights = []
-            for entity_spec in light_entities:
+    # ═══ CENTRAL DISPATCHER ═══
+    # Create async handler for this platform to be called by central dispatcher
+    async def _handle_light_from_dispatcher(serial_number: str, device_info: Dict[str, Any], entity_specs: List[Dict[str, Any]]) -> None:
+        """Handle light entity creation for a device.
+        
+        Called by central dispatcher with entity specs already prepared.
+        This replaces all the old event listener logic.
+        """
+        new_lights = []
+        for spec in entity_specs:
+            try:
                 if device_info.get("neo_device"):
-                    new_lights.append(EldatEWneoLight(coordinator, serial_number, device_info, entity_spec))
+                    lt = EasywaveEWneoLight(coordinator, serial_number, device_info, spec)
                 else:
-                    new_lights.append(EldatEWReceiverDimmer(coordinator, serial_number, device_info, entity_spec))
-                    
-            if new_lights:
-                async_add_entities(new_lights)
-                _LOGGER.info("✅ Force-created %d light entities for device %s", len(new_lights), serial_number)
+                    lt = EasywaveEWReceiverDimmer(coordinator, serial_number, device_info, spec)
                 
-        except Exception:
-            _LOGGER.exception("Error force-creating light entities")
+                if not coordinator.is_entity_created(lt.unique_id):
+                    new_lights.append(lt)
+                    coordinator.mark_entity_created(lt.unique_id, lt.name)
+                else:
+                    _LOGGER.debug("Light: Skipping duplicate light with unique_id: %s", lt.unique_id)
+            except Exception as e:
+                _LOGGER.error("Light: Error creating light for %s: %s", serial_number[-8:], e)
+        
+        if new_lights:
+            async_add_entities(new_lights)
+            _LOGGER.debug("Added %d light entities for %s", len(new_lights), serial_number[-8:])
     
-    config_entry.async_on_unload(hass.bus.async_listen(EVENT_FORCE_CREATE, _handle_force_create))
+    # Register handler with central dispatcher
+    coordinator.register_platform_handler("light", _handle_light_from_dispatcher)
 
 
-class EldatEWReceiverDimmer(EldatEntity, LightEntity):
+class EasywaveEWReceiverDimmer(EasywaveEntity, LightEntity):
     """Light/dimmer entity created from entity specification with operating mode support."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -174,7 +127,8 @@ class EldatEWReceiverDimmer(EldatEntity, LightEntity):
         if base_unique_id:
             self._attr_unique_id = base_unique_id
         else:
-            self._attr_unique_id = make_unique_id(serial_number, f"light_{self._receiver_kind}_mode{self._operating_mode}", self._channel)
+            uid_base = device_info['registration_id']
+            self._attr_unique_id = make_unique_id(uid_base, f"light_{self._receiver_kind}_mode{self._operating_mode}", self._channel)
         
         # Operating mode and button configuration
         self._button_config = entity_spec.get("button_config", {})
@@ -405,12 +359,12 @@ class EldatEWReceiverDimmer(EldatEntity, LightEntity):
             _LOGGER.error("Error adjusting brightness continuously for %s: %s", self._attr_unique_id, e)
 
 
-class EldatEWneoLight(EldatEntity, LightEntity):
+class EasywaveEWneoLight(EasywaveEntity, LightEntity):
     """EWneo light entity with bidirectional EWB_CHANGE_STATE control."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -469,7 +423,8 @@ class EldatEWneoLight(EldatEntity, LightEntity):
     def unique_id(self) -> str:
         """Return unique ID for this light."""
         from .helpers_unique_id import make_unique_id
-        return self._entity_spec.get("unique_id") or make_unique_id(self._serial_number, "light", self._channel)
+        uid_base = self._device_info['registration_id']
+        return self._entity_spec.get("unique_id") or make_unique_id(uid_base, "light", self._channel)
 
     @property
     def is_on(self) -> bool:
@@ -543,7 +498,7 @@ class EldatEWneoLight(EldatEntity, LightEntity):
                     self.hass.add_job(self._async_update_state_from_parsed, parsed_state)
         
         # Register the event listener
-        self.hass.bus.async_listen("eldat_ewneo_state_update", handle_ewneo_state_update)
+        self.hass.bus.async_listen("easywave_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo light %s: Registered state update event listener", self._serial_number[-8:])
     
     async def _async_update_state_from_parsed(self, parsed_state: Dict[str, Any]) -> None:

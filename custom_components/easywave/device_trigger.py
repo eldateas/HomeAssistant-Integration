@@ -1,4 +1,4 @@
-"""Device triggers for ELDAT integration.
+"""Device triggers for EASYWAVE integration.
 
 This module provides device triggers for Easywave Transmitter button presses,
 allowing users to create automations based on button events directly
@@ -209,7 +209,7 @@ async def async_get_triggers(
     
     triggers = []
     
-    # Check if this is an ELDAT device
+    # Check if this is an EASYWAVE device
     if not any(identifier[0] == DOMAIN for identifier in device.identifiers):
         return []
     
@@ -377,13 +377,13 @@ async def async_attach_trigger(
     
     # Map trigger types to event types (RX11 grundfunktionen)
     event_type_map = {
-        TRIGGER_TYPE_BUTTON_PRESS: "eldat_button_press",        # Taste gedrückt / Zustandswechsel
-        TRIGGER_TYPE_BUTTON_RELEASE: "eldat_button_release",    # Taste losgelassen
-        TRIGGER_TYPE_CHANNEL_ON: "eldat_button_press",          # Channel ON = press
-        TRIGGER_TYPE_CHANNEL_OFF: "eldat_button_release",       # Channel OFF = release
+        TRIGGER_TYPE_BUTTON_PRESS: "easywave_button_press",        # Taste gedrückt / Zustandswechsel
+        TRIGGER_TYPE_BUTTON_RELEASE: "easywave_button_release",    # Taste losgelassen
+        TRIGGER_TYPE_CHANNEL_ON: "easywave_button_press",          # Channel ON = press
+        TRIGGER_TYPE_CHANNEL_OFF: "easywave_button_release",       # Channel OFF = release
     }
     
-    event_type = event_type_map.get(trigger_type, "eldat_button_press")
+    event_type = event_type_map.get(trigger_type, "easywave_button_press")
     
     # Reverse translation map: translated label -> raw event value
     label_to_event_value = {

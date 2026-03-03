@@ -12,7 +12,7 @@ from threading import Lock
 _LOGGER = logging.getLogger(__name__)
 
 
-class EldatEntityRegistry:
+class EasywaveEntityRegistry:
     """Lightweight in-memory entity tracker for the current session only.
     
     This class does NOT persist entity information - it only tracks entities created
@@ -74,8 +74,10 @@ class EldatEntityRegistry:
             # Remove from removal tracking
             self._devices_being_removed.discard(device_serial)
             
-            # Clean up session entities for this device (use startswith for safety)
-            entities_to_remove = [e for e in self._session_entities if e.startswith(device_serial)]
+            # Clean up session entities for this device (match by serial or UUID prefix)
+            serial_lower = device_serial.lower()
+            entities_to_remove = [e for e in self._session_entities 
+                                  if e.lower().startswith(serial_lower) or e.startswith(device_serial)]
             for entity_id in entities_to_remove:
                 self._session_entities.discard(entity_id)
                 
@@ -91,15 +93,15 @@ class EldatEntityRegistry:
 
 
 # Global instance to be shared across all platforms
-_entity_registry: Optional[EldatEntityRegistry] = None
+_entity_registry: Optional[EasywaveEntityRegistry] = None
 
 
-def get_entity_registry() -> EldatEntityRegistry:
+def get_entity_registry() -> EasywaveEntityRegistry:
     """Get the global entity registry instance."""
     global _entity_registry
     if _entity_registry is None:
-        _entity_registry = EldatEntityRegistry()
-        _LOGGER.info("🚀 Initialized global ELDAT entity registry")
+        _entity_registry = EasywaveEntityRegistry()
+        _LOGGER.info("🚀 Initialized global EASYWAVE entity registry")
     return _entity_registry
 
 
@@ -108,5 +110,5 @@ def reset_entity_registry() -> None:
     global _entity_registry
     if _entity_registry:
         _entity_registry.clear()
-    _entity_registry = EldatEntityRegistry()
-    _LOGGER.info("🔄 Reset global ELDAT entity registry")
+    _entity_registry = EasywaveEntityRegistry()
+    _LOGGER.info("🔄 Reset global EASYWAVE entity registry")

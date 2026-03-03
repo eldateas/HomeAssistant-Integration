@@ -266,9 +266,9 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
             # Add translation_key for proper HA translation
             entity_spec["translation_key"] = sensor_type  # "temperature", "humidity", etc.
             
-            # For Neo sensors, use ALWAYS a deterministic unique_id basedonly on serial + sensor_type
-            # NO registration_id suffix - this ensures entities remain stable across re-learning
-            entity_spec["unique_id"] = f"{self.serial_number}_{sensor_type}"
+            # Use registration_id (UUID) as unique_id base
+            reg_id = self._get_registration_id()
+            entity_spec["unique_id"] = f"{reg_id}_{sensor_type}"
             
             # Add sensor type identifier for value retrieval
             entity_spec["sensor_type"] = sensor_type
@@ -284,9 +284,9 @@ class EWneoSensor(SensorBehaviorMixin, EntitySpecsMixin, BaseSensor):
         )
         # Add translation_key for proper HA translation
         battery_warning_spec["translation_key"] = "battery_warning"
-        # For Neo sensors, use ALWAYS a deterministic unique_id based only on serial + sensor_type
-        # NO registration_id suffix - this ensures entities remain stable across re-learning
-        battery_warning_spec["unique_id"] = f"{self.serial_number}_battery_warning"
+        # Use registration_id (UUID) as unique_id base
+        reg_id = self._get_registration_id()
+        battery_warning_spec["unique_id"] = f"{reg_id}_battery_warning"
         battery_warning_spec["sensor_type"] = "battery_warning"
         specs["binary_sensor"].append(battery_warning_spec)
         

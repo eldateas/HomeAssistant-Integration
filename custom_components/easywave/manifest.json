@@ -1,7 +1,7 @@
 {
   "domain": "easywave",
   "name": "Easywave",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "documentation": "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs/index.md",
   "dependencies": [],
   "codeowners": [
@@ -33,7 +33,8 @@
     {
       "vid": "155A",
       "pid": "1014",
-      "description": "*eldat*"
+      "manufacturer": "EASYWAVE*",
+      "description": "*RX11*"
     }
   ],
   "zeroconf": [],

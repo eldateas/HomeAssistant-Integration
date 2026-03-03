@@ -463,7 +463,7 @@
         "title": "Gerät bereits vorhanden",
         "description": "**Dieser Easywave Sender ist bereits eingelernt!**\n\nDer Sendecode wird schon als **{device_name}** in Home Assistant verwendet.\nBitte wiederholen Sie den Vorgang und verwenden Sie einen noch nicht eingelernten Sender.",
         "menu_options": {
-          "device_transmitter_learn_start": "🔄 weiteren Sender einlernen",
+          "device_transmitter_learn_start": "🔄 Einlernen wiederholen",
           "device_transmitter_description": "⬅️ Zurück"
         }
       },
@@ -711,15 +711,15 @@
       "_comment_manual_advanced": "===== MANUAL & ADVANCED OPTIONS (Manuelle & Erweiterte Optionen) =====",
       "show_all_devices": {
         "title": "Alle USB-Geräte anzeigen",
-        "description": "Gefunden: {total_devices} USB-Geräte ({eldat_devices} Easywave-Geräte).\n\n{warning}",
+        "description": "Gefunden: {total_devices} USB-Geräte ({easywave_devices} Easywave-Geräte).\n\n{warning}",
         "data": {
           "device_path": "USB-Gerät auswählen",
           "device_name": "Name der Integration"
         }
       },
       "manual": {
-        "title": "ELDAT USB Gerät manuell eingeben",
-        "description": "Geben Sie den Pfad zu Ihrem ELDAT USB-Gerät ein:\n\n{example_paths}",
+        "title": "EASYWAVE USB Gerät manuell eingeben",
+        "description": "Geben Sie den Pfad zu Ihrem EASYWAVE USB-Gerät ein:\n\n{example_paths}",
         "data": {
           "device_path": "Gerätepfad",
           "device_name": "Name der Integration"
@@ -730,8 +730,8 @@
         }
       },
       "usb_confirm": {
-        "title": "ELDAT USB Gerät bestätigen",
-        "description": "ELDAT USB Gerät bei {device_path} gefunden. Möchten Sie es hinzufügen?",
+        "title": "EASYWAVE USB Gerät bestätigen",
+        "description": "EASYWAVE USB Gerät bei {device_path} gefunden. Möchten Sie es hinzufügen?",
         "data": {
           "device_name": "Name der Integration"
         }
@@ -746,7 +746,7 @@
       "learning_failed": "Geräte-Anlernen fehlgeschlagen.",
       "no_coordinator": "Kein Coordinator verfügbar.",
       "no_rx11_found": "Kein RX11 USB Transceiver gefunden. Bitte schließen Sie den RX11 an einen USB-Port an und klicken Sie auf 'Erneut suchen'.",
-      "no_devices_found": "Keine ELDAT USB-Geräte gefunden. Verbinden Sie Ihr Gerät und aktualisieren Sie die Liste.",
+      "no_devices_found": "Keine EASYWAVE USB-Geräte gefunden. Verbinden Sie Ihr Gerät und aktualisieren Sie die Liste.",
       "no_usb_devices_found": "Keine USB-Geräte gefunden.",
       "no_device_selected": "Kein Gerät ausgewählt.",
       "device_type_mismatch": "Erkannter Gerätetyp passt nicht zur Auswahl.",
@@ -761,7 +761,7 @@
       "unknown": "Unbekannter Fehler aufgetreten"
     },
     "abort": {
-      "not_eldat_device": "Kein Easywave-Gerät",
+      "not_easywave_device": "Kein Easywave-Gerät",
       "already_configured": "Gerät ist bereits konfiguriert",
       "device_already_exists": "Dieser Sender ist bereits eingelernt und kann nicht überschrieben werden.",
       "invalid_discovery_info": "Ungültige Discovery-Informationen",

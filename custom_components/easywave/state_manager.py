@@ -1,12 +1,12 @@
-"""Consolidated State Manager - Speichert alle persistierten Daten in einer Datei.
+"""Simplified State Manager - DEPRECATED/REDUCED
 
-Dieses Modul konsolidiert alle persistierten Daten:
-- Entity-unique IDs
-- Registrierte Geräte
-- EWB-Index-Tracking
-- EWneo-Receiver-Index-Tracking
+This module is kept for backwards compatibility but most of its functionality
+has been moved to:
+- DeviceManager: Device information persistence
+- IndexAllocator: Index tracking and allocation
+- HA Entity Registry: Entity persistence
 
-in einer einzelnen JSON-Datei für einfaches Backup.
+This module now only handles optional dashboard entity state.
 """
 from __future__ import annotations
 
@@ -27,17 +27,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class StateManager:
-    """Verwaltet alle persistierten Integrations-Daten in einer Datei.
+    """Simplified State Manager - DEPRECATED
     
-    Diese konsolidierte Lösung:
-    - Speichert eine einzige JSON-Datei (~/.homeassistant/easywave_state_<entry_id>.json)
-    - Wird automatisch vom HA-Standard-Backup erfasst
-    - Enthält alle Indexe, Device-Listen und Entity-Informationen
-    - Ermöglicht leichte Migration zwischen Installationen
+    This class is kept for backwards compatibility. Most functionality has been
+    moved to DeviceManager and IndexAllocator. This now only handles optional
+    dashboard entity state tracking.
+    
+    DO NOT: Store devices, indices, or entity registry information here.
+    Use DeviceManager/IndexAllocator instead.
     """
     
     def __init__(self, hass: HomeAssistant, config_entry_id: str):
-        """Initialisiert StateManager.
+        """Initialisiert StateManager (vereinfacht - nur Dashboard-Zustände).
         
         Args:
             hass: Home Assistant instance
@@ -47,21 +48,20 @@ class StateManager:
         self.config_entry_id = config_entry_id
         self._lock = asyncio.Lock()
         
-        # Single consolidated state file in .homeassistant/ (auto-backed up by HA)
+        # Single state file in .homeassistant/ (auto-backed up by HA)
         backup_dir = Path(hass.config.config_dir)
         self.state_file = backup_dir / f"easywave_state_{config_entry_id}.json"
         
-        # In-memory state cache
+        # In-memory state cache - ONLY for dashboard entities
         self._state: Dict[str, Any] = {
-            "entity_unique_ids": set(),
-            "entity_metadata": {},
-            "registered_devices": {},
-            "ewb_indices": {},
-            "ew_receiver_indices": {},
+            # Dashboard entity state tracking (optional)
+            "dashboard_entities": {},  # Optional: for dashboard widgets
+            # Entity unique IDs tracking (for state persistence)
+            "entity_unique_ids": set(),  # Track which entities we've seen
         }
     
     async def load(self) -> bool:
-        """Lädt alle State-Daten aus Datei.
+        """Lädt State-Daten aus Datei (vereinfacht).
         
         Returns:
             True wenn erfolgreich, False bei Fehler
@@ -76,21 +76,16 @@ class StateManager:
                 
                 data = await self._read_json_file(self.state_file)
                 
-                # Load entity tracking
-                entity_uids = set(data.get("entity_unique_ids", []))
-                self._state["entity_unique_ids"] = entity_uids
-                self._state["entity_metadata"] = data.get("entity_metadata", {})
+                # Load only dashboard entities (everything else moved)
+                self._state["dashboard_entities"] = data.get("dashboard_entities", {})
                 
-                # Load device data
-                self._state["registered_devices"] = data.get("registered_devices", {})
-                self._state["ewb_indices"] = data.get("ewb_indices", {})
-                self._state["ew_receiver_indices"] = data.get("ew_receiver_indices", {})
+                # Load entity_unique_ids and convert back from list to set
+                unique_ids_list = data.get("entity_unique_ids", [])
+                self._state["entity_unique_ids"] = set(unique_ids_list) if unique_ids_list else set()
                 
-                loaded_count = len(entity_uids)
-                _LOGGER.info("✅ Geladen: %d Entities, %d Devices, %d EWB-Indizes", 
-                            loaded_count,
-                            len(self._state["registered_devices"]),
-                            len(self._state["ewb_indices"]))
+                _LOGGER.info("✅ Geladen: %d Dashboard-Entities, %d Entity-IDs", 
+                            len(self._state["dashboard_entities"]),
+                            len(self._state["entity_unique_ids"]))
                 
                 return True
                 
@@ -110,21 +105,16 @@ class StateManager:
                     "version": "2.0",
                     "created_at": datetime.now().isoformat(),
                     "config_entry_id": self.config_entry_id,
-                    "entity_count": len(self._state["entity_unique_ids"]),
-                    "device_count": len(self._state["registered_devices"]),
-                    "entity_unique_ids": sorted(list(self._state["entity_unique_ids"])),
-                    "entity_metadata": self._state["entity_metadata"],
-                    "registered_devices": self._state["registered_devices"],
-                    "ewb_indices": self._state["ewb_indices"],
-                    "ew_receiver_indices": self._state["ew_receiver_indices"],
+                    "entity_count": len(self._state.get("entity_unique_ids", set())),
+                    "entity_unique_ids": sorted(list(self._state.get("entity_unique_ids", set()))),
+                    "dashboard_entities": self._state.get("dashboard_entities", {}),
                 }
                 
                 await self._write_json_file(self.state_file, data)
                 
-                _LOGGER.info("💾 Gespeichert: %d Entities, %d Devices in %s",
+                _LOGGER.debug("💾 Gespeichert: %d Entity-IDs in %s",
                             data["entity_count"],
-                            data["device_count"],
-                            self.state_file)
+                            self.state_file.name)
                 
                 return True
                 
@@ -221,12 +211,14 @@ class StateManager:
         Returns:
             Anzahl der gelöschten Dateien
         """
+        # ⚠️ DO NOT add registered_devices.json here!
+        # It is the coordinator's PRIMARY data source (read/written by
+        # _load_registered_devices / _save_registered_devices).
+        # Deleting it causes data loss and forces migration from the
+        # incomplete managed_devices.json.
         old_files = [
             Path(self.hass.config.config_dir) / "easywave" / f"entity_persistence_{self.config_entry_id}.json",
             Path(self.hass.config.config_dir) / "easywave" / f"entity_persistence_{self.config_entry_id}_backup.json",
-            Path(self.hass.config.config_dir) / "eldat" / "registered_devices.json",
-            Path(self.hass.config.config_dir) / "eldat" / "used_ewb_indices.json",
-            Path(self.hass.config.config_dir) / "eldat" / "used_ew_receiver_indices.json",
         ]
         
         deleted_count = 0

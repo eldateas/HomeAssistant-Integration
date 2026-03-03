@@ -11,7 +11,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class TransceiverFactory:
-    """Factory for creating ELDAT transceivers."""
+    """Factory for creating EASYWAVE transceivers."""
     
     _registry = {
         TransceiverType.RX11: RX11Transceiver,

@@ -1,4 +1,4 @@
-"""Modern config flow for ELDAT integration with modular transceiver support."""
+"""Modern config flow for EASYWAVE integration with modular transceiver support."""
 from __future__ import annotations
 
 import asyncio
@@ -60,14 +60,14 @@ def get_docs_url(step_id: str) -> str:
     return f"{DOCS_URL_BASE}step_{step_id}.md"
 
 
-class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Modern config flow for ELDAT with transceiver modularity."""
+class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Modern config flow for EASYWAVE with transceiver modularity."""
 
     VERSION = 2
 
     def __init__(self):
         """Initialize flow."""
-        _LOGGER.info("ModernEldatConfigFlow.__init__ called")
+        _LOGGER.info("ModernEasywaveConfigFlow.__init__ called")
         self._transceiver_type: TransceiverType | None = None
         self._discovered_devices: list[dict[str, Any]] = []
         self._device_path: str | None = None
@@ -120,7 +120,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # If integration already configured, go to device adding flow
         existing_entries = self._async_current_entries()
         if existing_entries:
-            _LOGGER.info("ELDAT Integration already configured - redirecting to device flow")
+            _LOGGER.info("EASYWAVE Integration already configured - redirecting to device flow")
             return await self.async_step_device()
 
         # Automatically detect and setup transceiver
@@ -180,8 +180,12 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         vid = first_device.get("vid", 0x155A)
         pid = first_device.get("pid", 0x1014)
         serial_number = first_device.get("serial_number", "unknown")
-        manufacturer = first_device.get("manufacturer", "ELDAT")
-        product_name = first_device.get("name", "RX11 Device")
+        from .const import usb_device_name
+        _mfr_fallback, _prod_fallback = usb_device_name(
+            first_device.get("vid"), first_device.get("pid")
+        )
+        manufacturer = first_device.get("manufacturer") or _mfr_fallback
+        product_name = first_device.get("name") or _prod_fallback
         
         # Create unique ID from USB serial number (or device path as fallback)
         unique_id = f"rx11_{serial_number}" if serial_number != "unknown" else device_path
@@ -2050,8 +2054,8 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 try:
                     from homeassistant.helpers import device_registry as dr
                     device_reg = dr.async_get(self.hass)
-                    # Find device by identifier
-                    ha_device = device_reg.async_get_device(identifiers={(DOMAIN, receiver_serial)})
+                    # Find device by identifier (supports both UUID and serial)
+                    ha_device = coordinator._find_ha_device_entry(receiver_serial)
                     if ha_device:
                         # Use name_by_user if set, otherwise use HA device name
                         existing_device_name = ha_device.name_by_user or ha_device.name
@@ -2303,7 +2307,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             friendly_type_name = get_ewneo_device_name(device_type_code, lang)
             suggested_name = self._learned_device.get("name", f"Easywave neo {t_receiver(lang)} #{ewneo_index + 1}")
         else:
-            suggested_name = self._learned_device.get("name", f"ELDAT Device ({serial_number})")
+            suggested_name = self._learned_device.get("name", f"EASYWAVE Device ({serial_number})")
             description = (
                 f"✅ **Device successfully detected!**\n\n"
                 f"**🔍 Detected device info:**\n"
@@ -2591,7 +2595,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 dev_reg = dr.async_get(self.hass)
                 ent_reg = er.async_get(self.hass)
                 
-                existing_device = dev_reg.async_get_device(identifiers={(DOMAIN, serial_number)})
+                existing_device = coordinator._find_ha_device_entry(serial_number)
                 if existing_device:
                     _LOGGER.info("🧹 Found existing device in HA registry, purging activity log...")
                     
@@ -2618,6 +2622,15 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             _LOGGER.info("✅ Activity log purged for device entities")
                         except Exception as e:
                             _LOGGER.warning("⚠️ Could not purge entity history: %s", e)
+                
+                # Ensure registration_id exists BEFORE entity spec generation.
+                # register_device_permanently() would also create one, but
+                # _determine_device_entities() needs it earlier.
+                if not device_data.get('registration_id'):
+                    import uuid
+                    device_data['registration_id'] = uuid.uuid4().hex
+                    _LOGGER.info("🆔 Pre-assigned registration_id for %s: %s",
+                                serial_number[-8:], device_data['registration_id'][:8])
                 
                 # Determine specific device properties and entities to create
                 entity_info = self._determine_device_entities()
@@ -2662,9 +2675,7 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 # IMPORTANT: Check if a device with this identifier already exists
                 # and clear any user-customized name to prevent old names from persisting
-                existing_device = device_registry.async_get_device(
-                    identifiers={(DOMAIN, serial_number)}
-                )
+                existing_device = coordinator._find_ha_device_entry(serial_number)
                 if existing_device:
                     _LOGGER.info("🔄 Found existing device entry, clearing user customizations...")
                     # Clear name_by_user to use the new name
@@ -2694,9 +2705,14 @@ class ModernEldatConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     except Exception as e:
                         _LOGGER.debug("Could not clear entity customizations: %s", e)
                 
+                # Use UUID-based registration_id as device identifier so each
+                # learn cycle creates a completely fresh HA device (no tombstone
+                # collision with previously disabled/deleted devices).
+                device_identifier = device_data['registration_id']
                 device_entry = device_registry.async_get_or_create(
                     config_entry_id=entries[0].entry_id,
-                    identifiers={(DOMAIN, serial_number)},
+                    identifiers={(DOMAIN, device_identifier)},
+                    serial_number=serial_number,
                     name=device_name,
                     model=model,
                 )
@@ -2937,4 +2953,4 @@ class InvalidDevice(Exception):
 
 
 # Alias for Home Assistant to find the config flow
-ConfigFlow = ModernEldatConfigFlow
+ConfigFlow = ModernEasywaveConfigFlow

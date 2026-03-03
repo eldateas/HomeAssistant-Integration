@@ -147,7 +147,7 @@ except ImportError as e:
 class RX11DeviceFactory:
     """Factory class for creating RX11-specific device instances."""
     
-    # ELDAT Device Type Mappings
+    # EASYWAVE Device Type Mappings
     DEVICE_TYPE_MAPPING = {
         # EasyWave (EW) Geräte - Numeric IDs (ohne Sensoren)
         0x10: DeviceType.EW_RECEIVER,

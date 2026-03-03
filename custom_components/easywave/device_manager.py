@@ -1,4 +1,4 @@
-"""Unified Device Manager for ELDAT integration.
+"""Unified Device Manager for EASYWAVE integration.
 
 This module provides a centralized, simplified device management system
 where the whitelist is the single source of truth. All devices must be
@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class DeviceType(IntEnum):
-    """Device types for ELDAT devices."""
+    """Device types for EASYWAVE devices."""
     UNKNOWN = 0x00
     EW_TRANSMITTER = 0x01      # Easywave Transmitter (Transmitter)
     EW_RECEIVER = 0x02         # Easywave Receiver (Receiver)
@@ -45,7 +45,7 @@ class DeviceAvailability(IntEnum):
 
 @dataclass
 class ManagedDevice:
-    """Represents a managed device in the ELDAT system.
+    """Represents a managed device in the EASYWAVE system.
     
     This is the single source of truth for all device information.
     All devices must be registered in the whitelist to be managed.
@@ -59,8 +59,15 @@ class ManagedDevice:
     availability: DeviceAvailability = DeviceAvailability.UNKNOWN
     last_seen: Optional[str] = None       # ISO timestamp of last contact
     
-    # Optional attributes
-    rx11_index: Optional[int] = None      # RX11 index for receivers (0-255)
+    # Unified index management (consolidation from separate index files)
+    indices: Optional[Dict[str, int]] = None  # {'ewb': 5, 'ew_receiver': 3, 'rx11': 42, ...}
+    index_allocation_date: Optional[str] = None  # ISO timestamp when index was allocated
+    allocation_gateway: Optional[str] = None  # Gateway serial that allocated the index
+    
+    # Legacy attribute (kept for backwards compatibility, now in indices dict)
+    rx11_index: Optional[int] = None      # RX11 index for receivers (0-255) - DEPRECATED use indices['rx11']
+    
+    # Device attributes
     area: Optional[str] = None            # Home Assistant area
     battery_level: Optional[int] = None   # Battery level (0-100)
     signal_strength: Optional[int] = None # Signal strength (RSSI)
@@ -78,15 +85,30 @@ class ManagedDevice:
         result = asdict(self)
         # Convert enum to value
         result['availability'] = self.availability.value
+        
+        # Ensure rx11_index is synced with indices dict for backwards compatibility
+        if self.indices and 'rx11' in self.indices:
+            result['rx11_index'] = self.indices['rx11']
+        
         return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> ManagedDevice:
-        """Create instance from dictionary."""
+        """Create instance from dictionary with backwards compatibility."""
         # Handle availability enum
         if 'availability' in data:
             if isinstance(data['availability'], int):
                 data['availability'] = DeviceAvailability(data['availability'])
+        
+        # Backwards compatibility: migrate rx11_index to indices dict if needed
+        if 'rx11_index' in data and data['rx11_index'] is not None:
+            if 'indices' not in data or data['indices'] is None:
+                data['indices'] = {}
+            if not isinstance(data['indices'], dict):
+                data['indices'] = {}
+            # Don't override if already in indices
+            if 'rx11' not in data['indices']:
+                data['indices']['rx11'] = data['rx11_index']
         
         return cls(**data)
     
@@ -123,9 +145,12 @@ class DeviceManager:
         
         # In-memory device storage (serial_number -> ManagedDevice)
         self._devices: Dict[str, ManagedDevice] = {}
+        # Backup of previous state (for defensive loading - never lose data)
+        self._devices_backup: Dict[str, ManagedDevice] = {}
         
         # Secondary indices for quick lookups
         self._rx11_index_to_serial: Dict[int, str] = {}  # RX11 index -> serial
+        self._rx11_index_to_serial_backup: Dict[int, str] = {}  # Backup
         
         # Thread safety
         self._lock = asyncio.Lock()
@@ -134,20 +159,24 @@ class DeviceManager:
         self.config_dir.mkdir(parents=True, exist_ok=True)
     
     async def load(self) -> bool:
-        """Load all devices from persistent storage.
+        """Load all devices from persistent storage (defensive - preserves state on errors).
         
         Returns:
-            True if loaded successfully, False otherwise
+            True if loaded successfully, False otherwise (but preserves previous state)
         """
         async with self._lock:
             try:
+                # STEP 1: Backup current state (for defensive recovery)
+                self._devices_backup = dict(self._devices)
+                self._rx11_index_to_serial_backup = dict(self._rx11_index_to_serial)
+                
                 if not self.devices_file.exists():
                     _LOGGER.info("📂 No device file found, starting with empty device list")
                     return True
                 
                 _LOGGER.info("📖 Loading managed devices from %s", self.devices_file)
                 
-                # Read file asynchronously
+                # STEP 2: Read file
                 data = await self._read_json_file(self.devices_file)
                 
                 # Validate structure
@@ -157,36 +186,56 @@ class DeviceManager:
                 
                 # Check version and migrate if needed
                 file_version = data.get('version', '1.0')
-                if file_version != '2.0':
-                    _LOGGER.info("🔄 Migrating device data from version %s to 2.0", file_version)
+                if file_version not in ('2.0', '3.0'):
+                    _LOGGER.info("🔄 Migrating device data from version %s to 3.0", file_version)
                     data = await self._migrate_version(data, file_version)
                 
-                # Clear current state
-                self._devices.clear()
-                self._rx11_index_to_serial.clear()
+                # STEP 3: Load into fresh state (not modifying _devices yet!)
+                temp_devices: Dict[str, ManagedDevice] = {}
+                temp_rx11_map: Dict[int, str] = {}
                 
                 # Load devices
                 devices_data = data.get('devices', {})
                 for serial, device_dict in devices_data.items():
                     try:
                         device = ManagedDevice.from_dict(device_dict)
-                        self._devices[serial] = device
+                        temp_devices[serial] = device
                         
                         # Update secondary indices
-                        if device.rx11_index is not None:
-                            self._rx11_index_to_serial[device.rx11_index] = serial
+                        rx11_idx = None
+                        if device.indices and 'rx11' in device.indices:
+                            rx11_idx = device.indices['rx11']
+                        elif device.rx11_index is not None:
+                            rx11_idx = device.rx11_index
+                        
+                        if rx11_idx is not None:
+                            temp_rx11_map[rx11_idx] = serial
                         
                         _LOGGER.debug("✅ Loaded device: %s (%s)", 
                                      device.name, serial[-8:])
                     except Exception as e:
                         _LOGGER.error("❌ Failed to load device %s: %s", serial[-8:], e)
                 
+                # STEP 4: Only now replace state if all succeeded
+                self._devices = temp_devices
+                self._rx11_index_to_serial = temp_rx11_map
+                
                 _LOGGER.info("✅ Loaded %d managed devices", len(self._devices))
                 return True
                 
             except Exception as e:
                 _LOGGER.error("❌ Failed to load devices: %s", e)
-                return False
+                
+                # RECOVERY: Restore previous state from backup
+                if self._devices_backup:
+                    _LOGGER.warning("🔄 Restoring previous device state from backup")
+                    self._devices = self._devices_backup
+                    self._rx11_index_to_serial = self._rx11_index_to_serial_backup
+                    return False
+                else:
+                    # No backup available, stay in current state
+                    _LOGGER.warning("⚠️ No backup available, keeping current state")
+                    return False
     
     async def _load_backup(self) -> bool:
         """Load from backup file if main file is corrupted."""
@@ -203,8 +252,16 @@ class DeviceManager:
             for serial, device_dict in devices_data.items():
                 device = ManagedDevice.from_dict(device_dict)
                 self._devices[serial] = device
-                if device.rx11_index is not None:
-                    self._rx11_index_to_serial[device.rx11_index] = serial
+                
+                # Update rx11 index mappings from both old and new format
+                rx11_idx = None
+                if device.indices and 'rx11' in device.indices:
+                    rx11_idx = device.indices['rx11']
+                elif device.rx11_index is not None:
+                    rx11_idx = device.rx11_index
+                    
+                if rx11_idx is not None:
+                    self._rx11_index_to_serial[rx11_idx] = serial
             
             _LOGGER.info("✅ Restored %d devices from backup", len(self._devices))
             return True
@@ -225,12 +282,23 @@ class DeviceManager:
                 if self.devices_file.exists():
                     await self._copy_file(self.devices_file, self.backup_file)
                 
-                # Prepare data structure
+                # Build index allocation summary
+                index_allocations = {}
+                for device in self._devices.values():
+                    if device.indices:
+                        for index_type, index_value in device.indices.items():
+                            if index_type not in index_allocations:
+                                index_allocations[index_type] = []
+                            if index_value is not None:
+                                index_allocations[index_type].append(index_value)
+                
+                # Prepare data structure (v3.0 with unified indices)
                 data = {
-                    "version": "2.0",
+                    "version": "3.0",
                     "created_at": datetime.now().isoformat(),
                     "config_entry_id": self.config_entry_id,
                     "device_count": len(self._devices),
+                    "index_allocations": index_allocations,  # New in v3.0: allocation summary
                     "devices": {
                         serial: device.to_dict()
                         for serial, device in self._devices.items()
@@ -253,6 +321,7 @@ class DeviceManager:
         device_type: str,
         name: Optional[str] = None,
         rx11_index: Optional[int] = None,
+        indices: Optional[Dict[str, int]] = None,
         **kwargs
     ) -> ManagedDevice:
         """Add a new device to the whitelist.
@@ -264,12 +333,23 @@ class DeviceManager:
             serial_number: Unique serial number
             device_type: Device type string
             name: Human-readable name (auto-generated if None)
-            rx11_index: Optional RX11 index for receivers
+            rx11_index: Optional RX11 index for receivers (DEPRECATED - use indices instead)
+            indices: Optional dict of index allocations {'ewb': 5, 'ew_receiver': 3, 'rx11': 42}
             **kwargs: Additional device attributes
             
         Returns:
             The created or updated ManagedDevice
         """
+        # Normalize indices: merge rx11_index into indices dict
+        if indices is None:
+            indices = {}
+        if isinstance(indices, dict):
+            indices = dict(indices)  # Make a copy
+        
+        # Backwards compatibility: rx11_index parameter overrides indices['rx11']
+        if rx11_index is not None:
+            indices['rx11'] = rx11_index
+        
         # Check if device already exists
         if serial_number in self._devices:
             _LOGGER.info("🔄 Updating existing device: %s", serial_number[-8:])
@@ -277,12 +357,20 @@ class DeviceManager:
             device.device_type = device_type
             if name:
                 device.name = name
-            if rx11_index is not None:
-                # Update index mapping
-                if device.rx11_index is not None and device.rx11_index in self._rx11_index_to_serial:
-                    del self._rx11_index_to_serial[device.rx11_index]
-                device.rx11_index = rx11_index
-                self._rx11_index_to_serial[rx11_index] = serial_number
+            
+            # Update indices
+            if indices:
+                device.indices = indices
+                device.index_allocation_date = datetime.now().isoformat()
+                
+                # Update rx11 mapping
+                if 'rx11' in indices and indices['rx11'] is not None:
+                    # Remove old mapping
+                    if device.rx11_index is not None and device.rx11_index in self._rx11_index_to_serial:
+                        del self._rx11_index_to_serial[device.rx11_index]
+                    # Add new mapping
+                    self._rx11_index_to_serial[indices['rx11']] = serial_number
+            
             device.updated_at = datetime.now().isoformat()
         else:
             # Create new device
@@ -291,16 +379,17 @@ class DeviceManager:
                 serial_number=serial_number,
                 device_type=device_type,
                 name=name or f"{device_type}_{serial_number[-8:]}",
-                rx11_index=rx11_index,
+                rx11_index=indices.get('rx11') if indices else None,
+                indices=indices if indices else None,
                 created_at=datetime.now().isoformat(),
                 config_entry_id=self.config_entry_id,
                 **kwargs
             )
             self._devices[serial_number] = device
             
-            # Update index mapping
-            if rx11_index is not None:
-                self._rx11_index_to_serial[rx11_index] = serial_number
+            # Update rx11 index mapping
+            if indices and 'rx11' in indices and indices['rx11'] is not None:
+                self._rx11_index_to_serial[indices['rx11']] = serial_number
         
         # Mark as available by default when added
         device.mark_available()

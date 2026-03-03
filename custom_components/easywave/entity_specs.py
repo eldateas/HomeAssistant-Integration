@@ -1,4 +1,4 @@
-"""Entity specification generator for ELDAT devices.
+"""Entity specification generator for EASYWAVE devices.
 
 DEPRECATED: Diese Datei wird schrittweise durch get_entity_specs() 
 in den Device-Klassen (transceivers/rx11/devices/) ersetzt.
@@ -8,7 +8,7 @@ Entity-Spezifikationen selbst generieren.
 """
 from __future__ import annotations
 
-import hashlib
+
 import logging
 from typing import Dict, Any, List, Optional
 
@@ -46,34 +46,20 @@ def _get_device_prop(device_info: Dict[str, Any], key: str, default: Any = None)
 
 
 def _get_registration_id(device_info: Dict[str, Any]) -> str:
-    """Get a short registration ID from device_info.
+    """Get the full registration_id (UUID) from device_info.
     
-    This ID changes when a device is re-learned (new registration_id),
-    but stays the same across restarts (loaded from persistent storage).
-    
-    IMPORTANT: Only uses explicit 'registration_id' field, NOT 'registered_at'.
-    This ensures backwards compatibility - existing devices without 
-    registration_id continue to use their original unique_ids.
+    This UUID is the sole basis for unique_id generation.
+    Each learn cycle creates a new UUID → completely new entities.
     
     Returns:
-        A 6-character hex string based on registration_id,
-        or empty string if not available (backwards compatibility).
+        The full UUID registration_id, or empty string if not available.
     """
-    # Only use explicit registration_id field - NOT registered_at!
-    # This ensures existing devices keep their original unique_ids
-    # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
     registration_id = device_info.get("registration_id", "")
     if not registration_id:
         extra_data = device_info.get("extra_data", {})
         registration_id = extra_data.get("registration_id", "")
     
-    if not registration_id:
-        return ""
-    
-    # Create a short hash from the registration_id
-    hash_input = str(registration_id).encode('utf-8')
-    hash_hex = hashlib.md5(hash_input).hexdigest()[:6]
-    return hash_hex  # Return WITHOUT leading underscore - make_unique_id() will add it
+    return registration_id
 
 
 def create_entity_specs_for_device(serial_number: str, device_info: Dict[str, Any], coordinator=None) -> Dict[str, List[Dict[str, Any]]]:
@@ -154,18 +140,12 @@ def _try_get_specs_from_device_class(serial_number: str, device_info: Dict[str, 
             # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
             registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
             
-            # BUGFIX: If no registration_id exists, generate a DETERMINISTIC one for ALL device types
-            # This ensures unique_id stability across restarts and re-learning
+            # If no registration_id exists, do NOT generate one here.
+            # New devices get a UUID in coordinator.register_device_permanently().
+            # Old devices without registration_id keep legacy unique_ids (backward compat).
             if not registration_id:
-                import hashlib
-                # Use deterministic ID based on device_type + serial_number
-                registration_id = hashlib.md5(f"{device_type}_{serial_number}".encode('utf-8')).hexdigest()
-                device_info["registration_id"] = registration_id
-                # Also store in extra_data if it exists
-                if "extra_data" in device_info and isinstance(device_info["extra_data"], dict):
-                    device_info["extra_data"]["registration_id"] = registration_id
-                _LOGGER.info("🔧 Generated deterministic registration_id for %s %s: %s", 
-                            device_type, serial_number[-8:], registration_id[:6])
+                _LOGGER.debug("📝 No registration_id for %s %s — using legacy unique_id format",
+                            device_type, serial_number[-8:])
             
             if registration_id:
                 init_kwargs["registration_id"] = registration_id
@@ -279,7 +259,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         entities["button"].append({
             "type": "button",
             "name": "",
-            "unique_id": make_unique_id(serial_number, "toggle", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "toggle", None),
             "button_code": 0,  # TM_BUTTON_A
             "action": "toggle",
             "icon": "mdi:gesture-tap-button",
@@ -292,7 +272,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         entities["switch"].append({
             "type": "switch",
             "name": "",
-            "unique_id": make_unique_id(serial_number, "switch", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "switch", None),
             "device_class": "switch",
             "icon": "mdi:light-switch",
             "icon_on": "mdi:light-switch",
@@ -315,7 +295,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         entities["cover"].append({
             "type": "cover",
             "name": "",
-            "unique_id": make_unique_id(serial_number, "cover", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "cover", None),
             "device_class": "shade",
             "icon": "mdi:window-shutter",
             "icon_open": "mdi:window-shutter-open",
@@ -340,7 +320,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         entities["cover"].append({
             "type": "cover",
             "name": "",
-            "unique_id": make_unique_id(serial_number, "motor", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "motor", None),
             "device_class": "shade",
             "icon": "mdi:window-shutter",
             "icon_open": "mdi:window-shutter-open",
@@ -367,7 +347,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         entities["switch"].append({
             "type": "switch",
             "name": "",
-            "unique_id": make_unique_id(serial_number, "heating_cooling_switch", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "heating_cooling_switch", None),
             "device_class": "switch",
             "icon": "mdi:radiator",
             "icon_on": "mdi:radiator",
@@ -398,7 +378,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
             entities["button"].append({
                 "type": "button",
                 "translation_key": button_translation_keys[i],  # Uses translations/*.json
-                "unique_id": make_unique_id(serial_number, f"button_{button_keys[i]}", None, reg_id),
+                "unique_id": make_unique_id(reg_id, f"button_{button_keys[i]}", None),
                 "button_code": i,
                 "action": f"button_{button_keys[i]}",
                 "icon": button_icons[i],
@@ -413,7 +393,7 @@ def _create_ew_receiver_entities_legacy(serial_number: str, device_info: Dict[st
         entities["button"].append({
             "type": "button",
             "name": "",
-            "unique_id": make_unique_id(serial_number, "toggle", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "toggle", None),
             "button_code": 0,
             "action": "toggle",
             "icon": "mdi:gesture-tap-button",
@@ -470,7 +450,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "sensor",
                     "sensor_type": "transmitter_button",
                     "translation_key": button_translation_keys[detected_index],  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "button", detected_index, reg_id),
+                    "unique_id": make_unique_id(reg_id, "button", detected_index),
                     "button": button_labels[detected_index],
                     "button_index": detected_index,
                     "switch_mode": switch_mode,  # "impulse" oder "permanent"
@@ -487,7 +467,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                         "type": "sensor",
                         "sensor_type": "transmitter_button",
                         "translation_key": button_translation_keys[i],  # Uses translations/*.json
-                        "unique_id": make_unique_id(serial_number, "button", i, reg_id),
+                        "unique_id": make_unique_id(reg_id, "button", i),
                         "button": button_labels[i],
                         "button_index": i,
                         "switch_mode": switch_mode,  # "impulse" oder "permanent"
@@ -511,7 +491,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["sensor"].append({
                     "type": "sensor",
                     "translation_key": "last_button",  # Uses translations/*.json (= "Zustand")
-                    "unique_id": make_unique_id(serial_number, "last_button", None, reg_id),
+                    "unique_id": make_unique_id(reg_id, "last_button", None),
                     "switch_mode": switch_mode,  # "impulse" oder "permanent"
                     "icon": "mdi:radiobox-marked",
                     "device_class": "enum",
@@ -529,7 +509,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                 entities["sensor"].append({
                     "type": "sensor",
                     "translation_key": "last_button",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "last_button", None, reg_id),
+                    "unique_id": make_unique_id(reg_id, "last_button", None),
                     "switch_mode": switch_mode,  # "impulse" oder "permanent"
                     "icon": "mdi:radiobox-marked",
                     "device_class": "enum",
@@ -548,7 +528,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
                     "translation_key": "transmitter_state",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "state", None, reg_id),
+                    "unique_id": make_unique_id(reg_id, "state", None),
                     "state_key": "transmitter_state_1",
                     "channel": 0,
                     "device_class": "enum",
@@ -564,7 +544,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
                     "translation_key": "state_ab",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "state", 0, reg_id),
+                    "unique_id": make_unique_id(reg_id, "state", 0),
                     "state_key": "transmitter_state_1",
                     "channel": 0,
                     "device_class": "enum",
@@ -581,7 +561,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "sensor",
                     "sensor_type": "transmitter_state",
                     "translation_key": "state_cd",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "state", 1, reg_id),
+                    "unique_id": make_unique_id(reg_id, "state", 1),
                     "state_key": "transmitter_state_2",
                     "channel": 1,
                     "device_class": "enum",
@@ -606,7 +586,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
                     "translation_key": "transmitter_state_cover",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "state", None, reg_id),
+                    "unique_id": make_unique_id(reg_id, "state", None),
                     "state_key": "transmitter_state_1",
                     "channel": 0,
                     "device_class": "opening",  # Shows 'Geöffnet'/'Geschlossen' in logbook
@@ -624,7 +604,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
                     "translation_key": "state_ab",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "state", 0, reg_id),
+                    "unique_id": make_unique_id(reg_id, "state", 0),
                     "state_key": "transmitter_state_1",
                     "channel": 0,
                     "device_class": "opening",  # Shows 'Geöffnet'/'Geschlossen' in logbook
@@ -645,7 +625,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
                     "type": "binary_sensor",
                     "sensor_type": "transmitter_state",
                     "translation_key": "state_cd",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "state", 1, reg_id),
+                    "unique_id": make_unique_id(reg_id, "state", 1),
                     "state_key": "transmitter_state_2",
                     "channel": 1,
                     "device_class": "opening",  # Shows 'Geöffnet'/'Geschlossen' in logbook
@@ -673,7 +653,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
             "type": "sensor",
             "sensor_type": "transmitter_state",
             "translation_key": "transmitter_state",  # Uses translations/*.json
-            "unique_id": make_unique_id(serial_number, "state", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "state", None),
             "channel": 0,
             "device_class": "enum",
             "options": state_options,
@@ -694,7 +674,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
             entities["binary_sensor"].append({
                 "type": "binary_sensor",
                 "translation_key": button_translation_keys[i],  # Uses translations/*.json
-                "unique_id": make_unique_id(serial_number, f"button", i, reg_id),
+                "unique_id": make_unique_id(reg_id, f"button", i),
                 "button_index": i,
                 "button_label": button_labels[i],
                 "device_class": "button",
@@ -707,7 +687,7 @@ def _create_ew_transmitter_entities_legacy(serial_number: str, device_info: Dict
         "type": "binary_sensor",
         "sensor_type": "battery_warning",
         "translation_key": "battery_warning",  # HA looks up entity.binary_sensor.battery_warning.name
-        "unique_id": make_unique_id(serial_number, "battery_warning", None, reg_id),
+        "unique_id": make_unique_id(reg_id, "battery_warning", None),
         "device_class": "battery",
         "icon": "mdi:battery",
         "has_entity_name": True
@@ -727,7 +707,6 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     
     For EWneo-Sensoren, tries to use the new universal sensor class specs.
     """
-    import hashlib
     entities = _empty_entity_dict()
     # Get registration ID for unique entity creation on re-learning
     # Check both top-level and extra_data (managed_devices.json stores it in extra_data)
@@ -737,21 +716,12 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
         reg_id = _get_registration_id(extra_data)
     registration_id = device_info.get("registration_id") or extra_data.get("registration_id")
     
-    # BUGFIX: If no registration_id exists, generate one based on serial_number
-    # This ensures unique_id stability - the same sensor always gets the same unique_ids
-    # even if registration_id wasn't set at entity creation time
+    # If no registration_id exists for ewneo_sensor, do NOT generate one here.
+    # New devices get a UUID in coordinator.register_device_permanently().
+    # Old devices without registration_id keep legacy unique_ids (backward compat).
     if not registration_id and device_info.get("type") == "ewneo_sensor":
-        # Generate deterministic registration_id from serial number
-        registration_id = hashlib.md5(f"neo_sensor_{serial_number}".encode('utf-8')).hexdigest()
-        # Store it so future calls use the same value
-        device_info["registration_id"] = registration_id
-        # Also store in extra_data if it exists
-        if "extra_data" in device_info and isinstance(device_info["extra_data"], dict):
-            device_info["extra_data"]["registration_id"] = registration_id
-        # Now re-calculate reg_id from the new registration_id using same logic as _get_registration_id()
-        reg_id = hashlib.md5(str(registration_id).encode('utf-8')).hexdigest()[:6]
-        _LOGGER.info("🔧 Generated deterministic registration_id for neo_sensor %s: %s", 
-                    serial_number[-8:], registration_id[:6])
+        _LOGGER.debug("📝 No registration_id for neo_sensor %s — using legacy unique_id format",
+                    serial_number[-8:])
     
     # Check if this is an EWneo-Sensoren (new format)
     device_type = device_info.get("type") or extra_data.get("type", "unknown")
@@ -819,15 +789,15 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
     # Legacy fallback for old EW sensors
     base_name = device_info.get('name', 'Sensor')
     
-    # Temperature sensor - use translation_key for HA translation
-    # For Neo sensors, use DETERMINISTIC unique_id without registration_id suffix
-    # This ensures entities remain stable across re-learning
+    # Use registration_id (UUID) as unique_id base
+    uid_base = reg_id if reg_id else serial_number
+    
     if device_info.get("has_temperature", True):
         entities["sensor"].append({
             "type": "sensor",
             "sensor_type": "temperature",
             "translation_key": "temperature",  # HA looks up entity.sensor.temperature.name
-            "unique_id": f"{serial_number}_temperature",
+            "unique_id": f"{uid_base}_temperature",
             "device_class": "temperature",
             "unit_of_measurement": "°C",
             "icon": "mdi:thermometer",
@@ -841,7 +811,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
             "type": "sensor",
             "sensor_type": "humidity",
             "translation_key": "humidity",  # HA looks up entity.sensor.humidity.name
-            "unique_id": f"{serial_number}_humidity",
+            "unique_id": f"{uid_base}_humidity",
             "device_class": "humidity",
             "unit_of_measurement": "%",
             "icon": "mdi:water-percent",
@@ -854,7 +824,7 @@ def _create_ew_sensor_entities_legacy(serial_number: str, device_info: Dict[str,
         "type": "binary_sensor",
         "sensor_type": "battery_warning",
         "translation_key": "battery_warning",  # HA looks up entity.binary_sensor.battery_warning.name
-        "unique_id": f"{serial_number}_battery_warning",
+        "unique_id": f"{uid_base}_battery_warning",
         "device_class": "battery",
         "icon": "mdi:battery",
         "has_entity_name": True
@@ -884,7 +854,7 @@ def _create_ewneo_entities_legacy(serial_number: str, device_info: Dict[str, Any
                 entities["switch"].append({
                     "type": "switch",
                     "name": None,
-                    "unique_id": make_unique_id(serial_number, "switch", None, reg_id),
+                    "unique_id": make_unique_id(reg_id, "switch", None),
                     "channel": ch,
                     "device_class": "switch",
                     "icon": "mdi:light-switch",
@@ -896,7 +866,7 @@ def _create_ewneo_entities_legacy(serial_number: str, device_info: Dict[str, Any
                 entities["switch"].append({
                     "type": "switch",
                     "translation_key": f"channel_{ch+1}",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "switch", ch, reg_id),
+                    "unique_id": make_unique_id(reg_id, "switch", ch),
                     "channel": ch,
                     "device_class": "switch",
                     "icon": "mdi:light-switch",
@@ -909,7 +879,7 @@ def _create_ewneo_entities_legacy(serial_number: str, device_info: Dict[str, Any
         entities["light"].append({
             "type": "light",
             "name": None,  # Use device name only
-            "unique_id": make_unique_id(serial_number, "light", None, reg_id),
+            "unique_id": make_unique_id(reg_id, "light", None),
             "icon": "mdi:lightbulb-outline",
             "icon_on": "mdi:lightbulb-on",
             "icon_off": "mdi:lightbulb-outline"
@@ -928,7 +898,7 @@ def _create_ewneo_entities_legacy(serial_number: str, device_info: Dict[str, Any
                 entities["cover"].append({
                     "type": "cover",
                     "name": None,
-                    "unique_id": make_unique_id(serial_number, "cover", None, reg_id),
+                    "unique_id": make_unique_id(reg_id, "cover", None),
                     "channel": ch,
                     "device_class": "blind",
                     "icon": "mdi:window-shutter",
@@ -940,7 +910,7 @@ def _create_ewneo_entities_legacy(serial_number: str, device_info: Dict[str, Any
                 entities["cover"].append({
                     "type": "cover",
                     "translation_key": f"channel_{ch+1}",  # Uses translations/*.json
-                    "unique_id": make_unique_id(serial_number, "cover", ch, reg_id),
+                    "unique_id": make_unique_id(reg_id, "cover", ch),
                     "channel": ch,
                     "device_class": "blind",
                     "icon": "mdi:window-shutter",

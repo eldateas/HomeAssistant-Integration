@@ -131,8 +131,10 @@ class EntityMigrationHelper:
             if not entity.unique_id:
                 continue
             
-            # Check if entity belongs to this device (use startswith for safe matching)
-            if not entity.unique_id.startswith(serial_number):
+            # Check if entity belongs to this device (match by UUID or legacy serial)
+            ha_identifier = device_info['registration_id']
+            uid = entity.unique_id
+            if not (uid.startswith(ha_identifier) or uid.startswith(serial_number)):
                 continue
             
             # Check if unique_id matches expected format
@@ -317,7 +319,8 @@ class EntityMigrationHelper:
     async def cleanup_orphaned_entities(
         self,
         config_entry_id: str,
-        valid_serials: Set[str]
+        valid_serials: Set[str],
+        valid_identifiers: Optional[Set[str]] = None
     ) -> int:
         """Remove orphaned entities that don't belong to any valid device.
         
@@ -327,6 +330,7 @@ class EntityMigrationHelper:
         Args:
             config_entry_id: Config entry ID
             valid_serials: Set of valid device serial numbers
+            valid_identifiers: Optional set of registration_ids (UUIDs) to also match
             
         Returns:
             Number of entities removed
@@ -336,8 +340,13 @@ class EntityMigrationHelper:
         
         existing_entities = self._get_existing_entities(config_entry_id)
         
-        if not valid_serials:
-            _LOGGER.info("⚠️ No valid serials provided for orphan cleanup — skipping to prevent data loss")
+        # Combine serial numbers and registration_ids into one set of valid prefixes
+        all_valid_prefixes = set(valid_serials)
+        if valid_identifiers:
+            all_valid_prefixes.update(valid_identifiers)
+        
+        if not all_valid_prefixes:
+            _LOGGER.info("⚠️ No valid serials/identifiers provided for orphan cleanup — skipping to prevent data loss")
             return 0
         
         for entity in existing_entities:
@@ -348,9 +357,9 @@ class EntityMigrationHelper:
             if not entity.unique_id:
                 continue
             
-            # Check if entity belongs to any valid device (use startswith for safe matching)
+            # Check if entity belongs to any valid device (match by UUID or serial prefix)
             belongs_to_valid_device = any(
-                entity.unique_id.startswith(serial) for serial in valid_serials
+                entity.unique_id.startswith(prefix) for prefix in all_valid_prefixes
             )
             
             if not belongs_to_valid_device:
@@ -410,7 +419,8 @@ async def cleanup_legacy_battery_sensors(
             # Check for exact battery sensor (not battery_warning)
             if entity.unique_id and entity.unique_id.endswith("_battery"):
                 # Make sure it's not battery_warning, and use startswith for safe matching
-                if entity.unique_id.startswith(serial_number) and "warning" not in entity.unique_id:
+                ha_identifier = device_info['registration_id']
+                if (entity.unique_id.startswith(ha_identifier) or entity.unique_id.startswith(serial_number)) and "warning" not in entity.unique_id:
                     _LOGGER.info("🔋 Removing legacy battery percentage sensor: %s", entity.entity_id)
                     try:
                         entity_registry.async_remove(entity.entity_id)
@@ -457,8 +467,9 @@ async def cleanup_duplicate_entities(
         if not registration_id:
             continue
         
-        # Find entities for this device (use startswith to avoid substring false-matches)
-        device_entities = [e for e in all_entities if e.unique_id and e.unique_id.startswith(serial_number)]
+        # Find entities for this device (match by UUID or legacy serial)
+        ha_identifier = registration_id
+        device_entities = [e for e in all_entities if e.unique_id and (e.unique_id.startswith(ha_identifier) or e.unique_id.startswith(serial_number))]
         
         # Separate entities with and without registration_id suffix
         entities_with_suffix = []

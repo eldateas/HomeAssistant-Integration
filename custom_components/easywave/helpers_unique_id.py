@@ -81,21 +81,24 @@ def serial_number_fingerprint(serial: str) -> str:
         return serial.strip().upper()
 
 
-def make_unique_id(serial: str, entity_type: str, channel: Optional[int] = None, suffix: Optional[str] = None) -> str:
+def make_unique_id(registration_id: str, entity_type: str, channel: Optional[int] = None, suffix: Optional[str] = None) -> str:
     """Erzeugt eine einheitliche, eindeutige Entity-ID.
     
-    Format: <serial>_<entity_type>_ch<channel>[_suffix]
+    Format: <registration_id>_<entity_type>[_ch<channel>]
+    
+    Die registration_id (UUID) ist der alleinige Geräte-Identifikator.
+    Ein optionaler suffix wird NICHT mehr benötigt (die registration_id
+    selbst ist bereits pro Lernvorgang einzigartig).
     
     Beispiele:
-        - "1234567890abcdef1234567890abcdef_switch_ch1"
-        - "1234567890abcdef1234567890abcdef_sensor_temperature"
-        - "1234567890abcdef1234567890abcdef_binary_sensor_door_ch2_battery"
+        - "b0dcc3b8e54f0b2c413f208747d9f5c8_switch"
+        - "b0dcc3b8e54f0b2c413f208747d9f5c8_cover_ch1"
     
     Args:
-        serial: Seriennummer des Geräts
+        registration_id: UUID-basierte Registrierungs-ID des Geräts
         entity_type: Typ der Entity (switch, sensor, light, etc.)
         channel: Optional: Kanalnummer (für Multi-Channel-Geräte)
-        suffix: Optional: Zusätzlicher Suffix (zB 'battery' für Batterie-Sensor)
+        suffix: IGNORIERT – nur noch aus Kompatibilitätsgründen akzeptiert
         
     Returns:
         Eindeutige Entity-ID
@@ -103,11 +106,11 @@ def make_unique_id(serial: str, entity_type: str, channel: Optional[int] = None,
     Raises:
         ValueError: Wenn Eingaben ungültig sind
     """
-    # Validiere und normalisiere Seriennummer
-    try:
-        serial = normalize_serial_number(serial)
-    except ValueError as e:
-        raise ValueError(f"Ungültige Seriennummer in make_unique_id: {e}")
+    if not registration_id or not isinstance(registration_id, str):
+        raise ValueError(f"registration_id muss ein nicht-leerer String sein: {registration_id!r}")
+    
+    # registration_id ist bereits eine UUID (lowercase hex) – normalisiere trotzdem
+    registration_id = registration_id.strip().lower()
     
     # Validiere entity_type
     if not entity_type or not isinstance(entity_type, str):
@@ -116,7 +119,7 @@ def make_unique_id(serial: str, entity_type: str, channel: Optional[int] = None,
     entity_type = entity_type.lower().strip()
     
     # Baue unique_id zusammen
-    parts = [serial, entity_type]
+    parts = [registration_id, entity_type]
     
     if channel is not None:
         try:
@@ -127,11 +130,7 @@ def make_unique_id(serial: str, entity_type: str, channel: Optional[int] = None,
         except (ValueError, TypeError) as e:
             raise ValueError(f"Ungültige Kanalnummer: {e}")
     
-    if suffix:
-        suffix = str(suffix).lower().strip()
-        if not re.match(r'^[a-z0-9_]+$', suffix):
-            raise ValueError(f"Suffix darf nur alphanumerisch und _ enthalten: {suffix!r}")
-        parts.append(suffix)
+    # suffix wird ignoriert – registration_id ist bereits einzigartig pro Lernvorgang
     
     unique_id = "_".join(parts)
     

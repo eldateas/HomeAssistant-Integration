@@ -1,4 +1,4 @@
-"""Button entities for ELDAT integration with 1.6s press detection system."""
+"""Button entities for EASYWAVE integration with 1.6s press detection system."""
 from __future__ import annotations
 
 import asyncio
@@ -24,8 +24,8 @@ from .const import (
     DEVICE_ICONS,
     EVENT_DEVICE_ADDED,
 )
-from .coordinator import EldatCoordinator
-from .entity import EldatEntity
+from .coordinator import EasywaveCoordinator
+from .entity import EasywaveEntity
 from .entity_registry import get_entity_registry
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,9 +39,27 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ELDAT button entities."""
+    """Set up EASYWAVE button entities."""
+    from homeassistant.helpers import entity_registry as er
     
-    coordinator: EldatCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator: EasywaveCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    
+    # Get entity registry to prevent duplicate unique_ids
+    entity_registry = er.async_get(hass)
+    existing_unique_ids = set()
+    
+    # Collect all existing unique_ids for buttons in this integration
+    if entity_registry:
+        for entity_entry in entity_registry.entities.values():
+            # Only look at buttons for our integration and config entry
+            if (entity_entry.platform == "easywave" and 
+                entity_entry.config_entry_id == config_entry.entry_id and
+                entity_entry.domain == "button"):
+                if entity_entry.unique_id:
+                    existing_unique_ids.add(entity_entry.unique_id)
+                    _LOGGER.debug("Found existing button unique_id: %s", entity_entry.unique_id[-20:])
+    
+    _LOGGER.debug("Checking %d existing button unique_ids for duplicates", len(existing_unique_ids))
     
     # Track devices that already have button entities created during initial setup
     devices_with_button_entities = set()
@@ -58,7 +76,7 @@ async def async_setup_entry(
         if device_type in ["ewneo_transceiver", "ewneo_bidi_transmitter"]:
             # Multi-channel transceivers get individual button entities for sending commands
             for button_id in range(channels):
-                device_buttons.append(EldatButton(
+                device_buttons.append(EasywaveButton(
                     coordinator=coordinator,
                     serial_number=serial_number,
                     device_info=device_info,
@@ -92,14 +110,15 @@ async def async_setup_entry(
         # NOTE: Remove buttons are no longer created - devices can be deleted via the
         # three-dot menu in the integration view (async_remove_config_entry_device)
         
-        # Get button entities from entity_specs (dynamically generated)
-        from .entity_specs import create_entity_specs_for_device
-        entity_specs = create_entity_specs_for_device(serial_number, device_info)
-        button_entities = entity_specs.get("button", [])
+        # PRIORITY: Use stored entity specs from registered_devices.json (SINGLE SOURCE OF TRUTH)
+        stored_entities = device_info.get("entities", [])
+        button_entities = [e for e in stored_entities if e.get("type") == "button"]
         
-        # Fallback: Check if device_info has pre-stored entities
+        # Fallback: regenerate (only for new devices without stored entities)
         if not button_entities:
-            button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
+            from .entity_specs import create_entity_specs_for_device
+            entity_specs = create_entity_specs_for_device(serial_number, device_info)
+            button_entities = entity_specs.get("button", [])
         
         has_action_buttons = False  # Track if device has actual action buttons (not just remove)
         
@@ -132,7 +151,8 @@ async def async_setup_entry(
                         entity_spec["action"] = action
                     
                     # Create standard button
-                    button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
+                    button = EasywaveEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
+                    
                     buttons.append(button)
                     _LOGGER.info("✅ Created Easywave Receiver button: %s (%s)", 
                                 entity_spec.get('translation_key') or entity_spec.get('name'), action)
@@ -163,172 +183,44 @@ async def async_setup_entry(
         _LOGGER.info("✅ Added %d button entities for %d devices", 
                     len(buttons), len(coordinator.get_all_devices()))
     
-    # Listen for new devices and create entities dynamically
-    async def _handle_device_added(event):
-        """Handle new device added events."""
-        event_data = event.data
-        serial_number = event_data.get("serial_number") or event_data.get("serial")
-        device_info = event_data.get("device_info", {})
-        device_type = device_info.get("type") or event_data.get("device_type")
-        force_create = event_data.get("force_create", False)
-        orphaned_repair = event_data.get("orphaned_device_repair", False)
+    # ═══ CENTRAL DISPATCHER ═══
+    # Create async handler for this platform to be called by central dispatcher
+    async def _handle_button_from_dispatcher(serial_number: str, device_info: Dict[str, Any], entity_specs: List[Dict[str, Any]]) -> None:
+        """Handle button entity creation for a device.
         
-        if not serial_number:
-            _LOGGER.debug("No serial number in device added event")
-            return
-        
-        # For orphaned device repair or force_create, always recreate entities
-        if orphaned_repair:
-            _LOGGER.info("🔧 Orphaned device repair: Force creating button entities for %s", serial_number[-8:])
-        elif force_create:
-            _LOGGER.info("🚀 Force create: Creating button entities for %s", serial_number[-8:])
-        else:
-            # Skip if this device already has ACTION button entities created during initial setup
-            # (Remove buttons are universal and should always be created for new devices)
-            if serial_number in devices_with_button_entities:
-                if device_type != "ew_receiver":
-                    _LOGGER.debug("Skipping device %s - action button entities already created during initial setup", serial_number)
-                    return
-                else:
-                    # For Easywave Receivers, check if we actually have entities to create
-                    entity_info = event_data.get("entity_info", {})
-                    button_entities = entity_info.get("entities", [])
-                    if not button_entities:
-                        _LOGGER.debug("Skipping Easywave Receiver %s - no button entities configured", serial_number)
-                        return
-                    else:
-                        _LOGGER.debug("Retrying Easywave Receiver %s - found %d entities to create", serial_number, len(button_entities))
-            
-        _LOGGER.info("🔘 Handling device added event for %s (type: %s)", serial_number, device_type)
-        
-        # NOTE: Remove buttons are no longer created - devices can be deleted via the
-        # three-dot menu in the integration view (async_remove_config_entry_device)
-        
+        Called by central dispatcher with entity specs already prepared.
+        This replaces all the old event listener logic.
+        """
         new_buttons = []
+        device_type = device_info.get("type", "unknown")
         
-        # For Easywave Receivers, create additional configured button entities with press detection
-        if device_type == "ew_receiver":
-            receiver_kind = device_info.get("receiver_kind", "switch")
-            
-            # Skip button creation for heating/cooling receivers - they use switch entities
-            if receiver_kind in ["heating", "cooling", "heating_cooling"]:
-                _LOGGER.debug("Skipping button creation for Easywave Receiver %s (%s) - using switch entity instead", 
-                            serial_number, receiver_kind)
-            else:
-                # Get button entities from entity_specs (dynamically generated)
-                from .entity_specs import create_entity_specs_for_device
-                entity_specs = create_entity_specs_for_device(serial_number, device_info)
-                button_entities = entity_specs.get("button", [])
-                
-                # Fallback to event_info or device_info if entity_specs is empty
-                if not button_entities:
-                    entity_info = event_data.get("entity_info", {})
-                    button_entities = entity_info.get("entities", [])
-                    if not button_entities:
-                        button_entities = [e for e in device_info.get("entities", []) if e.get("type") == "button"]
-                    _LOGGER.debug("Using button entities from device_info for %s: %d buttons", 
-                                serial_number, len(button_entities))
-            
-                # Add configured action buttons (skip remove buttons as we already created one)
-                for entity_spec in button_entities:
-                    try:
-                        # Skip remove buttons as we already created one above
-                        if entity_spec.get("action") == "remove_device":
-                            continue
-                        
-                        # Create standard button
-                        button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
-                        new_buttons.append(button)
-                        _LOGGER.info("✅ Created Easywave Receiver button: %s (%s)", 
-                                    entity_spec.get('translation_key') or entity_spec.get('name'), 
-                                    entity_spec.get('action'))
-                    except Exception as e:
-                        _LOGGER.error("❌ Error creating Easywave Receiver button for %s: %s", serial_number, e)
-        elif device_type == "ew_transmitter":
-            # Easywave Transmitters don't need action buttons - they only send signals
-            _LOGGER.debug("Easywave Transmitter device %s - no button entities needed", serial_number[-8:])
-        else:
-            # For other device types, create additional legacy buttons
-            additional_buttons = _create_buttons_for_device(serial_number, device_info)
-            if additional_buttons:
-                new_buttons.extend(additional_buttons)
-                _LOGGER.debug("Added %d additional legacy button entities for device: %s", 
-                            len(additional_buttons), serial_number)
-        
-        if new_buttons:
-            async_add_entities(new_buttons, update_before_add=False)
-            _LOGGER.info("✅ Added %d button entities for device %s", 
-                       len(new_buttons), serial_number[-8:])
-            # Track this device as having button entities created
-            devices_with_button_entities.add(serial_number)
-            
-            # Update coordinator with entity information
-            entity_ids = []
-            for button in new_buttons:
-                entity_id = getattr(button, '_attr_entity_id', None) or getattr(button, 'entity_id', None)
-                if not entity_id and hasattr(button, '_attr_unique_id'):
-                    # Generate entity_id from unique_id if not set
-                    unique_id = button._attr_unique_id
-                    entity_id = f"button.{unique_id.lower()}"
-                if entity_id:
-                    entity_ids.append(entity_id)
-            
-            if entity_ids:
-                await coordinator.update_device_ha_info(serial_number, entity_ids=entity_ids)
-    
-    # Listen for button-specific device added events
-    async def _handle_button_device_added(event):
-        """Handle button-specific device added events."""
-        event_data = event.data
-        serial_number = event_data.get("serial_number")
-        device_info = event_data.get("device_info", {})
-        button_entities = event_data.get("entities", [])
-        
-        if not serial_number or not button_entities:
-            return
-        
-        # Skip if this device already has button entities created
-        if serial_number in devices_with_button_entities:
-            _LOGGER.debug("Skipping button-specific event for %s - entities already created", serial_number)
-            return
-            
-        _LOGGER.info("🔘 Button-specific event: Creating %d button entities for %s", 
-                   len(button_entities), serial_number)
-        
-        new_buttons = []
-        for entity_spec in button_entities:
+        for entity_spec in entity_specs:
             try:
-                # Skip remove buttons - devices can be deleted via the UI menu
+                # Skip remove buttons as we create them separately
                 if entity_spec.get("action") == "remove_device":
                     continue
                 
-                button = EldatEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
+                button = EasywaveEWReceiverButton(coordinator, serial_number, device_info, entity_spec)
                 new_buttons.append(button)
-                _LOGGER.info("✅ Created button entity: %s (%s)", entity_spec.get('name'), entity_spec.get('action'))
+                _LOGGER.debug("Created button entity: %s (%s)", entity_spec.get('name'), entity_spec.get('action'))
             except Exception as e:
-                _LOGGER.error("❌ Error creating button entity: %s", e)
+                _LOGGER.error("Error creating button for %s: %s", serial_number[-8:], e)
         
         if new_buttons:
             async_add_entities(new_buttons, update_before_add=False)
-            
-            # Give entities time to be properly registered with Home Assistant
-            await asyncio.sleep(0.2)
-            
-            _LOGGER.info("✅ Added %d button entities from button-specific event", len(new_buttons))
-            # Track this device as having button entities created
+            _LOGGER.debug("Added %d button entities for %s", len(new_buttons), serial_number[-8:])
             devices_with_button_entities.add(serial_number)
     
-    # Subscribe to device added events
-    hass.bus.async_listen(EVENT_DEVICE_ADDED, _handle_device_added)
-    hass.bus.async_listen(f"{EVENT_DEVICE_ADDED}_button", _handle_button_device_added)
+    # Register handler with central dispatcher
+    coordinator.register_platform_handler("button", _handle_button_from_dispatcher)
 
 
-class EldatButton(EldatEntity, ButtonEntity):
-    """Basic ELDAT button entity."""
+class EasywaveButton(EasywaveEntity, ButtonEntity):
+    """Basic EASYWAVE button entity."""
     
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         button_id: int,
@@ -338,7 +230,8 @@ class EldatButton(EldatEntity, ButtonEntity):
         
         self._button_id = button_id
         from .helpers_unique_id import make_unique_id
-        self._attr_unique_id = make_unique_id(serial_number, "button", button_id)
+        reg_id = device_info["registration_id"]
+        self._attr_unique_id = make_unique_id(reg_id, "button", button_id)
         
         self._attr_name = f"Button {button_id + 1}"
         
@@ -350,7 +243,7 @@ class EldatButton(EldatEntity, ButtonEntity):
     def available(self) -> bool:
         """Return if entity is available.
         
-        Eldat buttons inherit the RX11 transceiver connection status via via_device 
+        Easywave buttons inherit the RX11 transceiver connection status via via_device 
         linkage.
         """
         return self._is_rx11_connected()
@@ -379,12 +272,12 @@ class EldatButton(EldatEntity, ButtonEntity):
         return bytes([0x02, self._button_id, 0x01])
 
 
-class EWReceiverUIButton(EldatEntity, ButtonEntity):
+class EWReceiverUIButton(EasywaveEntity, ButtonEntity):
     """Easywave Receiver button optimized for Home Assistant UI with explicit short/long press actions."""
     
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -394,7 +287,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         
         # Entity configuration from spec
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{entity_spec.get('action', 'button')}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_{entity_spec.get('action', 'button')}")
         self._attr_name = entity_spec.get("name", "Easywave Receiver Button")
         self._attr_icon = entity_spec.get("icon", "mdi:gesture-tap")
         
@@ -527,7 +420,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                 
                 # Fire unified events basierend auf RX11 Grundfunktionen
                 if press_type == "short":
-                    self.hass.bus.async_fire("eldat_button_press", {
+                    self.hass.bus.async_fire("easywave_button_press", {
                         "device_id": self._serial_number,
                         "entity_id": self.entity_id,
                         "subtype": self._action,
@@ -538,7 +431,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                         "device_name": self._device_info.get("name", "Unknown")
                     })
                 elif press_type == "long_start":
-                    self.hass.bus.async_fire("eldat_button_hold", {
+                    self.hass.bus.async_fire("easywave_button_hold", {
                         "device_id": self._serial_number,
                         "entity_id": self.entity_id,
                         "subtype": self._action,
@@ -549,7 +442,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                         "device_name": self._device_info.get("name", "Unknown")
                     })
                 elif press_type == "long_stop":
-                    self.hass.bus.async_fire("eldat_button_release", {
+                    self.hass.bus.async_fire("easywave_button_release", {
                         "device_id": self._serial_number,
                         "entity_id": self.entity_id,
                         "subtype": self._action,
@@ -617,7 +510,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
                 success = await self._execute_short_press()
                 if success:
                     # Fire press event (RX11 grundfunktion)
-                    self.hass.bus.async_fire("eldat_button_press", {
+                    self.hass.bus.async_fire("easywave_button_press", {
                         "device_id": self._serial_number,
                         "entity_id": self.entity_id,
                         "subtype": self._action,
@@ -653,7 +546,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         success = await self._start_unified_continuous_sending()
         if success:
             # Fire hold event (emuliert, > 1 sekunde)
-            self.hass.bus.async_fire("eldat_button_hold", {
+            self.hass.bus.async_fire("easywave_button_hold", {
                 "device_id": self._serial_number,
                 "entity_id": self.entity_id,
                 "subtype": self._action,
@@ -670,7 +563,7 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
         
         # Fire release event (RX11 grundfunktion)
         if success:
-            self.hass.bus.async_fire("eldat_button_release", {
+            self.hass.bus.async_fire("easywave_button_release", {
                 "device_id": self._serial_number,
                 "entity_id": self.entity_id,
                 "subtype": self._action,
@@ -913,15 +806,15 @@ class EWReceiverUIButton(EldatEntity, ButtonEntity):
 
 
 # EWReceiverLongPressButton class removed - no longer needed
-# Easywave Receiver buttons now use EldatEWReceiverButton without longpress support
+# Easywave Receiver buttons now use EasywaveEWReceiverButton without longpress support
 
 
-class EldatEWReceiverButton(EldatEntity, ButtonEntity):
-    """ELDAT button entity with LongPress support for Easywave Receiver stateless buttons."""
+class EasywaveEWReceiverButton(EasywaveEntity, ButtonEntity):
+    """EASYWAVE button entity with LongPress support for Easywave Receiver stateless buttons."""
     
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -931,7 +824,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
         
         # Entity configuration from spec
         self._entity_spec = entity_spec
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_{entity_spec.get('action', 'button')}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_{entity_spec.get('action', 'button')}")
         
         # Use translation_key for HA's translation system if available
         translation_key = entity_spec.get("translation_key")
@@ -939,7 +832,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
             self._attr_translation_key = translation_key
             self._attr_has_entity_name = True
         else:
-            self._attr_name = entity_spec.get("name", "ELDAT Button")
+            self._attr_name = entity_spec.get("name", "EASYWAVE Button")
         
         self._operating_mode = entity_spec.get("operating_mode", 1)
         self._button_config = entity_spec.get("button_config", {})
@@ -1038,7 +931,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
                 _LOGGER.info("✅ Simple press successful: %s", self._entity_label)
                 
                 # Fire press event (RX11 grundfunktion)
-                self.hass.bus.async_fire("eldat_button_press", {
+                self.hass.bus.async_fire("easywave_button_press", {
                     "device_id": self._serial_number,
                     "entity_id": self.entity_id,
                     "subtype": self._action if hasattr(self, '_action') else "press",
@@ -1082,7 +975,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
                                    self._entity_label, self._channel)
                         
                         # Fire hold event (emuliert, kontinuierliches Senden)
-                        self.hass.bus.async_fire("eldat_button_hold", {
+                        self.hass.bus.async_fire("easywave_button_hold", {
                             "device_id": self._serial_number,
                             "entity_id": self.entity_id,
                             "subtype": self._action if hasattr(self, '_action') else "hold",
@@ -1120,7 +1013,7 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
                                    self._entity_label, self._channel)
                         
                         # Fire release event (RX11 grundfunktion)
-                        self.hass.bus.async_fire("eldat_button_release", {
+                        self.hass.bus.async_fire("easywave_button_release", {
                             "device_id": self._serial_number,
                             "entity_id": self.entity_id,
                             "subtype": self._action if hasattr(self, '_action') else "release",
@@ -1206,19 +1099,19 @@ class EldatEWReceiverButton(EldatEntity, ButtonEntity):
 
 
 
-class EldatTestButton(EldatEntity, ButtonEntity):
+class EasywaveTestButton(EasywaveEntity, ButtonEntity):
     """Button entity for testing device communication."""
     
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
     ) -> None:
         """Initialize the test button."""
         super().__init__(coordinator, serial_number, device_info)
         
-        self._attr_unique_id = f"{serial_number}_test"
+        self._attr_unique_id = f"{device_info['registration_id']}_test"
         self._attr_name = "Test"
         self._attr_icon = "mdi:test-tube"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC

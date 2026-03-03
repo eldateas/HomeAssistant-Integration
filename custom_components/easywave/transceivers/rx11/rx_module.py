@@ -1,9 +1,9 @@
 """
-Python implementation of ELDAT RX11 RxModule - © ELDAT EaS GmbH 2024
+Python implementation of EASYWAVE RX11 RxModule - © EASYWAVE EaS GmbH 2024
 Converted from C to Python by GitHub Copilot
 
 This module provides a Python implementation of the RxModule communication
-protocol for the ELDAT RX11 transceiver.
+protocol for the EASYWAVE RX11 transceiver.
 
 Filename:       rx_module.py
 Original:       RxModule.c by L.Koepping
@@ -459,7 +459,7 @@ def parse_icp_data(self, icp: ICP, function: int) -> dict[str, Any]:
 
 class RxModule:
     """
-    Pure Python implementation of ELDAT RX11 RxModule communication protocol.
+    Pure Python implementation of EASYWAVE RX11 RxModule communication protocol.
     
     This class provides a complete Python implementation without requiring C libraries.
     """
@@ -699,8 +699,8 @@ class RxModule:
         if self.debug:
             _LOGGER.info("RxModule disconnected")
     
-    def _find_eldat_usb_port(self) -> Optional[str]:
-        """Find ELDAT USB device by VID/PID, handling port changes.
+    def _find_easywave_usb_port(self) -> Optional[str]:
+        """Find EASYWAVE USB device by VID/PID, handling port changes.
         
         Returns the device path if found, None otherwise.
         """
@@ -709,14 +709,14 @@ class RxModule:
             
             ports = list(serial.tools.list_ports.comports())
             
-            # Look for ELDAT USB devices (VID: 0x155A, PID: 0x1014)
+            # Look for EASYWAVE USB devices (VID: 0x155A, PID: 0x1014)
             for port in ports:
                 if port.vid == 0x155A and port.pid == 0x1014:
-                    _LOGGER.info("🔍 Found ELDAT device at %s (VID:0x%04X PID:0x%04X)", 
+                    _LOGGER.info("🔍 Found EASYWAVE device at %s (VID:0x%04X PID:0x%04X)", 
                                port.device, port.vid, port.pid)
                     return port.device
             
-            _LOGGER.debug("No ELDAT USB device found")
+            _LOGGER.debug("No EASYWAVE USB device found")
             return None
             
         except ImportError:
@@ -781,7 +781,7 @@ class RxModule:
                 return True
             
             # If original port failed, search for device by VID/PID
-            new_port = self._find_eldat_usb_port()
+            new_port = self._find_easywave_usb_port()
             if new_port and new_port != self.port:
                 _LOGGER.info("🔄 USB port changed: %s → %s", original_port, new_port)
                 self.port = new_port

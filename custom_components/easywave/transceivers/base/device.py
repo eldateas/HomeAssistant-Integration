@@ -1,4 +1,4 @@
-"""Base device class for all ELDAT devices."""
+"""Base device class for all EASYWAVE devices."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

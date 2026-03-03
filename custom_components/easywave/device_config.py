@@ -1,4 +1,4 @@
-"""Simplified device configuration facade for ELDAT integration.
+"""Simplified device configuration facade for EASYWAVE integration.
 
 This is a thin wrapper around DeviceManager for backward compatibility.
 Most operations are delegated directly to DeviceManager.

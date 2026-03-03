@@ -1,4 +1,4 @@
-"""Behavior mixins for ELDAT devices."""
+"""Behavior mixins for EASYWAVE devices."""
 
 from .button import ButtonBehaviorMixin
 from .cover import CoverBehaviorMixin

@@ -67,6 +67,8 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             "button": []
         }
         
+        reg_id = self._get_registration_id()
+        
         # Create cover entities for each channel
         for channel in range(self.channel_count):
             channel_suffix = f" CH{channel+1}" if self.channel_count > 1 else ""
@@ -74,7 +76,7 @@ class RX11MotorReceiver(CoverBehaviorMixin, EntitySpecsMixin, BaseReceiver):
             specs["cover"].append({
                 "type": "cover",
                 "name": f"{self.name}{channel_suffix}",
-                "unique_id": make_unique_id(self.serial_number, "cover", channel if self.channel_count > 1 else None),
+                "unique_id": make_unique_id(reg_id, "cover", channel if self.channel_count > 1 else None),
                 "device_class": "shade",
                 "icon": "mdi:window-shutter",
                 "channel": channel,

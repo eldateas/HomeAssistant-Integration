@@ -1,4 +1,4 @@
-"""Cover platform for ELDAT motor devices."""
+"""Cover platform for EASYWAVE motor devices."""
 from __future__ import annotations
 
 import asyncio
@@ -18,8 +18,8 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import EldatCoordinator
-from .entity import EldatEntity
+from .coordinator import EasywaveCoordinator
+from .entity import EasywaveEntity
 from .translations import translate, get_language
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,10 +30,28 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up ELDAT cover entities from a config entry."""
+    """Set up EASYWAVE cover entities from a config entry."""
     from .const import EVENT_DEVICE_ADDED, EVENT_FORCE_CREATE
+    from homeassistant.helpers import entity_registry as er
     
     coordinator = hass.data[DOMAIN][config_entry.entry_id]
+    
+    # Get entity registry to prevent duplicate unique_ids
+    entity_registry = er.async_get(hass)
+    existing_unique_ids = set()
+    
+    # Collect all existing unique_ids for covers in this integration
+    if entity_registry:
+        for entity_entry in entity_registry.entities.values():
+            # Only look at covers for our integration and config entry
+            if (entity_entry.platform == "easywave" and 
+                entity_entry.config_entry_id == config_entry.entry_id and
+                entity_entry.domain == "cover"):
+                if entity_entry.unique_id:
+                    existing_unique_ids.add(entity_entry.unique_id)
+                    _LOGGER.debug("Found existing cover unique_id: %s", entity_entry.unique_id[-20:])
+    
+    _LOGGER.debug("Checking %d existing cover unique_ids for duplicates", len(existing_unique_ids))
     
     entities = []
     
@@ -54,19 +72,19 @@ async def async_setup_entry(
                         device_type_code = device_info.get("device_type_code", 0)
                         if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
                             channel = entity_spec.get("channel", 0)
-                            entities.append(EldatEWneoDualMotorCover(coordinator, serial_number, device_info, entity_spec))
+                            entities.append(EasywaveEWneoDualMotorCover(coordinator, serial_number, device_info, entity_spec))
                             _LOGGER.info("🔧 Restored EWneo-DualMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
                         elif device_type_code == 0x09:  # EWB_DT_QUAD_MOTOR
                             channel = entity_spec.get("channel", 0)
-                            entities.append(EldatEWneoQuadMotorCover(coordinator, serial_number, device_info, entity_spec))
+                            entities.append(EasywaveEWneoQuadMotorCover(coordinator, serial_number, device_info, entity_spec))
                             _LOGGER.info("🔧 Restored EWneo-QuadMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
                         else:
                             # Single motor or other EWneo-Motor
-                            entities.append(EldatEWneoCover(coordinator, serial_number, device_info, entity_spec))
+                            entities.append(EasywaveEWneoCover(coordinator, serial_number, device_info, entity_spec))
                             _LOGGER.info("🔧 Restored EWneo-Motor entity for device %s", serial_number[-8:])
                     else:
                         # Regular cover entity
-                        entities.append(EldatCover(coordinator, serial_number, device_info, entity_spec))
+                        entities.append(EasywaveCover(coordinator, serial_number, device_info, entity_spec))
                 except Exception as e:
                     _LOGGER.warning("Failed to create cover for device %s: %s", 
                                   serial_number, e)
@@ -75,90 +93,47 @@ async def async_setup_entry(
         async_add_entities(entities, update_before_add=False)
         _LOGGER.info("Added %d cover entities", len(entities))
     
-    # Event handler for new devices
-    async def _handle_device_added(event):
-        try:
-            serial_number = event.data.get("serial_number")
-            device_info = event.data.get("device_info")
-            entities = event.data.get("entities", [])
-            
-            if not serial_number or not entities:
-                _LOGGER.debug("Cover: Device added event missing data")
-                return
-            
-            new_covers = []
-            for entity_spec in entities:
-                if entity_spec.get("type") == "cover":
-                    if device_info.get("neo_device"):
-                        # Check for multi motor devices
-                        device_type_code = device_info.get("device_type_code", 0)
-                        if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
-                            # Entity specs already contain channel info - use directly
-                            # Channel is 0-based in entity_spec, but we need 1-based for display
-                            channel = entity_spec.get("channel", 0)
-                            new_covers.append(EldatEWneoDualMotorCover(coordinator, serial_number, device_info, entity_spec))
-                            _LOGGER.info("✅ Created EWneo-DualMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
-                        elif device_type_code == 0x09:  # EWB_DT_QUAD_MOTOR
-                            # Entity specs already contain channel info - use directly
-                            # Channel is 0-based in entity_spec, but we need 1-based for display
-                            channel = entity_spec.get("channel", 0)
-                            new_covers.append(EldatEWneoQuadMotorCover(coordinator, serial_number, device_info, entity_spec))
-                            _LOGGER.info("✅ Created EWneo-QuadMotor cover CH%d for device %s", channel + 1, serial_number[-8:])
-                        else:
-                            new_covers.append(EldatEWneoCover(coordinator, serial_number, device_info, entity_spec))
-                            _LOGGER.info("✅ Created EWneo-Motor entity for device %s", serial_number[-8:])
-                    else:
-                        new_covers.append(EldatCover(coordinator, serial_number, device_info, entity_spec))
-            
-            if new_covers:
-                async_add_entities(new_covers)
-                _LOGGER.info("Created %d cover entities for device %s", len(new_covers), serial_number)
-                
-        except Exception:
-            _LOGGER.exception("Error creating cover entities from event")
-    
-    # Force create handler
-    async def _handle_force_create(event):
-        try:
-            serial_number = event.data.get("serial_number")
-            entity_type = event.data.get("entity_type")
-            device_info = event.data.get("device_info")
-            
-            if entity_type != "cover" or not serial_number or not device_info:
-                return
-            
-            _LOGGER.info("🔧 Force creating cover entities for device %s", serial_number)
-            
-            # Create cover entities from entity specs
-            from .entity_specs import create_entity_specs_for_device
-            entity_specs = create_entity_specs_for_device(serial_number, device_info)
-            cover_entities = entity_specs.get("cover", [])
-            
-            new_covers = []
-            for entity_spec in cover_entities:
+    # ═══ CENTRAL DISPATCHER ═══
+    # Create async handler for this platform to be called by central dispatcher
+    async def _handle_cover_from_dispatcher(serial_number: str, device_info: Dict[str, Any], entity_specs: List[Dict[str, Any]]) -> None:
+        """Handle cover entity creation for a device.
+        
+        Called by central dispatcher with entity specs already prepared.
+        This replaces all the old event listener logic.
+        """
+        new_covers = []
+        for entity_spec in entity_specs:
+            try:
                 if device_info.get("neo_device"):
-                    new_covers.append(EldatEWneoCover(coordinator, serial_number, device_info, entity_spec))
+                    # Check for multi motor devices
+                    device_type_code = device_info.get("device_type_code", 0)
+                    if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
+                        channel = entity_spec.get("channel", 0)
+                        new_covers.append(EasywaveEWneoDualMotorCover(coordinator, serial_number, device_info, entity_spec))
+                    elif device_type_code == 0x09:  # EWB_DT_QUAD_MOTOR
+                        channel = entity_spec.get("channel", 0)
+                        new_covers.append(EasywaveEWneoQuadMotorCover(coordinator, serial_number, device_info, entity_spec))
+                    else:
+                        new_covers.append(EasywaveEWneoCover(coordinator, serial_number, device_info, entity_spec))
                 else:
-                    new_covers.append(EldatCover(coordinator, serial_number, device_info, entity_spec))
-            
-            if new_covers:
-                async_add_entities(new_covers)
-                _LOGGER.info("✅ Force-created %d cover entities for device %s", len(new_covers), serial_number)
-            
-        except Exception:
-            _LOGGER.exception("Error force-creating cover entities")
+                    new_covers.append(EasywaveCover(coordinator, serial_number, device_info, entity_spec))
+            except Exception as e:
+                _LOGGER.error("Error creating cover for %s: %s", serial_number[-8:], e)
+        
+        if new_covers:
+            async_add_entities(new_covers)
+            _LOGGER.debug("Added %d cover entities for %s", len(new_covers), serial_number[-8:])
     
-    # Register event listeners
-    hass.bus.async_listen(EVENT_DEVICE_ADDED, _handle_device_added)
-    hass.bus.async_listen(EVENT_FORCE_CREATE, _handle_force_create)
+    # Register handler with central dispatcher
+    coordinator.register_platform_handler("cover", _handle_cover_from_dispatcher)
 
 
-class EldatCover(EldatEntity, CoverEntity):
-    """ELDAT cover entity for motor devices."""
+class EasywaveCover(EasywaveEntity, CoverEntity):
+    """EASYWAVE cover entity for motor devices."""
     
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: dict[str, Any],
         entity_spec: dict[str, Any],
@@ -198,7 +173,8 @@ class EldatCover(EldatEntity, CoverEntity):
             )
         
         from .helpers_unique_id import make_unique_id
-        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(serial_number, "cover")
+        reg_id = device_info["registration_id"]
+        self._attr_unique_id = entity_spec.get("unique_id") or make_unique_id(reg_id, "cover")
         translation_key = entity_spec.get("translation_key")
         if translation_key:
             self._attr_translation_key = translation_key
@@ -523,12 +499,12 @@ class EldatCover(EldatEntity, CoverEntity):
         self.async_write_ha_state()
 
 
-class EldatEWneoCover(EldatEntity, CoverEntity):
+class EasywaveEWneoCover(EasywaveEntity, CoverEntity):
     """EWneo-Motor entity with bidirectional EWB_CHANGE_STATE control for motors."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -582,7 +558,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
             self._attr_name = None  # Let HA use translation_key
         else:
             self._attr_name = entity_spec.get("name", f"EWneo-Motor {serial_number}")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_cover_{self._channel}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_ewneo_cover_{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
         
         # Dynamic icons based on open/closed state
@@ -813,7 +789,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
                     self.hass.add_job(self._async_update_state_from_parsed, parsed_state)
         
         # Register the event listener
-        self.hass.bus.async_listen("eldat_ewneo_state_update", handle_ewneo_state_update)
+        self.hass.bus.async_listen("easywave_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo-Motor %s: Registered state update event listener", self._serial_number[-8:])
         
         # Perform initial state query to check for runtime measurement
@@ -1106,7 +1082,7 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
                         
                     # Also fire an event for consistency with other state updates
                     self.hass.bus.async_fire(
-                        "eldat_ewneo_state_update",
+                        "easywave_ewneo_state_update",
                         {
                             "serial_number": self._serial_number,
                             "device_id": self._serial_number,
@@ -1305,12 +1281,12 @@ class EldatEWneoCover(EldatEntity, CoverEntity):
                          self._serial_number, e)
 
 
-class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
+class EasywaveEWneoDualMotorCover(EasywaveEntity, CoverEntity):
     """EWneo-DualMotor cover entity with individual motor control and runtime measurement activation."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -1376,7 +1352,7 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         self._translation_key = entity_spec.get("translation_key")
         self._attr_translation_key = self._translation_key  # For HA state translations
         self._static_name = entity_spec.get("name", f"EWneo DualMotor CH{self._channel} {serial_number}")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_dual_motor_ch{self._channel}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_ewneo_dual_motor_ch{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
         
         # Dynamic icons based on open/closed state
@@ -1639,7 +1615,7 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
             except Exception as e:
                 _LOGGER.error("Error in dual motor CH%d state update handler: %s", self._channel, e)
         
-        self.hass.bus.async_listen("eldat_ewneo_state_update", handle_ewneo_state_update)
+        self.hass.bus.async_listen("easywave_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo dual motor CH%d %s: Registered state update event listener", 
                      self._channel, self._serial_number[-8:])
         
@@ -2082,12 +2058,12 @@ class EldatEWneoDualMotorCover(EldatEntity, CoverEntity):
         await self._send_ewb_change_state(mode, state_bytes)
 
 
-class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
+class EasywaveEWneoQuadMotorCover(EasywaveEntity, CoverEntity):
     """EWneo-QuadMotor cover entity with individual motor control and runtime measurement activation."""
 
     def __init__(
         self,
-        coordinator: EldatCoordinator,
+        coordinator: EasywaveCoordinator,
         serial_number: str,
         device_info: Dict[str, Any],
         entity_spec: Dict[str, Any],
@@ -2158,7 +2134,7 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
         self._translation_key = entity_spec.get("translation_key")
         self._attr_translation_key = self._translation_key  # For HA state translations
         self._static_name = entity_spec.get("name", f"EWneo-QuadMotor CH{self._channel} {serial_number}")
-        self._attr_unique_id = entity_spec.get("unique_id", f"{serial_number}_ewneo_quad_motor_ch{self._channel}")
+        self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_ewneo_quad_motor_ch{self._channel}")
         self._attr_device_class = CoverDeviceClass.SHUTTER
         
         # Dynamic icons based on open/closed state
@@ -2420,7 +2396,7 @@ class EldatEWneoQuadMotorCover(EldatEntity, CoverEntity):
             except Exception as e:
                 _LOGGER.error("Error in quad motor CH%d state update handler: %s", self._channel, e)
         
-        self.hass.bus.async_listen("eldat_ewneo_state_update", handle_ewneo_state_update)
+        self.hass.bus.async_listen("easywave_ewneo_state_update", handle_ewneo_state_update)
         _LOGGER.debug("🔗 EWneo quad motor CH%d %s: Registered state update event listener", 
                      self._channel, self._serial_number[-8:])
         

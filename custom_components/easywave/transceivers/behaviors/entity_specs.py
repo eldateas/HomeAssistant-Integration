@@ -1,7 +1,6 @@
 """Entity specs mixin for automatic entity specification generation."""
 from __future__ import annotations
 
-import hashlib
 from typing import Any, Dict, List
 
 
@@ -22,35 +21,30 @@ class EntitySpecsMixin:
         # Wird von konkreten Device-Klassen überschrieben
         return specs
     
-    def _get_registration_id_suffix(self) -> str:
-        """Get registration ID suffix for unique_id generation.
+    def _get_registration_id(self) -> str:
+        """Get the full registration_id (UUID) for unique_id generation.
         
-        Returns a suffix like 'a1b2c3' based on registration_id (WITHOUT underscore),
-        or empty string for backwards compatibility with existing devices.
-        The caller is responsible for adding the underscore if needed.
+        Returns the UUID registration_id, or empty string if not available.
         """
-        registration_id = self.properties.get("registration_id", "")
-        if not registration_id:
-            return ""
-        
-        # Create a short hash from the registration_id
-        hash_input = str(registration_id).encode('utf-8')
-        hash_hex = hashlib.md5(hash_input).hexdigest()[:6]
-        return hash_hex
+        return self.properties.get("registration_id", "")
     
     def _create_base_entity_spec(self, entity_type: str, channel: int = 0, **kwargs) -> Dict[str, Any]:
         """Create a base entity specification."""
-        channel_suffix = f"_ch{channel}" if channel > 0 else ""
+        from ...helpers_unique_id import make_unique_id
+        
+        reg_id = self._get_registration_id()
+        channel_num = channel if channel > 0 else None
         
         # If name is explicitly None, don't set a default - HA will use device_class translation
         entity_name = kwargs.get("name")
+        channel_suffix = f"_ch{channel}" if channel > 0 else ""
         if "name" not in kwargs:
             entity_name = f"{self.name} {entity_type.title()}{channel_suffix}"
         
         spec = {
             "type": entity_type,
             "name": entity_name,
-            "unique_id": f"{self.serial_number}_{entity_type}{channel_suffix}",
+            "unique_id": make_unique_id(reg_id, entity_type, channel_num),
             "channel": channel,
             "device_class": kwargs.get("device_class"),
             "icon": kwargs.get("icon"),

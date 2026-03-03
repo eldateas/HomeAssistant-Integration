@@ -1,4 +1,4 @@
-"""Base transceiver class for ELDAT transceivers."""
+"""Base transceiver class for EASYWAVE transceivers."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,7 @@ from .device_info import DeviceInfo, TransceiverCapabilities
 
 
 class BaseTransceiver(ABC):
-    """Abstract base class for ELDAT transceivers."""
+    """Abstract base class for EASYWAVE transceivers."""
     
     def __init__(self, device_path: str = None):
         """Initialize the transceiver."""
