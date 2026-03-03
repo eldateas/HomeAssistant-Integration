@@ -576,6 +576,10 @@ async def migrate_v064_to_current(
         if not registration_id:
             continue
 
+        # v0.6.4 normalize_serial_number() lowercases the serial for unique_ids,
+        # but device identifiers in the HA device registry may be UPPERCASE.
+        serial_lower = serial_number.lower()
+
         # ----------------------------------------------------------
         # 1. Migrate HA device identifier  serial → registration_id
         # ----------------------------------------------------------
@@ -583,8 +587,11 @@ async def migrate_v064_to_current(
             identifiers={(DOMAIN, registration_id)}
         )
         if not new_device:
-            old_device = device_registry.async_get_device(
-                identifiers={(DOMAIN, serial_number)}
+            # v0.6.4 stored identifiers as (DOMAIN, self._serial_number).
+            # Try both uppercase (raw) and lowercase (normalised) serial.
+            old_device = (
+                device_registry.async_get_device(identifiers={(DOMAIN, serial_number)})
+                or device_registry.async_get_device(identifiers={(DOMAIN, serial_lower)})
             )
             if old_device:
                 device_registry.async_update_device(
@@ -617,16 +624,17 @@ async def migrate_v064_to_current(
             if not uid:
                 continue
 
-            # Only touch entities that still carry the old serial-number prefix
-            if not uid.startswith(serial_number + "_"):
+            # v0.6.4 unique_ids use LOWERCASE normalised serial (32 chars).
+            # The dict key may be uppercase → compare lowercase.
+            if not uid.startswith(serial_lower + "_"):
                 continue
             # Already migrated?
             if uid.startswith(registration_id):
                 continue
 
             # Extract the entity-type part:
-            #   "{serial}_{type}[_ch{n}][_{hash6}]"  →  "_{type}[_ch{n}]"
-            remainder = uid[len(serial_number):]
+            #   "{serial_lower}_{type}[_ch{n}][_{hash6}]"  →  "_{type}[_ch{n}]"
+            remainder = uid[len(serial_lower):]
 
             # Strip trailing hash suffix if present (_{6 hex chars} at end)
             remainder = re.sub(r"_[0-9a-f]{6}$", "", remainder)

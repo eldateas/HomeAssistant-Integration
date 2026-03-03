@@ -231,6 +231,19 @@ async def _cleanup_orphaned_sensor_entities(
                 return removed_count
             
             if entity.unique_id not in valid_sensor_uids:
+                # SAFETY: Do NOT remove entities that look like un-migrated v0.6.4
+                # format (serial_number prefix).  migrate_v064_to_current() in
+                # entity_migration.py renames them during the same startup — if
+                # we deleted them here they would be gone before migration runs
+                # on the next restart.
+                uid_lower = entity.unique_id.lower()
+                if uid_lower.startswith(serial_lower) and not uid_lower.startswith(reg_id_lower):
+                    _LOGGER.debug(
+                        "⏭️ Keeping legacy entity %s — awaits v0.6.4 migration",
+                        entity.entity_id,
+                    )
+                    continue
+
                 try:
                     entity_registry.async_remove(entity.entity_id)
                     removed_count += 1
