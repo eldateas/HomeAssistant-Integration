@@ -297,73 +297,34 @@ class EasywaveEWneoSwitch(EasywaveEntity, SwitchEntity):
             self.hass.async_create_task(self._query_initial_state())
     
     async def _query_initial_state(self) -> None:
-        """Query initial state from device using EWB_QUERY_STATE."""
-        max_retries = 2
+        """Query initial state from device using coordinator's deduplicated query.
         
-        # Skip if a command has already been sent (prevents race condition)
+        For multi-channel devices (dual/quad switches), a single mode-0 query returns
+        all channel states at once. The coordinator ensures only one query is sent per
+        device serial, even when multiple channel entities request it concurrently.
+        Channel state is received via the easywave_ewneo_state_update event listener.
+        """
         if self._initial_state_queried:
-            _LOGGER.debug("⏭️ Skipping initial state query for EWneo switch %s CH%d (command already sent)", 
-                        self._serial_number, self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1)
+            channel = self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1
+            _LOGGER.debug("⏭️ Skipping initial state query for EWneo switch %s CH%d (already queried)",
+                        self._serial_number[-8:], channel)
             return
         
-        for attempt in range(1, max_retries + 1):
-            try:
-                _LOGGER.info("🔍 Querying initial state for EWneo switch %s CH%d (attempt %d/%d)", 
-                            self._serial_number, self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1,
-                            attempt, max_retries)
-                
-                # Query with mode 0 (on/off state)
-                result = await self.coordinator.transceiver.rx11_ewb_query_state(
-                    self._gateway_serial, self._serial_number, mode=0
-                )
-                
-                if result:
-                    recent_mode, recent_state_bytes = result
-                    _LOGGER.debug("EWneo switch %s: Query state successful, mode=%d, state=%s", 
-                                 self._serial_number, recent_mode, 
-                                 [f"0x{b:02X}" for b in recent_state_bytes])
-                    
-                    # Parse the state
-                    parsed_state = self.coordinator._parse_ewneo_state(
-                        self._device_type_code, recent_state_bytes, "ewneo_switch", self._serial_number
-                    )
-                    
-                    if parsed_state and parsed_state.get("type") == "switch":
-                        # For dual/quad switches, extract the channel-specific state
-                        if self._device_type_code in [0x06, 0x07]:
-                            channel_key = f"channel_{self._channel + 1}"
-                            channel_state = parsed_state.get(channel_key, {})
-                            self._is_on = channel_state.get("on", False)
-                            _LOGGER.info("✅ EWneo dual/quad switch %s CH%d: Initial state is %s", 
-                                        self._serial_number, self._channel + 1, "ON" if self._is_on else "OFF")
-                        else:
-                            # Single switch
-                            self._is_on = parsed_state.get("on", False)
-                            _LOGGER.info("✅ EWneo switch %s: Initial state is %s", 
-                                        self._serial_number, "ON" if self._is_on else "OFF")
-                        
-                        self._initial_state_queried = True
-                        self.async_write_ha_state()
-                        return  # Success - exit retry loop
-                    else:
-                        _LOGGER.warning("⚠️ Could not parse initial state for EWneo switch %s (attempt %d/%d)", 
-                                       self._serial_number, attempt, max_retries)
-                        # Mark as unreachable and report failure for persistent notification
-                        self._reachable = False
-                        await self.coordinator.report_ewneo_communication_failure(self._serial_number)
-                else:
-                    _LOGGER.warning("⚠️ Failed to query initial state for EWneo switch %s (attempt %d/%d)", 
-                                   self._serial_number, attempt, max_retries)
-                    # Mark as unreachable and report failure for persistent notification
-                    self._reachable = False
-                    await self.coordinator.report_ewneo_communication_failure(self._serial_number)
-                    
-            except Exception as e:
-                _LOGGER.error("Error querying initial state for EWneo switch %s (attempt %d/%d): %s", 
-                             self._serial_number, attempt, max_retries, e)
-                # Mark as unreachable and report failure for persistent notification
-                self._reachable = False
-                await self.coordinator.report_ewneo_communication_failure(self._serial_number)
+        # Use coordinator's deduplicated query - mode 0 returns all channels at once.
+        # State updates arrive via the easywave_ewneo_state_update event listener
+        # that was registered in async_added_to_hass.
+        success = await self.coordinator.query_ewneo_initial_state_once(
+            self._serial_number, self._gateway_serial
+        )
+        
+        if success:
+            self._reachable = True
+            self._initial_state_queried = True
+        else:
+            self._reachable = False
+            channel = self._channel + 1 if self._device_type_code in [0x06, 0x07] else 1
+            _LOGGER.warning("⚠️ EWneo switch %s CH%d: Device not reachable during initial state query",
+                           self._serial_number[-8:], channel)
     
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator.

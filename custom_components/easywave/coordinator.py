@@ -146,6 +146,11 @@ class EasywaveCoordinator(DataUpdateCoordinator):
         # Track devices that already have an active unreachable notification
         self._ewneo_unreachable_notified: Set[str] = set()
         
+        # Deduplication for initial state queries across channel entities
+        # For multi-channel devices (dual/quad), only one mode-0 query is needed
+        self._ewneo_initial_query_locks: Dict[str, asyncio.Lock] = {}
+        self._ewneo_initial_query_done: Dict[str, bool] = {}  # True=success, False=failed
+        
         # Track which devices have already had their entity events fired
         self._devices_with_fired_events: Set[str] = set()
         
@@ -251,6 +256,8 @@ class EasywaveCoordinator(DataUpdateCoordinator):
         """Report a successful communication with an EWneo device.
         
         Resets failure counter and dismisses any active unreachable notification.
+        Always attempts to dismiss the notification since persistent notifications
+        survive integration reloads while the in-memory tracking set does not.
         
         Args:
             device_serial: The device serial number
@@ -259,23 +266,83 @@ class EasywaveCoordinator(DataUpdateCoordinator):
         if device_serial in self._ewneo_failure_counts:
             del self._ewneo_failure_counts[device_serial]
         
-        # Dismiss notification if one was active
-        if device_serial in self._ewneo_unreachable_notified:
-            self._ewneo_unreachable_notified.discard(device_serial)
-            
-            # Dismiss the persistent notification
-            await self.hass.services.async_call(
-                "persistent_notification",
-                "dismiss",
-                {
-                    "notification_id": f"easywave_ewneo_unreachable_{device_serial}",
-                },
-                blocking=False,
-            )
-            
+        # Track whether we thought a notification was active
+        was_notified = device_serial in self._ewneo_unreachable_notified
+        self._ewneo_unreachable_notified.discard(device_serial)
+        
+        # Always attempt to dismiss the persistent notification.
+        # After an integration reload the in-memory set is empty, but the
+        # persistent notification from a previous session may still exist.
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {
+                "notification_id": f"easywave_ewneo_unreachable_{device_serial}",
+            },
+            blocking=False,
+        )
+        
+        if was_notified:
             # Get user-defined device name for logging
             friendly_name = await self._get_device_friendly_name(device_serial)
             _LOGGER.info("✅ EWneo device '%s' (%s) is reachable again", friendly_name, device_serial[-8:])
+
+    async def query_ewneo_initial_state_once(
+        self, device_serial: str, gateway_serial: str, max_retries: int = 2
+    ) -> bool:
+        """Query initial state for an EWneo device, deduplicated across channel entities.
+        
+        For multi-channel devices (dual/quad switches), a single mode-0 query returns
+        the state for all channels at once. This method ensures only one query is sent
+        per device serial, even when multiple channel entities request it concurrently.
+        
+        The result is fired as an easywave_ewneo_state_update event that all channel
+        entities receive via their event listeners.
+        
+        Args:
+            device_serial: The device serial number
+            gateway_serial: The gateway serial number
+            max_retries: Maximum number of attempts
+            
+        Returns:
+            True if query succeeded (state event was fired), False otherwise
+        """
+        # Already completed for this device?
+        if device_serial in self._ewneo_initial_query_done:
+            return self._ewneo_initial_query_done[device_serial]
+        
+        # Get or create lock for this device
+        if device_serial not in self._ewneo_initial_query_locks:
+            self._ewneo_initial_query_locks[device_serial] = asyncio.Lock()
+        
+        async with self._ewneo_initial_query_locks[device_serial]:
+            # Re-check after acquiring lock (another entity may have completed the query)
+            if device_serial in self._ewneo_initial_query_done:
+                return self._ewneo_initial_query_done[device_serial]
+            
+            # Perform the actual query with retries
+            # _query_ewneo_state handles success/failure reporting internally
+            for attempt in range(1, max_retries + 1):
+                _LOGGER.info(
+                    "🔍 Querying initial state for EWneo device %s (attempt %d/%d)",
+                    device_serial[-8:], attempt, max_retries,
+                )
+                result = await self._query_ewneo_state(gateway_serial, device_serial)
+                if result:
+                    self._ewneo_initial_query_done[device_serial] = True
+                    _LOGGER.info(
+                        "✅ EWneo device %s: Initial state query successful",
+                        device_serial[-8:],
+                    )
+                    return True
+            
+            # All retries failed
+            self._ewneo_initial_query_done[device_serial] = False
+            _LOGGER.warning(
+                "⚠️ EWneo device %s: Initial state query failed after %d attempts",
+                device_serial[-8:], max_retries,
+            )
+            return False
 
     async def _get_device_friendly_name(self, device_serial: str) -> str:
         """Get the user-defined friendly name for a device from HA device registry.
@@ -3720,6 +3787,9 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 if parsed_state:
                     _LOGGER.debug("EWneo device %s: Parsed state update: %s", 
                                target_device_serial[-8:], parsed_state)
+                    
+                    # Report success (resets failure counter, dismisses notification if any)
+                    await self.report_ewneo_communication_success(target_device_serial)
                     
                     # Fire an event that EWneo entities can listen to using the device serial (not telegram serial)
                     self.hass.bus.async_fire(

@@ -1050,6 +1050,10 @@ class RX11Wrapper:
                         _LOGGER.debug("State refreshed for %s %s (attempt %d)", 
                                    device_type, device_name, attempt)
                         
+                        # Report success (resets failure counter, dismisses notification if any)
+                        if self._coordinator:
+                            await self._coordinator.report_ewneo_communication_success(device_serial)
+                        
                         # Fire state update event so entities can update
                         if hasattr(device_instance, 'get_motor_data'):
                             motor_data = device_instance.get_motor_data()
