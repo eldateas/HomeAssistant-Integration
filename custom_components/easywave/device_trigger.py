@@ -30,6 +30,7 @@ from .const import (
     EVENT_GATEWAY_DISCONNECTED,
     EVENT_GATEWAY_STATUS_CHANGED,
 )
+from .translations import translate, get_button_label, get_language
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,20 +117,16 @@ def _get_transmitter_trigger_map(
     from .entity_specs import create_entity_specs_for_device
     from .const import BUTTON_LABELS
 
+    lang = get_language(hass) if hass else None
     specs = create_entity_specs_for_device(serial_number, device_info)
 
     trigger_map: list[tuple[str, str]] = []
     seen_labels = set()  # Track labels to avoid duplicates
 
-    # State label translation map for 2-button and 3-button modes
-    state_label_map = {
-        "on": "Ein",
-        "off": "Aus",
-        "up": "Auf",
-        "down": "Zu",
-        "stop": "Stopp",
-        "released": "Nicht betätigt",
-    }
+    # State label translation map for 2-button and 3-button modes — use translate()
+    def _translate_state(key: str) -> str:
+        result = translate(f"state_translated.{key}", hass=hass)
+        return result if result != f"state_translated.{key}" else key
 
     # Prefer transmitter state sensors (2/3-button modes)
     for spec in specs.get("sensor", []):
@@ -138,7 +135,7 @@ def _get_transmitter_trigger_map(
             for button_index, label in button_map.items():
                 button_name = ["A", "B", "C", "D"][button_index] if button_index in [0, 1, 2, 3] else str(button_index)
                 # Translate state keys to readable labels
-                translated_label = state_label_map.get(label, label)
+                translated_label = _translate_state(label)
                 # Avoid duplicates: only add if label hasn't been seen yet
                 if translated_label not in seen_labels:
                     trigger_map.append((translated_label, button_name))
@@ -147,21 +144,16 @@ def _get_transmitter_trigger_map(
             button_index = spec.get("button_index")
             if button_index is None:
                 continue
-            label = spec.get("button") or BUTTON_LABELS.get(button_index, f"Taste {button_index + 1}")
+            label = spec.get("button") or get_button_label(button_index, hass=hass)
             button_name = ["A", "B", "C", "D"][button_index] if button_index in [0, 1, 2, 3] else str(button_index)
             trigger_map.append((label, button_name))
         elif spec.get("device_class") == "enum" and spec.get("options"):
             # Map option keys to readable labels for last_button sensors (group mode)
-            option_label_map = {
-                "a": BUTTON_LABELS.get(0, "Taste A"),
-                "b": BUTTON_LABELS.get(1, "Taste B"),
-                "c": BUTTON_LABELS.get(2, "Taste C"),
-                "d": BUTTON_LABELS.get(3, "Taste D"),
-                "released": "Nicht betätigt",
-                "off": "Aus",
-            }
             for option in spec.get("options", []):
-                label = option_label_map.get(option, option)
+                if option in ("a", "b", "c", "d"):
+                    label = get_button_label(ord(option) - ord('a'), hass=hass)
+                else:
+                    label = _translate_state(option)
                 if (label, option.upper()) not in trigger_map:
                     trigger_map.append((label, option.upper()))
 
@@ -183,9 +175,9 @@ def _get_transmitter_trigger_map(
         if button_index is None:
             continue
         if device_info.get("operating_type") == "1" and device_info.get("switch_mode") == "permanent":
-            label = spec.get("button") or BUTTON_LABELS.get(button_index, f"Taste {button_index + 1}")
+            label = spec.get("button") or get_button_label(button_index, hass=hass)
         else:
-            label = spec.get("button_label") or spec.get("button") or BUTTON_LABELS.get(button_index, f"Taste {button_index + 1}")
+            label = spec.get("button_label") or spec.get("button") or get_button_label(button_index, hass=hass)
         button_name = ["A", "B", "C", "D"][button_index] if button_index in [0, 1, 2, 3] else str(button_index)
         trigger_map.append((label, button_name))
 
@@ -386,18 +378,20 @@ async def async_attach_trigger(
     event_type = event_type_map.get(trigger_type, "easywave_button_press")
     
     # Reverse translation map: translated label -> raw event value
-    label_to_event_value = {
-        "Ein": "on",
-        "Aus": "off",
-        "Auf": "up",
-        "Zu": "down",
-        "Stopp": "stop",
-        "Nicht betätigt": "released",
-        "Taste A": "a",
-        "Taste B": "b",
-        "Taste C": "c",
-        "Taste D": "d",
-    }
+    # Build dynamically from translations to support all languages
+    label_to_event_value = {}
+    hass = config.get("hass")
+    if hass:
+        for raw, key in [("on", "state_translated.on"), ("off", "state_translated.off"),
+                         ("up", "state_translated.up"), ("down", "state_translated.down"),
+                         ("stop", "state_translated.stop"), ("released", "state_translated.released")]:
+            translated = translate(key, hass=hass)
+            label_to_event_value[translated] = raw
+        # Button labels
+        for letter in ["A", "B", "C", "D"]:
+            idx = ord(letter) - ord("A")
+            label = get_button_label(idx, hass=hass)
+            label_to_event_value[label] = letter.lower()
     
     event_match_key = "button_name"
     event_match_value = button_name

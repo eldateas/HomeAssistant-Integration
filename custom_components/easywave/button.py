@@ -27,6 +27,7 @@ from .const import (
 from .coordinator import EasywaveCoordinator
 from .entity import EasywaveEntity
 from .entity_registry import get_entity_registry
+from .translations import translate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ async def async_setup_entry(
         # Motor receivers use configured button entities from entity specs
         device_type = device_info.get("type", "unknown")
         receiver_kind = device_info.get("receiver_kind", "switch")
-        is_neo_device = device_info.get("neo_device", False)
+        is_neo_device = device_info.get("neo_device", False) or device_type.startswith("ewneo_")
         skip_action_buttons = ((device_type == "ew_receiver" and 
                                receiver_kind in ["heating", "cooling", "heating_cooling"]) or
                               is_neo_device)
@@ -344,17 +345,17 @@ class EWReceiverUIButton(EasywaveEntity, ButtonEntity):
         if self._supports_long_press:
             attrs["longpress_active"] = self._is_long_press_active
             if self._is_long_press_active:
-                attrs["status"] = "Aktiv - 'Stop Command' zum Beenden"
+                attrs["status"] = translate("config_flow.button_status_active_stop", hass=self.hass)
             else:
-                attrs["status"] = "Bereit - Doppelklick für Dauerbetrieb"
+                attrs["status"] = translate("config_flow.button_status_ready_doubleclick", hass=self.hass)
         elif self._action_type == "press_and_hold":
             attrs["longpress_active"] = self._is_long_press_active
             if self._is_long_press_active:
-                attrs["status"] = "Aktiv - 'Stop Command' zum Beenden"
+                attrs["status"] = translate("config_flow.button_status_active_stop", hass=self.hass)
             else:
-                attrs["status"] = "Bereit - Klick für Dauerbetrieb"
+                attrs["status"] = translate("config_flow.button_status_ready_click_hold", hass=self.hass)
         else:
-            attrs["status"] = "Bereit - Klick für Einzelimpuls"
+            attrs["status"] = translate("config_flow.button_status_ready_click", hass=self.hass)
             
         return attrs
 

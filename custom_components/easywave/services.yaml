@@ -463,36 +463,6 @@ device_recreate:
         device:
           integration: easywave_plugin
 
-device_disable:
-  name: "⏸️ Gerät deaktivieren"
-  description: Deaktiviert alle Entitäten dieses Geräts
-  target:
-    device:
-      integration: easywave_plugin
-  fields:
-    device_id:
-      name: Device ID
-      description: Die Home Assistant Device ID des zu deaktivierenden Geräts
-      required: true
-      selector:
-        device:
-          integration: easywave_plugin
-
-device_enable:
-  name: "▶️ Gerät aktivieren"
-  description: Aktiviert alle deaktivierten Entitäten dieses Geräts
-  target:
-    device:
-      integration: easywave_plugin
-  fields:
-    device_id:
-      name: Device ID
-      description: Die Home Assistant Device ID des zu aktivierenden Geräts
-      required: true
-      selector:
-        device:
-          integration: easywave_plugin
-
 update_translations:
   name: "🌐 Übersetzungen aktualisieren"
   description: Aktualisiert die Gerätenamen und Modellbeschreibungen basierend auf der aktuellen Sprache. Rufen Sie diesen Service auf, nachdem Sie die Sprache in den Home Assistant Einstellungen geändert haben.

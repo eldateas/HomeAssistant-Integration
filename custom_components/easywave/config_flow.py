@@ -522,42 +522,46 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if coordinator:
             sender_index = str(coordinator.get_next_ew_sender_index())
         
-        # Build readable settings descriptions
+        # Build readable settings descriptions using translations
+        lang = get_language(self.hass)
         # Betriebsart
         if operating_type == "1":
-            operating_mode = "1-Tast-Bedienung"
+            operating_mode = translate("config_flow.operating_mode_1", lang)
         elif operating_type == "2":
             # Bei 2-Tast den Usage-Typ mit anzeigen
             if usage_type == "cover":
-                operating_mode = "2-Tast-Bedienung (AUF/ZU)"
+                operating_mode = translate("config_flow.operating_mode_2_cover", lang)
             else:
-                operating_mode = "2-Tast-Bedienung (EIN/AUS)"
+                operating_mode = translate("config_flow.operating_mode_2_switch", lang)
         else:  # operating_type == "3"
-            operating_mode = "3-Tast-Bedienung (AUF/STOPP/ZU)"
+            operating_mode = translate("config_flow.operating_mode_3", lang)
         
         # Bedienung (nur bei 1-Tast) - als komplette Zeile
         grouping_mode_line = ""
         if operating_type == "1":
             if grouping_mode == "single":
-                grouping_text = "Einzeln schalten"
+                grouping_text = translate("config_flow.grouping_single", lang)
             else:
-                grouping_text = "Als Gruppe schalten"
-            grouping_mode_line = f"\n• **Bedienung:** {grouping_text}"
+                grouping_text = translate("config_flow.grouping_group", lang)
+            grouping_mode_line = f"\n• **{translate('config_flow.control_mode', lang)}:** {grouping_text}"
         
         # Verhalten (nur bei 1-Tast) - als komplette Zeile
         behavior_line = ""
         if operating_type == "1":
             if switch_mode == "impulse":
-                behavior_text = "Impuls"
+                behavior_text = translate("config_flow.behavior_impulse", lang)
             else:
-                behavior_text = "Dauer"
-            behavior_line = f"\n• **Verhalten:** {behavior_text}"
+                behavior_text = translate("config_flow.behavior_permanent", lang)
+            behavior_line = f"\n• **{translate('config_flow.behavior', lang)}:** {behavior_text}"
         
         # Tastenanzahl
         if operating_type == "3":
-            button_count_text = "3 oder 4 Tasten"
+            button_count_text = translate("config_flow.buttons_3_or_4", lang)
         else:
-            button_count_text = f"{button_count} {'Taste' if button_count == 1 else 'Tasten'}"
+            if button_count == 1:
+                button_count_text = translate("config_flow.button_count_singular", lang, count=button_count)
+            else:
+                button_count_text = translate("config_flow.button_count_plural", lang, count=button_count)
         
         # Store description placeholders for use in strings.json
         placeholders = {
@@ -1104,7 +1108,7 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 translated_name = s.replace('_', ' ').title()
             translated_sensors.append(f"  • {translated_name}")
         
-        auto_detect_msg = translate("device.auto_detect", lang) if translate("device.auto_detect", lang) != "device.auto_detect" else ("Auto-Erkennung bei Empfang" if lang == "de" else "Auto-detection on receive")
+        auto_detect_msg = translate("config_flow.auto_detect", lang)
         sensor_list = "\n".join(translated_sensors) if translated_sensors else f"  • {auto_detect_msg}"
         
         # Get available areas for selection
@@ -1259,16 +1263,18 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # Map receiver_kind to programming mode (without operating type annotation)
         # This ensures consistent text when navigating forward or backward
-        programming_modes = {
-            "impulse": "Impuls",
-            "switch_2button": "EIN / AUS",
-            "cover_2button": "AUF / ZU",
-            "motor_3button": "AUF / STOPP / ZU",
-            "heating_cooling": "EIN / AUS",
-            "universal_4button": "UNIVERSAL",
+        lang = get_language(self.hass)
+        programming_mode_keys = {
+            "impulse": "config_flow.programming_mode_impulse",
+            "switch_2button": "config_flow.programming_mode_on_off",
+            "cover_2button": "config_flow.programming_mode_up_down",
+            "motor_3button": "config_flow.programming_mode_up_stop_down",
+            "heating_cooling": "config_flow.programming_mode_heating",
+            "universal_4button": "config_flow.programming_mode_universal",
         }
         
-        programming_mode = programming_modes.get(receiver_kind, receiver_kind)
+        key = programming_mode_keys.get(receiver_kind)
+        programming_mode = translate(key, lang) if key else receiver_kind
         
         # Save which dialog we came from for correct back navigation
         self._device_config["previous_description_step"] = "device_receiver_description"
@@ -1288,9 +1294,9 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show receiver learning overview for heating mode with specific instructions."""
         # Save which dialog we came from for correct back navigation
         self._device_config["previous_description_step"] = "device_receiver_description_heating"
-        
+        lang = get_language(self.hass)
         placeholders = {
-            "operating_mode": "EIN / AUS",
+            "operating_mode": translate("config_flow.programming_mode_heating", lang),
             "docs_url": get_docs_url("device_receiver_description_heating"),
         }
         
@@ -1392,36 +1398,13 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         lang = get_language(self.hass)
         default_name = f"Easywave {t_receiver(lang)} #{rx11_index + 1}"
         
-        # Map receiver_kind to readable type description
-        receiver_type_names = {
-            "de": {
-                "impulse": "Impuls (1-Tast)",
-                "switch_2button": "EIN/AUS (2-Tast)",
-                "cover_2button": "AUF/ZU (2-Tast)",
-                "motor_3button": "AUF/STOPP/ZU (3-Tast)",
-                "heating_cooling": "Heizung",
-                "universal_4button": "Universal (4-Tast)",
-            },
-            "en": {
-                "impulse": "Impulse (1-Button)",
-                "switch_2button": "ON/OFF (2-Button)",
-                "cover_2button": "OPEN/CLOSE (2-Button)",
-                "motor_3button": "OPEN/STOP/CLOSE (3-Button)",
-                "heating_cooling": "Heating",
-                "universal_4button": "Universal (4-Button)",
-            },
-            "fr": {
-                "impulse": "Impulsion (1 touche)",
-                "switch_2button": "MARCHE/ARRÊT (2 touches)",
-                "cover_2button": "OUVERT/FERMÉ (2 touches)",
-                "motor_3button": "OUVERT/STOP/FERMÉ (3 touches)",
-                "heating_cooling": "Chauffage",
-                "universal_4button": "Universel (4 touches)",
-            },
-        }
-        
-        type_names = receiver_type_names.get(lang, receiver_type_names["en"])
-        receiver_type = type_names.get(receiver_kind, receiver_kind)
+        # Map receiver_kind to readable type description using translations
+        lang = get_language(self.hass)
+        receiver_type_key = f"config_flow.receiver_type_{receiver_kind}"
+        receiver_type = translate(receiver_type_key, lang)
+        # Fallback if translation key doesn't exist
+        if receiver_type == receiver_type_key:
+            receiver_type = receiver_kind
         
         return self.async_show_form(
             step_id="device_receiver_verify",
@@ -1505,7 +1488,7 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("rx11_index"): int
             }),
             description_placeholders={
-                "instruction": "Enter the Easywave Receiver serial number manually.",
+                "instruction": translate("config_flow.receiver_manual_instruction", get_language(self.hass)),
                 "docs_url": get_docs_url("device_receiver_manual"),
             }
         )
@@ -1520,46 +1503,47 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         rx11_index = self._device_config.get("rx11_index", "Unknown")
         
         # Generate operating mode description based on new receiver_kind values
-        if receiver_kind == "impulse":
-            mode_desc = "Impuls (1-Tast)"
-            button_summary = "• Toggle-Button (zustandslos)"
-            learn_instructions = "Empfänger in 1-Tast Lernmodus versetzen."
-        elif receiver_kind == "switch_2button":
-            mode_desc = "EIN / AUS (2-Tast)"
-            button_summary = "• Zustandsloser Schalter (A→Ein, B→Aus)"
-            learn_instructions = "Empfänger in 2-Tast Lernmodus versetzen (Ein + Aus)."
-        elif receiver_kind == "cover_2button":
-            mode_desc = "AUF / ZU (2-Tast)"
-            button_summary = "• Zustandslose Abdeckung (A→Auf, B→Zu)"
-            learn_instructions = "Empfänger in 2-Tast Lernmodus versetzen (Auf + Zu)."
-        elif receiver_kind == "motor_3button":
-            mode_desc = "AUF / STOPP / ZU (3-Tast)"
-            button_summary = "• Zustandsloser Motor (A→Auf, B→Zu, C→Stopp)"
-            learn_instructions = "Empfänger in 3-Tast Lernmodus versetzen (Auf + Zu + Stopp)."
-        elif receiver_kind == "heating_cooling":
-            mode_desc = "EIN / AUS (Heizung)"
-            button_summary = "• Heizungsschalter (EIN/AUS mit 4h Wiederholung)"
-            learn_instructions = "Empfänger in 2-Tast Lernmodus versetzen (Ein + Aus)."
-        elif receiver_kind == "universal_4button":
-            mode_desc = "UNIVERSAL (4-Tast)"
-            button_summary = "• Button A\n• Button B\n• Button C\n• Button D"
-            learn_instructions = "Empfänger in 4-Tast Lernmodus versetzen."
+        lang = get_language(self.hass)
+        
+        mode_desc_keys = {
+            "impulse": "config_flow.mode_desc_impulse",
+            "switch_2button": "config_flow.mode_desc_switch_2button",
+            "cover_2button": "config_flow.mode_desc_cover_2button",
+            "motor_3button": "config_flow.mode_desc_motor_3button",
+            "heating_cooling": "config_flow.mode_desc_heating",
+            "universal_4button": "config_flow.mode_desc_universal",
+        }
+        summary_keys = {
+            "impulse": "config_flow.summary_impulse",
+            "switch_2button": "config_flow.summary_switch_2button",
+            "cover_2button": "config_flow.summary_cover_2button",
+            "motor_3button": "config_flow.summary_motor_3button",
+            "heating_cooling": "config_flow.summary_heating",
+            "universal_4button": "config_flow.summary_universal",
+        }
+        learn_keys = {
+            "impulse": "config_flow.learn_impulse",
+            "switch_2button": "config_flow.learn_switch_2button",
+            "cover_2button": "config_flow.learn_cover_2button",
+            "motor_3button": "config_flow.learn_motor_3button",
+            "heating_cooling": "config_flow.learn_heating",
+            "universal_4button": "config_flow.learn_universal",
+        }
+        
+        if receiver_kind in mode_desc_keys:
+            mode_desc = translate(mode_desc_keys[receiver_kind], lang)
+            button_summary = "• " + translate(summary_keys[receiver_kind], lang)
+            learn_instructions = translate(learn_keys[receiver_kind], lang)
         else:
             # Legacy fallback for old configurations
-            if operating_mode == 1:
-                mode_desc = "1-Tast (Toggle)"
-                button_summary = "• Toggle Button"
-            elif operating_mode == 2:
-                mode_desc = "2-Tast"
-                button_summary = "• Button A\n• Button B"
-            elif operating_mode == 3:
-                mode_desc = "3-Tast"
-                button_summary = "• Button A\n• Button B\n• Button C"
+            legacy_mode_keys = {1: "config_flow.legacy_mode_1", 2: "config_flow.legacy_mode_2", 3: "config_flow.legacy_mode_3"}
+            if operating_mode in legacy_mode_keys:
+                mode_desc = translate(legacy_mode_keys[operating_mode], lang)
+                button_summary = "• Toggle Button" if operating_mode == 1 else "\n".join(f"• Button {chr(65 + i)}" for i in range(operating_mode))
             else:
-                mode_desc = f"Mode {operating_mode}" if get_language(self.hass) == "en" else f"Modus {operating_mode}"
-                button_summary = "• Standard configuration" if get_language(self.hass) == "en" else "• Standardkonfiguration"
-            lang = get_language(self.hass)
-            learn_instructions = f"Put receiver in {operating_mode}-button learning mode." if lang == "en" else f"Empfänger in {operating_mode}-Tast Lernmodus versetzen."
+                mode_desc = translate("config_flow.legacy_mode_generic", lang, mode=operating_mode)
+                button_summary = "• " + translate("config_flow.legacy_summary", lang)
+            learn_instructions = translate("config_flow.learn_generic", lang, mode=operating_mode)
         
         return {
             "data_schema": vol.Schema({}),
@@ -1578,23 +1562,25 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _get_receiver_operating_mode_placeholders(self) -> dict[str, str]:
         """Build description placeholders for the receiver operating mode step."""
         receiver_kind = self._device_config.get("receiver_kind", "switch")
+        lang = get_language(self.hass)
 
-        if receiver_kind == "switch":
-            receiver_kind_label = "Switch"
-            mode_descriptions = "• 🔘 1-Button (Toggle)\n• 🔘🔘 2-Button (On + Off)"
-        elif receiver_kind == "motor":
-            receiver_kind_label = "Motor/Cover"
-            mode_descriptions = (
-                "• 🔘 1-Button (Toggle)\n"
-                "• 🔘🔘 2-Button (Up + Down)\n"
-                "• 🔘🔘🔘 3-Button (Up + Down + Stop)"
-            )
-        elif receiver_kind == "heating_cooling":
-            receiver_kind_label = "Heating/Cooling"
-            mode_descriptions = "• 🔘 1-Button (Toggle, 4h auto-repeat)"
+        kind_key_map = {
+            "switch": "config_flow.receiver_kind_switch",
+            "motor": "config_flow.receiver_kind_motor",
+            "heating_cooling": "config_flow.receiver_kind_heating",
+        }
+        desc_key_map = {
+            "switch": "config_flow.mode_descriptions_switch",
+            "motor": "config_flow.mode_descriptions_motor",
+            "heating_cooling": "config_flow.mode_descriptions_heating",
+        }
+
+        if receiver_kind in kind_key_map:
+            receiver_kind_label = translate(kind_key_map[receiver_kind], lang)
+            mode_descriptions = translate(desc_key_map[receiver_kind], lang)
         else:
             receiver_kind_label = receiver_kind.replace("_", "/").title()
-            mode_descriptions = "• 🔘 1-Button\n• 🔘🔘 2-Button"
+            mode_descriptions = translate("config_flow.mode_descriptions_default", lang)
 
         return {
             "receiver_kind": receiver_kind_label,
@@ -1831,6 +1817,122 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.error("Error in EWneo learning: %s", e)
             raise
 
+    async def _handle_ewneo_relearn_existing(
+        self, coordinator, receiver_serial: str, ewneo_index: int,
+        gateway_serial: str, device_type_code: int, lang: str,
+    ) -> str:
+        """Handle Überlernen: update an existing EWneo device in-place.
+
+        Called when the same physical receiver re-joins while the device
+        still exists in both coordinator AND the HA device registry.
+        Updates gateway serial, EWB index and entity attributes without
+        creating a new device.
+        """
+        existing_device = coordinator.devices[receiver_serial]
+
+        # Try to get the user-set name from Device Registry first
+        existing_device_name = None
+        try:
+            ha_device = coordinator._find_ha_device_entry(receiver_serial)
+            if ha_device:
+                existing_device_name = ha_device.name_by_user or ha_device.name
+        except Exception as e:
+            _LOGGER.debug("Could not get device name from registry: %s", e)
+
+        if not existing_device_name:
+            existing_device_name = (
+                existing_device.get("name")
+                or f"Easywave neo {t_receiver(lang)} {receiver_serial}"
+            )
+
+        old_ewneo_index = existing_device.get("ewneo_index")
+
+        _LOGGER.info(
+            "⚠️ Easywave neo receiver already exists: %s (old index: %s, new index: %s)",
+            existing_device_name, old_ewneo_index, ewneo_index,
+        )
+
+        # Determine specific device type name from device_type_code
+        device_type_map = {
+            0x03: "ewneo_switch",
+            0x04: "ewneo_dimmer",
+            0x05: "ewneo_motor",
+            0x06: "ewneo_dual_switch",
+            0x07: "ewneo_quad_switch",
+            0x08: "ewneo_dual_motor",
+            0x09: "ewneo_quad_motor",
+        }
+        specific_device_type_name = device_type_map.get(device_type_code, "ewneo_receiver")
+
+        # Update the existing device with new gateway serial and index
+        existing_device["ewneo_index"] = ewneo_index
+        existing_device["gateway_serial"] = gateway_serial
+        existing_device["device_type_code"] = device_type_code
+        existing_device["device_type_name"] = specific_device_type_name
+        existing_device["type"] = specific_device_type_name
+
+        # Also update in coordinator.data
+        if hasattr(coordinator, "data") and receiver_serial in coordinator.data:
+            coordinator.data[receiver_serial]["ewneo_index"] = ewneo_index
+            coordinator.data[receiver_serial]["gateway_serial"] = gateway_serial
+            coordinator.data[receiver_serial]["device_type_code"] = device_type_code
+            coordinator.data[receiver_serial]["device_type_name"] = specific_device_type_name
+            coordinator.data[receiver_serial]["type"] = specific_device_type_name
+            _LOGGER.info("✅ Updated coordinator.data for device %s", receiver_serial[-8:])
+
+        # Free the old index if it differs
+        if old_ewneo_index is not None and old_ewneo_index != ewneo_index:
+            _LOGGER.info("🔄 Freeing old EWneo index: %d", old_ewneo_index)
+            coordinator.mark_ewb_index_free(old_ewneo_index)
+
+        coordinator.mark_ewb_index_used(
+            ewneo_index, gateway_serial, receiver_serial, existing_device_name,
+        )
+
+        await coordinator._save_device_configuration()
+        _LOGGER.info("✅ Device configuration updated and saved")
+
+        # Update all entities with new gateway serial and index
+        _LOGGER.info("🔄 Updating entities for device %s...", receiver_serial[-8:])
+        from homeassistant.helpers import entity_registry as er
+
+        entity_reg = er.async_get(self.hass)
+        device_entities = [
+            entry
+            for entry in entity_reg.entities.values()
+            if entry.platform == DOMAIN
+            and entry.unique_id
+            and receiver_serial in entry.unique_id
+        ]
+
+        _LOGGER.info("📝 Found %d entities to update", len(device_entities))
+        for entity_entry in device_entities:
+            entity_obj = None
+            for entity in self.hass.data.get(DOMAIN, {}).get("entities", []):
+                if hasattr(entity, "entity_id") and entity.entity_id == entity_entry.entity_id:
+                    entity_obj = entity
+                    break
+            if entity_obj:
+                if hasattr(entity_obj, "_gateway_serial"):
+                    entity_obj._gateway_serial = gateway_serial
+                if hasattr(entity_obj, "_ewneo_index"):
+                    entity_obj._ewneo_index = ewneo_index
+
+        await coordinator.async_request_refresh()
+        _LOGGER.info("✅ Entities updated with new gateway serial and index")
+
+        self._learned_device = {
+            "name": existing_device_name,
+            "serial_number": receiver_serial,
+            "device_type": "ewneo_receiver",
+            "ewneo_index": ewneo_index,
+            "old_ewneo_index": old_ewneo_index,
+            "gateway_serial": gateway_serial,
+            "device_type_code": device_type_code,
+            "already_exists": True,
+        }
+        return "already_exists"
+
     async def async_step_device_ewneo_receiver_learn_wait(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show wait menu while EWneo receiver learning is running."""
         # Check if task is done and redirect
@@ -2047,126 +2149,45 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # Check if receiver already exists (similar to sensor)
             if receiver_serial in coordinator.devices:
-                existing_device = coordinator.devices[receiver_serial]
-                
-                # Try to get the user-set name from Device Registry first
-                existing_device_name = None
-                try:
-                    from homeassistant.helpers import device_registry as dr
-                    device_reg = dr.async_get(self.hass)
-                    # Find device by identifier (supports both UUID and serial)
-                    ha_device = coordinator._find_ha_device_entry(receiver_serial)
-                    if ha_device:
-                        # Use name_by_user if set, otherwise use HA device name
-                        existing_device_name = ha_device.name_by_user or ha_device.name
-                except Exception as e:
-                    _LOGGER.debug("Could not get device name from registry: %s", e)
-                
-                # Fallback to coordinator device name or default
-                if not existing_device_name:
-                    existing_device_name = existing_device.get("name") or f"Easywave neo {t_receiver(lang)} {receiver_serial}"
-                
-                old_ewneo_index = existing_device.get("ewneo_index")
-                old_gateway_serial = existing_device.get("gateway_serial")
-                
-                _LOGGER.info("⚠️ Easywave neo receiver already exists: %s (old index: %s, new index: %s)",
-                           existing_device_name, old_ewneo_index, ewneo_index)
-                
-                # Determine specific device type name from device_type_code
-                device_type_map = {
-                    0x03: "ewneo_switch",           # Single switch
-                    0x04: "ewneo_dimmer",           # Dimmer
-                    0x05: "ewneo_motor",            # Single motor
-                    0x06: "ewneo_dual_switch",      # Dual switch
-                    0x07: "ewneo_quad_switch",      # Quad switch
-                    0x08: "ewneo_dual_motor",       # Dual motor
-                    0x09: "ewneo_quad_motor",       # Quad motor
-                }
-                specific_device_type_name = device_type_map.get(device_type_code, "ewneo_receiver")
-                
-                # Update the existing device with new gateway serial and index
-                existing_device["ewneo_index"] = ewneo_index
-                existing_device["gateway_serial"] = gateway_serial
-                existing_device["device_type_code"] = device_type_code
-                existing_device["device_type_name"] = specific_device_type_name  # Use specific type
-                existing_device["type"] = specific_device_type_name  # Also update 'type' field for consistency
-                
-                # Also update in coordinator.data to ensure entities get the new data
-                if hasattr(coordinator, 'data') and receiver_serial in coordinator.data:
-                    coordinator.data[receiver_serial]["ewneo_index"] = ewneo_index
-                    coordinator.data[receiver_serial]["gateway_serial"] = gateway_serial
-                    coordinator.data[receiver_serial]["device_type_code"] = device_type_code
-                    coordinator.data[receiver_serial]["device_type_name"] = specific_device_type_name
-                    coordinator.data[receiver_serial]["type"] = specific_device_type_name
-                    _LOGGER.info("✅ Updated coordinator.data for device %s", receiver_serial[-8:])
-                
-                # Free the old index if it's different from the new one
-                if old_ewneo_index is not None and old_ewneo_index != ewneo_index:
-                    _LOGGER.info("🔄 Freeing old EWneo index: %d", old_ewneo_index)
-                    coordinator.mark_ewb_index_free(old_ewneo_index)
-                
-                # Mark new index as used
-                coordinator.mark_ewb_index_used(ewneo_index, gateway_serial, receiver_serial, existing_device_name)
-                
-                # Save the updated device configuration immediately
-                await coordinator._save_device_configuration()
-                _LOGGER.info("✅ Device configuration updated and saved")
-                
-                # Update all entities with new gateway serial and index
-                _LOGGER.info("🔄 Updating entities for device %s...", receiver_serial[-8:])
-                
-                # Get all entities for this device from entity registry
-                from homeassistant.helpers import entity_registry as er
-                entity_reg = er.async_get(self.hass)
-                
-                # Find all entities for this device
-                device_entities = []
-                for entity_id, entry in entity_reg.entities.items():
-                    if entry.platform == DOMAIN:
-                        # Check if this entity belongs to our device
-                        if entry.unique_id and receiver_serial in entry.unique_id:
-                            device_entities.append(entry)
-                
-                _LOGGER.info("📝 Found %d entities to update", len(device_entities))
-                
-                # Reload entities by triggering their async_update_ha_state
-                for entity_entry in device_entities:
-                    entity_id = entity_entry.entity_id
-                    _LOGGER.debug("🔄 Reloading entity: %s", entity_id)
-                    
-                    # Get the entity object and update its internal state
-                    entity_obj = None
-                    for entity in self.hass.data.get(DOMAIN, {}).get("entities", []):
-                        if hasattr(entity, "entity_id") and entity.entity_id == entity_id:
-                            entity_obj = entity
-                            break
-                    
-                    if entity_obj:
-                        # Update internal attributes from coordinator data
-                        if hasattr(entity_obj, '_gateway_serial'):
-                            entity_obj._gateway_serial = gateway_serial
-                            _LOGGER.info("✅ Updated _gateway_serial for entity %s", entity_id)
-                        if hasattr(entity_obj, '_ewneo_index'):
-                            entity_obj._ewneo_index = ewneo_index
-                            _LOGGER.info("✅ Updated _ewneo_index for entity %s", entity_id)
-                
-                # Force a coordinator refresh to propagate changes to entities
-                await coordinator.async_request_refresh()
-                _LOGGER.info("✅ Entities updated with new gateway serial and index")
-                
-                # Store for already_exists step
-                self._learned_device = {
-                    "name": existing_device_name,
-                    "serial_number": receiver_serial,
-                    "device_type": "ewneo_receiver",
-                    "ewneo_index": ewneo_index,
-                    "old_ewneo_index": old_ewneo_index,
-                    "gateway_serial": gateway_serial,
-                    "device_type_code": device_type_code,
-                    "already_exists": True,
-                }
-                
-                return "already_exists"
+                # ── Distinguish "Überlernen" from stale ghost after UI delete ──
+                # If the user deleted the device via HA's device page, the HA device
+                # entry and entities are gone but coordinator.devices may still carry
+                # stale data.  In that case we must NOT enter the already_exists path
+                # (which would silently reference the ghost) — instead we clean up the
+                # stale coordinator state and fall through to fresh device creation.
+                ha_device_entry = coordinator._find_ha_device_entry(receiver_serial)
+                if not ha_device_entry:
+                    stale_device = coordinator.devices[receiver_serial]
+                    old_idx = stale_device.get("ewneo_index")
+                    _LOGGER.info(
+                        "♻️ Device %s found in coordinator but missing from HA registry "
+                        "(deleted via UI) — cleaning up stale state for fresh creation",
+                        receiver_serial[-8:],
+                    )
+                    # Free old EWB index if it differs from the newly allocated one
+                    if old_idx is not None and old_idx != ewneo_index:
+                        coordinator.mark_ewb_index_free(old_idx)
+                    # Software-only cleanup (no EWB_REMOVE — device was just freshly paired)
+                    coordinator.devices.pop(receiver_serial, None)
+                    coordinator._known_devices.discard(receiver_serial)
+                    coordinator._devices_with_fired_events.discard(receiver_serial)
+                    coordinator._dispatched_devices.discard(receiver_serial)
+                    if receiver_serial in coordinator._registered_devices:
+                        del coordinator._registered_devices[receiver_serial]
+                    if coordinator.device_manager.is_whitelisted(receiver_serial):
+                        coordinator.device_manager.remove_device(receiver_serial)
+                    await coordinator._save_registered_devices()
+                    await coordinator._save_device_configuration()
+                    await coordinator.device_manager.save()
+                    _LOGGER.info("✅ Stale data removed — proceeding as new device")
+                    # Fall through to new-device creation below (skip already_exists)
+                else:
+                    # ── Überlernen: device exists in coordinator AND in HA ──
+                    # Update the existing device in-place (no new device creation).
+                    return await self._handle_ewneo_relearn_existing(
+                        coordinator, receiver_serial, ewneo_index, gateway_serial,
+                        device_type_code, lang,
+                    )
 
             # Determine channel count and specific device type based on device type code
             device_type_map = {
@@ -2228,8 +2249,9 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         device_type = self._learned_device.get("device_type", self._learned_device.get("type", "unknown"))
         serial_number = self._learned_device.get("serial_number", "?")
+        lang = get_language(self.hass)
         
-        # Generate description based on device type
+        # Generate translated description based on device type
         if device_type == "ew_transmitter":
             button_count = self._learned_device.get("button_count", 4)
             
@@ -2241,23 +2263,14 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if coordinator:
                 sender_index = str(coordinator.get_next_ew_sender_index())
             
-            lang = get_language(self.hass)
             suggested_name = f"Easywave {t_transmitter(lang)} #{sender_index}"
             last_telegram = self._learned_device.get("last_telegram", {})
             button = last_telegram.get("button", "?")
             
-            description = (
-                f"✅ **Easywave Sender erfolgreich erkannt!**\n\n"
-                f"**🔍 Detected device info:**\n"
-                f"• Serial: `{serial_number[-8:]}`\n"
-                f"• Name: {suggested_name}\n"
-                f"• Button count: {button_count}\n"
-                f"• Button pressed: {button}\n\n"
-                f"**⚡ What will be created:**\n"
-                f"• 1 Easywave Sender device\n"
-                f"• {button_count} button entities\n\n"
-                f"**⚙️ Gerät anlegen:**\n"
-                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
+            description = translate(
+                "config_flow.confirm_transmitter_desc", lang,
+                serial=serial_number[-8:], name=suggested_name,
+                button_count=str(button_count), button=str(button)
             )
         elif device_type in ["ew_sensor", "ewneo_sensor"]:
             sensor_types = self._learned_device.get("sensor_types", [])
@@ -2265,7 +2278,6 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             suggested_name = self._learned_device.get("name", "Easywave neo Sensor #?")
             
             # Translate sensor type names
-            lang = get_language(self.hass)
             sensors_to_show = sensor_types or available_sensors
             translated_sensors = []
             for s in sensors_to_show:
@@ -2275,63 +2287,55 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     translated_name = s.replace('_', ' ').title()
                 translated_sensors.append(f"• {translated_name}")
             sensor_list = "\n".join(translated_sensors)
+            if not sensor_list:
+                sensor_list = "• " + translate("config_flow.auto_detect", lang)
            
-            # Use translation placeholders for EWneo-Sensor description
-            description_placeholders = {
-                "serial_short": serial_number[-8:],
-                "suggested_name": suggested_name,
-                "sensor_list": sensor_list,
-            }
-            
-            # Description will be fetched from strings.json via device_confirm_ewneo_sensor step
-            description = ""
+            description = ""  # Description comes from translation file via placeholders
         elif device_type == "ewneo_receiver":
             device_type_code = self._learned_device.get("device_type_code", 0)
-            device_type_name = self._learned_device.get("device_type_name", "unknown")
             ewneo_index = self._learned_device.get("ewneo_index", "?")
             
-            # Get language
-            lang = get_language(self.hass)
-            
-            # Determine entity type for display
-            if device_type_code == 0x04:
-                entity_type_display = "Dimmer (Light)"
-            elif device_type_code in [0x05, 0x08, 0x09]:
-                entity_type_display = "Motor (Cover)"
-            elif device_type_code in [0x03, 0x06, 0x07]:
-                entity_type_display = "Switch"
-            else:
-                entity_type_display = "Switch"
-            
-            # Use stored name or generate fallback with index
             friendly_type_name = get_ewneo_device_name(device_type_code, lang)
             suggested_name = self._learned_device.get("name", f"Easywave neo {t_receiver(lang)} #{ewneo_index + 1}")
+            
+            description = translate(
+                "config_flow.confirm_ewneo_receiver_desc", lang,
+                serial=serial_number[-8:], name=suggested_name,
+                device_type_name=friendly_type_name
+            )
         else:
             suggested_name = self._learned_device.get("name", f"EASYWAVE Device ({serial_number})")
-            description = (
-                f"✅ **Device successfully detected!**\n\n"
-                f"**🔍 Detected device info:**\n"
-                f"• Serial: `{serial_number[-8:]}`\n"
-                f"• Name: {suggested_name}\n"
-                f"• Type: {device_type}\n\n"
-                f"**⚙️ Gerät anlegen:**\n"
-                f"Wählen Sie 'Anlegen' um das Gerät zu erstellen."
+            description = translate(
+                "config_flow.confirm_generic_desc", lang,
+                serial=serial_number[-8:], name=suggested_name,
+                device_type=device_type
             )
 
         self._learned_device["name"] = suggested_name
 
         # Use specialized step for EWneo-Sensor to enable translations
-        step_id = "device_confirm_ewneo_sensor" if device_type in ["ew_sensor", "ewneo_sensor"] else "device_confirm"
+        if device_type in ["ew_sensor", "ewneo_sensor"]:
+            return self.async_show_menu(
+                step_id="device_confirm_ewneo_sensor",
+                menu_options=["device_confirm_create", "device_confirm_rename", "device_confirm_back"],
+                description_placeholders={
+                    "serial_short": serial_number[-8:],
+                    "suggested_name": suggested_name,
+                    "sensor_list": sensor_list,
+                    "docs_url": get_docs_url("device_confirm_ewneo_sensor"),
+                },
+            )
+
+        # Append create instruction to description
+        create_instruction = translate("config_flow.confirm_create_instruction", lang)
+        description = f"{description}\n\n**⚙️** {create_instruction}"
 
         return self.async_show_menu(
-            step_id=step_id,
-            menu_options={
-                "device_confirm_create": "✅ Anlegen",
-                "device_confirm_rename": "✏️ Namen ändern",
-                "device_confirm_back": "⬅️ Zurück",
-            },
+            step_id="device_confirm",
+            menu_options=["device_confirm_create", "device_confirm_rename", "device_confirm_back"],
             description_placeholders={
-                "docs_url": get_docs_url(step_id),
+                "description": description,
+                "docs_url": get_docs_url("device_confirm"),
             },
         )
 
@@ -2420,17 +2424,13 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     translated_sensors.append(f"• {translated_name}")
                 sensor_list = "\n".join(translated_sensors)
                 if not sensor_list:
-                    sensor_list = "• Auto-Erkennung bei Empfang" if lang == "de" else "• Auto-detection on reception"
+                    sensor_list = "• " + translate("config_flow.auto_detect", lang)
                 
                 serial_number = self._learned_device.get("serial_number", "?")
                 
                 return self.async_show_menu(
                     step_id="device_confirm_ewneo_sensor",
-                    menu_options={
-                        "device_confirm_create": "✅ Anlegen",
-                        "device_confirm_rename": "✏️ Namen ändern",
-                        "device_confirm_back": "⬅️ Zurück",
-                    },
+                    menu_options=["device_confirm_create", "device_confirm_rename", "device_confirm_back"],
                     description_placeholders={
                         "serial_short": serial_number[-8:],
                         "suggested_name": device_name,
@@ -2472,11 +2472,7 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_menu(
             step_id="device_ewneo_receiver_confirm",
-            menu_options={
-                "device_ewneo_receiver_confirm_create": "✅ Anlegen",
-                "device_ewneo_receiver_confirm_rename": "✏️ Namen ändern",
-                "device_ewneo_receiver_confirm_back": "⬅️ Zurück",
-            },
+            menu_options=["device_ewneo_receiver_confirm_create", "device_ewneo_receiver_confirm_rename", "device_ewneo_receiver_confirm_back"],
             description_placeholders={
                 "docs_url": get_docs_url("device_ewneo_receiver_confirm"),
             },
@@ -2768,7 +2764,7 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         _LOGGER.warning("⚠️ Error querying initial EWneo state: %s", e)
 
                 _LOGGER.info("Device permanently registered: %s (%s) with %d entities", 
-                           device_data.get("name", device_data.get("device_type", "Unbekanntes Gerät")), 
+                           device_data.get("name", device_data.get("device_type", "Unknown device")), 
                            serial_number[-8:], len(entity_info.get("entities", [])))
                 
                 # SKIP: register_device_permanently already fired EVENT_DEVICE_ADDED and platform-specific events
@@ -2829,7 +2825,7 @@ class ModernEasywaveConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         # Determine if entities were created
         entity_count = len(entity_info.get("entities", [])) if 'entity_info' in locals() else 0
-        device_name = device_data.get("name", device_data.get("device_type", "Unbekanntes Gerät")) if 'device_data' in locals() else "Neues Gerät"
+        device_name = device_data.get("name", device_data.get("device_type", translate("config_flow.unknown_device", get_language(self.hass)))) if 'device_data' in locals() else translate("config_flow.new_device", get_language(self.hass))
         serial = serial_number[-8:] if 'serial_number' in locals() and serial_number else "?"
         
         # Check if entities actually exist in HA

@@ -574,6 +574,14 @@
       "device_ewneo_receiver_confirm_back": {
         "title": "Retour"
       },
+      "device_ewneo_receiver_confirm": {
+        "title": "Confirmer le récepteur Easywave neo",
+        "menu_options": {
+          "device_ewneo_receiver_confirm_create": "\u2705 Créer",
+          "device_ewneo_receiver_confirm_rename": "\u270f\ufe0f Renommer",
+          "device_ewneo_receiver_confirm_back": "\u2b05\ufe0f Retour"
+        }
+      },
       "device_ewneo_receiver_confirm_legacy": {
         "title": "Confirmer l'appareil Easywave neo (Legacy)"
       },
@@ -669,6 +677,11 @@
       "device_confirm": {
         "title": "Confirmer l'appareil",
         "description": "{description}",
+        "menu_options": {
+          "device_confirm_create": "\u2705 Créer",
+          "device_confirm_rename": "\u270f\ufe0f Renommer",
+          "device_confirm_back": "\u2b05\ufe0f Retour"
+        },
         "data": {
           "device_name": "Nom de l'appareil",
           "action": "Action"
@@ -679,6 +692,15 @@
       },
       "device_confirm_back": {
         "title": "Retour"
+      },
+      "device_confirm_ewneo_sensor": {
+        "title": "Confirmer le capteur Easywave neo",
+        "description": "\u2705 **Capteur Easywave neo détecté !**\n\n**\ud83d\udd0d Infos appareil :**\n\u2022 N\u00b0 de série : `{serial_short}`\n\u2022 Nom : {suggested_name}\n\n**\ud83d\udcca Capteurs :**\n{sensor_list}",
+        "menu_options": {
+          "device_confirm_create": "\u2705 Créer",
+          "device_confirm_rename": "\u270f\ufe0f Renommer",
+          "device_confirm_back": "\u2b05\ufe0f Retour"
+        }
       },
       "device_save": {
         "title": "Enregistrer l'appareil"
@@ -1044,26 +1066,6 @@
           "description": "L'ID de l'appareil Home Assistant à recréer"
         }
       }
-    },
-    "device_disable": {
-      "name": "Désactiver l'appareil",
-      "description": "Désactive toutes les entités de cet appareil",
-      "fields": {
-        "device_id": {
-          "name": "ID de l'appareil",
-          "description": "L'ID de l'appareil Home Assistant à désactiver"
-        }
-      }
-    },
-    "device_enable": {
-      "name": "Activer l'appareil",
-      "description": "Active toutes les entités désactivées de cet appareil",
-      "fields": {
-        "device_id": {
-          "name": "ID de l'appareil",
-          "description": "L'ID de l'appareil Home Assistant à activer"
-        }
-      }
     }
   },
   "common": {
@@ -1118,6 +1120,11 @@
       "device_not_responding": "{device} : RX11 ne répond pas",
       "turn_on_failed": "Erreur lors de l'activation : {error}",
       "turn_off_failed": "Erreur lors de la désactivation : {error}",
+      "gateway_filter_restore_failed": "Le filtre de passerelle n'a pas pu être restauré. Veuillez redémarrer Home Assistant ou réajouter l'appareil.",
+      "gateway_not_in_filter": "Passerelle {serial} absente du filtre RX11. Veuillez redémarrer Home Assistant ou réajouter l'appareil.",
+      "gateway_filter_unavailable": "Passerelle {serial} absente du filtre RX11. Fonction de filtre non disponible - veuillez redémarrer Home Assistant.",
+      "invalid_serial": "Numéro de série invalide {serial}. Veuillez supprimer et réajouter l'appareil.",
+      "command_no_response": "Commande échouée - aucune réponse de l'appareil",
       "cannot_delete_rx11_with_devices": "Le transceiver USB RX11 ne peut pas être supprimé tant que des appareils sont encore configurés.\n\nVeuillez d'abord supprimer tous les appareils via le menu à trois points, ou supprimer l'intégration entière via le menu à trois points de l'entrée de l'intégration",
       "cannot_delete_rx11": "Le transceiver USB RX11 ne peut pas être supprimé via le menu de l'appareil.\n\nPour supprimer le RX11, veuillez supprimer l'intégration Easywave complète via le menu à trois points de l'entrée de l'intégration."
     },
@@ -1177,6 +1184,86 @@
       "receiver_heating_cooling": "Chauffage",
       "receiver_universal_4button": "Universel",
       "channel_count": "{count} canaux"
+    },
+    "state_translated": {
+      "on": "Activé",
+      "off": "Désactivé",
+      "up": "Haut",
+      "down": "Bas",
+      "stop": "Stop",
+      "released": "Non appuyé",
+      "unknown": "Inconnu"
+    },
+    "config_flow": {
+      "operating_mode_1": "Fonctionnement 1 bouton",
+      "operating_mode_2_switch": "Fonctionnement 2 boutons (ON/OFF)",
+      "operating_mode_2_cover": "Fonctionnement 2 boutons (HAUT/BAS)",
+      "operating_mode_3": "Fonctionnement 3 boutons (HAUT/STOP/BAS)",
+      "grouping_single": "Commuter individuellement",
+      "grouping_group": "Commuter en groupe",
+      "behavior_impulse": "Impulsion",
+      "behavior_permanent": "Permanent",
+      "buttons_3_or_4": "3 ou 4 boutons",
+      "button_count_singular": "{count} bouton",
+      "button_count_plural": "{count} boutons",
+      "control_mode": "Mode de commande",
+      "behavior": "Comportement",
+      "programming_mode_impulse": "IMPULSION",
+      "programming_mode_on_off": "ON / OFF",
+      "programming_mode_up_down": "HAUT / BAS",
+      "programming_mode_up_stop_down": "HAUT / STOP / BAS",
+      "programming_mode_heating": "ON / OFF",
+      "programming_mode_universal": "UNIVERSEL",
+      "receiver_type_impulse": "Impulsion (1 touche)",
+      "receiver_type_switch_2button": "MARCHE/ARRÊT (2 touches)",
+      "receiver_type_cover_2button": "OUVERT/FERMÉ (2 touches)",
+      "receiver_type_motor_3button": "OUVERT/STOP/FERMÉ (3 touches)",
+      "receiver_type_heating_cooling": "Chauffage",
+      "receiver_type_universal_4button": "Universel (4 touches)",
+      "mode_desc_impulse": "IMPULSION (1 touche)",
+      "mode_desc_switch_2button": "ON / OFF (2 touches)",
+      "mode_desc_cover_2button": "HAUT / BAS (2 touches)",
+      "mode_desc_motor_3button": "HAUT / STOP / BAS (3 touches)",
+      "mode_desc_heating": "ON / OFF (Chauffage)",
+      "mode_desc_universal": "UNIVERSEL (4 touches)",
+      "summary_impulse": "Bouton bascule (sans état)",
+      "summary_switch_2button": "Interrupteur sans état (A→On, B→Off)",
+      "summary_cover_2button": "Volet sans état (A→Haut, B→Bas)",
+      "summary_motor_3button": "Moteur sans état (A→Haut, B→Bas, C→Stop)",
+      "summary_heating": "Interrupteur chauffage (ON/OFF avec répétition 4h)",
+      "summary_universal": "Bouton A\nBouton B\nBouton C\nBouton D",
+      "learn_impulse": "Mettez le récepteur en mode d'apprentissage 1 touche.",
+      "learn_switch_2button": "Mettez le récepteur en mode d'apprentissage 2 touches (On + Off).",
+      "learn_cover_2button": "Mettez le récepteur en mode d'apprentissage 2 touches (Haut + Bas).",
+      "learn_motor_3button": "Mettez le récepteur en mode d'apprentissage 3 touches (Haut + Bas + Stop).",
+      "learn_heating": "Mettez le récepteur en mode d'apprentissage 2 touches (On + Off).",
+      "learn_universal": "Mettez le récepteur en mode d'apprentissage 4 touches.",
+      "learn_generic": "Mettez le récepteur en mode d'apprentissage {mode} touches.",
+      "legacy_mode_1": "1 touche (Bascule)",
+      "legacy_mode_2": "2 touches",
+      "legacy_mode_3": "3 touches",
+      "legacy_mode_generic": "Mode {mode}",
+      "legacy_summary": "Configuration standard",
+      "receiver_kind_switch": "Interrupteur",
+      "receiver_kind_motor": "Moteur/Volet",
+      "receiver_kind_heating": "Chauffage/Refroidissement",
+      "mode_descriptions_switch": "• \ud83d\udd18 1 touche (Bascule)\n• \ud83d\udd18\ud83d\udd18 2 touches (On + Off)",
+      "mode_descriptions_motor": "• \ud83d\udd18 1 touche (Bascule)\n• \ud83d\udd18\ud83d\udd18 2 touches (Haut + Bas)\n• \ud83d\udd18\ud83d\udd18\ud83d\udd18 3 touches (Haut + Bas + Stop)",
+      "mode_descriptions_heating": "• \ud83d\udd18 1 touche (Bascule, répétition auto 4h)",
+      "mode_descriptions_default": "• \ud83d\udd18 1 touche\n• \ud83d\udd18\ud83d\udd18 2 touches",
+      "receiver_manual_instruction": "Entrez le numéro de série du récepteur Easywave manuellement.",
+      "unknown_device": "Appareil inconnu",
+      "new_device": "Nouvel appareil",
+      "auto_detect": "Détection automatique à la réception",
+      "button_status_active_stop": "Actif - utilisez 'Stop Command' pour arrêter",
+      "button_status_ready_doubleclick": "Prêt - double-clic pour mode continu",
+      "button_status_ready_click_hold": "Prêt - clic pour mode continu",
+      "button_status_ready_click": "Prêt - clic pour impulsion unique",
+      "device_fallback_name": "Appareil {serial}",
+      "confirm_transmitter_desc": "\u2705 **\u00c9metteur Easywave détecté avec succès !**\n\n**\ud83d\udd0d Infos appareil :**\n\u2022 N\u00b0 de série : `{serial}`\n\u2022 Nom : {name}\n\u2022 Nombre de boutons : {button_count}\n\u2022 Bouton appuyé : {button}\n\n**\u26a1 Sera créé :**\n\u2022 1 émetteur Easywave\n\u2022 {button_count} entités bouton",
+      "confirm_ewneo_receiver_desc": "\u2705 **Récepteur Easywave neo détecté !**\n\n**\ud83d\udd0d Infos appareil :**\n\u2022 N\u00b0 de série : `{serial}`\n\u2022 Nom : {name}\n\u2022 Type : {device_type_name}",
+      "confirm_generic_desc": "\u2705 **Appareil détecté avec succès !**\n\n**\ud83d\udd0d Infos appareil :**\n\u2022 N\u00b0 de série : `{serial}`\n\u2022 Nom : {name}\n\u2022 Type : {device_type}",
+      "confirm_create_instruction": "Sélectionnez 'Créer' pour créer l'appareil."
     }
   }
 }

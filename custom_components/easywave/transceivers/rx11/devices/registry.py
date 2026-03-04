@@ -645,17 +645,17 @@ def get_device_class_for_info(device_info: Dict[str, Any]) -> Optional[type]:
         # For EWneo transceivers
         if device_type in [DeviceType.EWNEO_TRANSCEIVER, DeviceType.EWNEO_SWITCH, 
                           DeviceType.EWNEO_DUAL_SWITCH, DeviceType.EWNEO_QUAD_SWITCH]:
-            from .ewneo_transceivers.unified_switch import EWneoSwitch
-            return EWneoSwitch
+            from .ewneo_transceivers.unified_switch import RX11EWneoSwitch
+            return RX11EWneoSwitch
         
         if device_type in [DeviceType.EWNEO_DIMMER]:
-            from .ewneo_transceivers.dimmer import EWneoDimmer
-            return EWneoDimmer
+            from .ewneo_transceivers.dimmer import RX11EWneoDimmer
+            return RX11EWneoDimmer
         
         if device_type in [DeviceType.EWNEO_MOTOR, DeviceType.EWNEO_DUAL_MOTOR, 
                           DeviceType.EWNEO_QUAD_MOTOR]:
-            from .ewneo_transceivers.unified_motor import EWneoMotor
-            return EWneoMotor
+            from .ewneo_transceivers.unified_motor import RX11EWneoMotor
+            return RX11EWneoMotor
         
         return None
         

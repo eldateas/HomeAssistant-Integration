@@ -196,7 +196,7 @@
         "name": "Tastencode D"
       },
       "toggle": {
-        "name": "Toggle"
+        "name": "Umschalten"
       },
       "on": {
         "name": "Ein"
@@ -528,7 +528,7 @@
         "title": "Zurück"
       },
       "device_ewneo_receiver_learn_timeout": {
-        "title": "Timeout",
+        "title": "Zeitüberschreitung",
         "description": "⏰ **Keine Antwort empfangen**\n\nDas System hat keine gültige Antwort erhalten. Sie können es erneut versuchen.",
         "menu_options": {
           "device_ewneo_receiver_programming_mode": "🔄 Erneut versuchen",
@@ -573,6 +573,14 @@
       "device_ewneo_receiver_confirm_back": {
         "title": "Zurück"
       },
+      "device_ewneo_receiver_confirm": {
+        "title": "Easywave neo Empfänger bestätigen",
+        "menu_options": {
+          "device_ewneo_receiver_confirm_create": "\u2705 Anlegen",
+          "device_ewneo_receiver_confirm_rename": "\u270f\ufe0f Namen ändern",
+          "device_ewneo_receiver_confirm_back": "\u2b05\ufe0f Zurück"
+        }
+      },
       "device_ewneo_receiver_confirm_legacy": {
         "title": "Easywave neo Gerät bestätigen (Legacy)"
       },
@@ -600,7 +608,7 @@
       },
       "device_receiver_description": {
         "title": "Empfänger einlernen",
-        "description": "Bringen Sie Ihren Empfänger bitte jetzt in den Programmiermodus für **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhytmus blinkt.",
+        "description": "Bringen Sie Ihren Empfänger bitte jetzt in den Programmiermodus für **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhythmus blinkt.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Weiter",
           "device_receiver_type": "⬅️ Zurück"
@@ -608,7 +616,7 @@
       },
       "device_receiver_description_heating": {
         "title": "Empfänger einlernen",
-        "description": "Bringen Sie Ihren Empfänger für Heizungssteuerung bitte jetzt in den Programmiermodus **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhytmus blinkt.",
+        "description": "Bringen Sie Ihren Empfänger für Heizungssteuerung bitte jetzt in den Programmiermodus **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf \"Weiter\", sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhythmus blinkt.",
         "menu_options": {
           "device_receiver_learn_start": "▶️ Weiter",
           "device_receiver_type": "⬅️ Zurück"
@@ -668,6 +676,11 @@
       "device_confirm": {
         "title": "Gerät bestätigen",
         "description": "{description}",
+        "menu_options": {
+          "device_confirm_create": "\u2705 Anlegen",
+          "device_confirm_rename": "\u270f\ufe0f Namen ändern",
+          "device_confirm_back": "\u2b05\ufe0f Zurück"
+        },
         "data": {
           "device_name": "Gerätename",
           "action": "Aktion"
@@ -678,6 +691,15 @@
       },
       "device_confirm_back": {
         "title": "Zurück"
+      },
+      "device_confirm_ewneo_sensor": {
+        "title": "Easywave neo Sensor bestätigen",
+        "description": "\u2705 **Easywave neo Sensor erkannt!**\n\n**\ud83d\udd0d Geräteinfo:**\n\u2022 Seriennummer: `{serial_short}`\n\u2022 Name: {suggested_name}\n\n**\ud83d\udcca Sensoren:**\n{sensor_list}",
+        "menu_options": {
+          "device_confirm_create": "\u2705 Anlegen",
+          "device_confirm_rename": "\u270f\ufe0f Namen ändern",
+          "device_confirm_back": "\u2b05\ufe0f Zurück"
+        }
       },
       "device_save": {
         "title": "Gerät speichern"
@@ -920,7 +942,7 @@
       "description": "Führt Toggle-Funktion eines Easywave Receivers aus (Eintastbedienung mit LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Toggle-Funktion"
         }
       }
@@ -930,7 +952,7 @@
       "description": "Schaltet Easywave Receiver ein (Zweitastbedienung mit LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Ein-Funktion"
         }
       }
@@ -940,7 +962,7 @@
       "description": "Schaltet Easywave Receiver aus (Zweitastbedienung mit LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Aus-Funktion"
         }
       }
@@ -950,7 +972,7 @@
       "description": "Fährt Motor/Rollo auf (LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Auf-Funktion"
         }
       }
@@ -960,7 +982,7 @@
       "description": "Fährt Motor/Rollo zu (LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Zu-Funktion"
         }
       }
@@ -970,7 +992,7 @@
       "description": "Stoppt Motor/Rollo (LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Stopp-Funktion"
         }
       }
@@ -980,7 +1002,7 @@
       "description": "Macht Dimmer heller (LongPress für kontinuierliche Dimm-Funktion)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Heller-Funktion"
         }
       }
@@ -990,7 +1012,7 @@
       "description": "Macht Dimmer dunkler (LongPress für kontinuierliche Dimm-Funktion)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Dunkler-Funktion"
         }
       }
@@ -1000,7 +1022,7 @@
       "description": "Aktiviert Heiz-/Kühlmodus (ohne LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für Heizen/Kühlen-Funktion"
         }
       }
@@ -1010,7 +1032,7 @@
       "description": "Schaltet Heizung/Kühlung aus (ohne LongPress)",
       "fields": {
         "entity_id": {
-          "name": "Button Entity",
+          "name": "Button-Entit00e4t",
           "description": "Die Easywave Receiver Button-Entity für HVAC-Aus-Funktion"
         }
       }
@@ -1040,26 +1062,6 @@
         "device_id": {
           "name": "Geräte-ID",
           "description": "Die Home Assistant Device ID des neu zu erstellenden Geräts"
-        }
-      }
-    },
-    "device_disable": {
-      "name": "Gerät deaktivieren",
-      "description": "Deaktiviert alle Entitäten dieses Geräts",
-      "fields": {
-        "device_id": {
-          "name": "Geräte-ID",
-          "description": "Die Home Assistant Device ID des zu deaktivierenden Geräts"
-        }
-      }
-    },
-    "device_enable": {
-      "name": "Gerät aktivieren",
-      "description": "Aktiviert alle deaktivierten Entitäten dieses Geräts",
-      "fields": {
-        "device_id": {
-          "name": "Geräte-ID",
-          "description": "Die Home Assistant Device ID des zu aktivierenden Geräts"
         }
       }
     }
@@ -1116,6 +1118,11 @@
       "device_not_responding": "{device}: RX11 antwortet nicht",
       "turn_on_failed": "Fehler beim Einschalten: {error}",
       "turn_off_failed": "Fehler beim Ausschalten: {error}",
+      "gateway_filter_restore_failed": "Gateway-Filter konnte nicht wiederhergestellt werden. Bitte starten Sie Home Assistant neu oder fügen Sie das Gerät erneut hinzu.",
+      "gateway_not_in_filter": "Gateway {serial} nicht im RX11-Filter. Bitte starten Sie Home Assistant neu oder fügen Sie das Gerät erneut hinzu.",
+      "gateway_filter_unavailable": "Gateway {serial} nicht im RX11-Filter. Filter-Funktion nicht verfügbar - bitte Home Assistant neu starten.",
+      "invalid_serial": "Ungültige Seriennummer {serial}. Bitte löschen und fügen Sie das Gerät erneut hinzu.",
+      "command_no_response": "Befehl fehlgeschlagen - keine Antwort vom Gerät",
       "cannot_delete_rx11_with_devices": "Der RX11 USB Transceiver kann nicht gelöscht werden, solange noch Geräte angelegt sind. \n\nBitte löschen Sie zuerst alle Geräte über das Drei-Punkte-Menü, oder entfernen Sie die gesamte Integration über das Drei-Punkte-Menü vom Integrationseintrag",
       "cannot_delete_rx11": "Der RX11 USB Transceiver kann nicht über das Gerätemenü gelöscht werden.\n\nUm den RX11 zu entfernen, löschen Sie bitte die gesamte Easywave-Integration über das Drei-Punkte-Menü des Integrationseintrags."
     },
@@ -1175,6 +1182,86 @@
       "receiver_heating_cooling": "Heizung",
       "receiver_universal_4button": "Universal",
       "channel_count": "{count}-Kanal"
+    },
+    "state_translated": {
+      "on": "Ein",
+      "off": "Aus",
+      "up": "Auf",
+      "down": "Zu",
+      "stop": "Stopp",
+      "released": "Nicht betätigt",
+      "unknown": "Unbekannt"
+    },
+    "config_flow": {
+      "operating_mode_1": "1-Tast-Bedienung",
+      "operating_mode_2_switch": "2-Tast-Bedienung (EIN/AUS)",
+      "operating_mode_2_cover": "2-Tast-Bedienung (AUF/ZU)",
+      "operating_mode_3": "3-Tast-Bedienung (AUF/STOPP/ZU)",
+      "grouping_single": "Einzeln schalten",
+      "grouping_group": "Als Gruppe schalten",
+      "behavior_impulse": "Impuls",
+      "behavior_permanent": "Dauer",
+      "buttons_3_or_4": "3 oder 4 Tasten",
+      "button_count_singular": "{count} Taste",
+      "button_count_plural": "{count} Tasten",
+      "control_mode": "Bedienung",
+      "behavior": "Verhalten",
+      "programming_mode_impulse": "IMPULS",
+      "programming_mode_on_off": "EIN / AUS",
+      "programming_mode_up_down": "AUF / ZU",
+      "programming_mode_up_stop_down": "AUF / STOPP / ZU",
+      "programming_mode_heating": "EIN / AUS",
+      "programming_mode_universal": "UNIVERSAL",
+      "receiver_type_impulse": "Impuls (1-Tast)",
+      "receiver_type_switch_2button": "EIN/AUS (2-Tast)",
+      "receiver_type_cover_2button": "AUF/ZU (2-Tast)",
+      "receiver_type_motor_3button": "AUF/STOPP/ZU (3-Tast)",
+      "receiver_type_heating_cooling": "Heizung",
+      "receiver_type_universal_4button": "Universal (4-Tast)",
+      "mode_desc_impulse": "IMPULS (1-Tast)",
+      "mode_desc_switch_2button": "EIN / AUS (2-Tast)",
+      "mode_desc_cover_2button": "AUF / ZU (2-Tast)",
+      "mode_desc_motor_3button": "AUF / STOPP / ZU (3-Tast)",
+      "mode_desc_heating": "EIN / AUS (Heizung)",
+      "mode_desc_universal": "UNIVERSAL (4-Tast)",
+      "summary_impulse": "Toggle-Button (zustandslos)",
+      "summary_switch_2button": "Zustandsloser Schalter (A→Ein, B→Aus)",
+      "summary_cover_2button": "Zustandslose Abdeckung (A→Auf, B→Zu)",
+      "summary_motor_3button": "Zustandsloser Motor (A→Auf, B→Zu, C→Stopp)",
+      "summary_heating": "Heizungsschalter (EIN/AUS mit 4h Wiederholung)",
+      "summary_universal": "Button A\nButton B\nButton C\nButton D",
+      "learn_impulse": "Empfänger in 1-Tast Lernmodus versetzen.",
+      "learn_switch_2button": "Empfänger in 2-Tast Lernmodus versetzen (Ein + Aus).",
+      "learn_cover_2button": "Empfänger in 2-Tast Lernmodus versetzen (Auf + Zu).",
+      "learn_motor_3button": "Empfänger in 3-Tast Lernmodus versetzen (Auf + Zu + Stopp).",
+      "learn_heating": "Empfänger in 2-Tast Lernmodus versetzen (Ein + Aus).",
+      "learn_universal": "Empfänger in 4-Tast Lernmodus versetzen.",
+      "learn_generic": "Empfänger in {mode}-Tast Lernmodus versetzen.",
+      "legacy_mode_1": "1-Tast (Toggle)",
+      "legacy_mode_2": "2-Tast",
+      "legacy_mode_3": "3-Tast",
+      "legacy_mode_generic": "Modus {mode}",
+      "legacy_summary": "Standardkonfiguration",
+      "receiver_kind_switch": "Schalter",
+      "receiver_kind_motor": "Motor/Abdeckung",
+      "receiver_kind_heating": "Heizung/Kühlung",
+      "mode_descriptions_switch": "• \ud83d\udd18 1-Tast (Toggle)\n• \ud83d\udd18\ud83d\udd18 2-Tast (Ein + Aus)",
+      "mode_descriptions_motor": "• \ud83d\udd18 1-Tast (Toggle)\n• \ud83d\udd18\ud83d\udd18 2-Tast (Auf + Zu)\n• \ud83d\udd18\ud83d\udd18\ud83d\udd18 3-Tast (Auf + Zu + Stopp)",
+      "mode_descriptions_heating": "• \ud83d\udd18 1-Tast (Toggle, 4h automatische Wiederholung)",
+      "mode_descriptions_default": "• \ud83d\udd18 1-Tast\n• \ud83d\udd18\ud83d\udd18 2-Tast",
+      "receiver_manual_instruction": "Seriennummer des Easywave-Empfängers manuell eingeben.",
+      "unknown_device": "Unbekanntes Gerät",
+      "new_device": "Neues Gerät",
+      "auto_detect": "Auto-Erkennung bei Empfang",
+      "button_status_active_stop": "Aktiv - 'Stop Command' zum Beenden",
+      "button_status_ready_doubleclick": "Bereit - Doppelklick für Dauerbetrieb",
+      "button_status_ready_click_hold": "Bereit - Klick für Dauerbetrieb",
+      "button_status_ready_click": "Bereit - Klick für Einzelimpuls",
+      "device_fallback_name": "Gerät {serial}",
+      "confirm_transmitter_desc": "\u2705 **Easywave Sender erfolgreich erkannt!**\n\n**\ud83d\udd0d Geräteinfo:**\n\u2022 Seriennummer: `{serial}`\n\u2022 Name: {name}\n\u2022 Tastenanzahl: {button_count}\n\u2022 Gedrückte Taste: {button}\n\n**\u26a1 Wird erstellt:**\n\u2022 1 Easywave Sender\n\u2022 {button_count} Button-Entitäten",
+      "confirm_ewneo_receiver_desc": "\u2705 **Easywave neo Empfänger erkannt!**\n\n**\ud83d\udd0d Geräteinfo:**\n\u2022 Seriennummer: `{serial}`\n\u2022 Name: {name}\n\u2022 Typ: {device_type_name}",
+      "confirm_generic_desc": "\u2705 **Gerät erfolgreich erkannt!**\n\n**\ud83d\udd0d Geräteinfo:**\n\u2022 Seriennummer: `{serial}`\n\u2022 Name: {name}\n\u2022 Typ: {device_type}",
+      "confirm_create_instruction": "Wählen Sie 'Anlegen' um das Gerät zu erstellen."
     }
   }
 }

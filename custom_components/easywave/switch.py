@@ -567,18 +567,15 @@ class EasywaveEWneoSwitch(EasywaveEntity, SwitchEntity):
                                 if not result or (isinstance(result, tuple) and len(result) == 3 and isinstance(result[0], str) and result[0].startswith("ERR_")):
                                     # Still failed
                                     raise HomeAssistantError(
-                                        f"Gateway-Filter konnte nicht wiederhergestellt werden. "
-                                        f"Bitte starten Sie Home Assistant neu oder fügen Sie das Gerät erneut hinzu."
+                                        translate("error.gateway_filter_restore_failed", hass=self.hass)
                                     )
                             else:
                                 raise HomeAssistantError(
-                                    f"Gateway {gateway_serial[-8:]} nicht im RX11-Filter. "
-                                    f"Bitte starten Sie Home Assistant neu oder fügen Sie das Gerät erneut hinzu."
+                                    translate("error.gateway_not_in_filter", hass=self.hass, serial=gateway_serial[-8:])
                                 )
                         else:
                             raise HomeAssistantError(
-                                f"Gateway {gateway_serial[-8:]} nicht im RX11-Filter. "
-                                f"Filter-Funktion nicht verfügbar - bitte Home Assistant neu starten."
+                                translate("error.gateway_filter_unavailable", hass=self.hass, serial=gateway_serial[-8:])
                             )
                     
                     elif error_type == "ERR_RF_TIMEOUT":
@@ -602,8 +599,7 @@ class EasywaveEWneoSwitch(EasywaveEntity, SwitchEntity):
                     elif error_type == "ERR_INVALID_SERIAL":
                         error_type, receiver_serial, gateway_serial = result
                         raise HomeAssistantError(
-                            f"Ungültige Seriennummer {receiver_serial[-8:]}. "
-                            f"Bitte löschen und fügen Sie das Gerät erneut hinzu."
+                            translate("error.invalid_serial", hass=self.hass, serial=receiver_serial[-8:])
                         )
                     
                     elif error_type == "ERR_CANCELED":

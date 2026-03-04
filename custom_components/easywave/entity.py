@@ -111,14 +111,22 @@ class EasywaveEntity(CoordinatorEntity):
             # Use existing default name - this preserves name_by_user
             device_name = existing_default_name
         elif device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
-            # EWneo bidirectional devices: use ewneo_index (EWB_GET_FD_SERIAL index)
-            ewneo_index = current_device_info.get("ewneo_index")
-            receiver_label = t_receiver(lang)
-            if ewneo_index is not None:
-                device_name = f"Easywave neo {receiver_label} #{ewneo_index + 1}"
+            # EWneo bidirectional devices: prefer stored name from config_flow
+            # (includes user renames from device_confirm_rename step).
+            # This ensures entity.device_info and config_flow.device_save use the
+            # SAME name source, preventing inconsistent entity_ids when entities
+            # are created before the HA device registry entry exists.
+            stored_name = current_device_info.get("name")
+            if stored_name:
+                device_name = stored_name
             else:
-                # Fallback if no ewneo_index available
-                device_name = f"Easywave neo {receiver_label} {self._serial_number[-4:]}"
+                # Fallback: generate from ewneo_index
+                ewneo_index = current_device_info.get("ewneo_index")
+                receiver_label = t_receiver(lang)
+                if ewneo_index is not None:
+                    device_name = f"Easywave neo {receiver_label} #{ewneo_index + 1}"
+                else:
+                    device_name = f"Easywave neo {receiver_label} {self._serial_number[-4:]}"
         else:
             # Other devices: use existing name or generate default
             device_name = current_device_info.get("name")

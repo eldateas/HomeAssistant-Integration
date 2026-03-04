@@ -43,7 +43,7 @@ class RX11Wrapper:
     def __init__(self, device_path: str):
         """Initialize RX11 wrapper."""
         self.device_path = device_path
-        self._module = RxModule(port=device_path, baudrate=115200, debug=True)
+        self._module = RxModule(port=device_path, baudrate=115200, debug=False)
         self._connected = False
         self._lock = asyncio.Lock()
         
@@ -90,7 +90,7 @@ class RX11Wrapper:
         # Coordinator reference for status updates
         self._coordinator = None
         
-        _LOGGER.info("✅ RX11 Pure Python wrapper initialized for %s", device_path)
+        _LOGGER.debug("RX11 wrapper initialized for %s", device_path)
     
     def set_device_path(self, device_path: str) -> None:
         """Update the device path for reconnection after USB port change.
@@ -113,7 +113,7 @@ class RX11Wrapper:
         self._connected = False
         
         # Create new module with new path
-        self._module = RxModule(port=device_path, baudrate=115200, debug=True)
+        self._module = RxModule(port=device_path, baudrate=115200, debug=False)
         
         # Reset version cache to force re-fetch
         self._invalidate_version_cache("device path changed")
@@ -126,18 +126,20 @@ class RX11Wrapper:
         """Connect to RX11 device."""
         async with self._lock:
             if self._connected:
-                _LOGGER.info("✅ Already connected to RX11 at %s", self.device_path)
+                _LOGGER.debug("Already connected to RX11 at %s", self.device_path)
                 return True
             
-            _LOGGER.info("🔌 Connecting to RX11 at %s (Pure Python)...", self.device_path)
+            _LOGGER.debug("Connecting to RX11 at %s...", self.device_path)
             
             try:
                 # Connect using pure Python implementation
-                success = self._module.connect()
+                # Must run in executor — connect() contains blocking serial I/O and time.sleep()
+                success = await asyncio.get_event_loop().run_in_executor(
+                    None, self._module.connect
+                )
                 
                 if success:
                     self._connected = True
-                    _LOGGER.info("✅ Connected to RX11 at %s", self.device_path)
                     
                     # Register disconnect callback for immediate notification on hardware errors
                     self._module.set_disconnect_callback(self._on_hardware_disconnect)
@@ -153,26 +155,26 @@ class RX11Wrapper:
                     # Wait for serial interface to be fully ready (avoid race conditions)
                     await asyncio.sleep(0.8)  # Increased settle time to prevent startup errors
                     
+                    # Final buffer flush right before version queries to remove any
+                    # stale data that arrived during the settle window.
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, self._module.flush_serial_buffer
+                    )
+                    
                     # Fetch HW + FW versions BEFORE starting the EWB receive loop.
                     # Both queries use synchronous request/response matching and must
                     # complete before the long-poll EWB_RCV is sent (FIFO race condition).
                     versions_ok = await self._ensure_versions_fetched()
-                    if versions_ok:
-                        _LOGGER.info("✅ Connection verified with RX11")
-                    else:
-                        _LOGGER.warning("⚠️ Could not fully verify connection (version query incomplete)")
+                    if not versions_ok:
+                        _LOGGER.warning("Could not fully verify connection (version query incomplete)")
                     
                     # Start continuous EWB receive loop for background telegram monitoring
-                    _LOGGER.info("🚀 Starting continuous EWB receive loop...")
                     await self.rx11_ewb_sensor_start_receive_loop()
                     
                     # Start health check task for connection monitoring
-                    _LOGGER.info("🏥 Starting health check task...")
                     await self._start_health_check()
                     
                     # Initialize all EWneo devices by querying their state
-                    # This is done after health check starts to ensure connection is stable
-                    _LOGGER.info("🔄 Initializing EWneo device states...")
                     await self._refresh_all_ewneo_device_states()
                     
                     self._serial_error_count = 0
@@ -222,7 +224,7 @@ class RX11Wrapper:
         After stopping the loops, this method initiates reconnection attempts
         which will keep trying until the device is found again.
         """
-        _LOGGER.info("🔴 RX11 hardware disconnect detected - initiating reconnection...")
+        _LOGGER.info("RX11 hardware disconnect detected — initiating reconnection...")
         
         # Mark as disconnected immediately
         self._connected = False
@@ -235,23 +237,21 @@ class RX11Wrapper:
                 async def stop_loops_and_reconnect():
                     try:
                         # Stop EWB receive loop
-                        _LOGGER.info("⏹️ Stopping EWB receive loop due to disconnect...")
                         await self.rx11_ewb_sensor_stop_receive_loop()
                         
                         # Stop health check (will be restarted after reconnection)
-                        _LOGGER.info("⏹️ Stopping health check due to disconnect...")
                         await self._stop_health_check_task()
                         
                         # Notify coordinator about disconnect
                         self._coordinator.async_update_listeners()
-                        _LOGGER.info("✅ Loops gestoppt - starte Reconnect-Versuch...")
+                        _LOGGER.debug("Loops stopped — starting reconnect...")
                         
                         # Start reconnection attempts - this will keep trying until device is found
                         await self._handle_connection_lost()
                         
                         # If reconnection succeeded, restart the loops
                         if self._connected:
-                            _LOGGER.info("🚀 Reconnect erfolgreich - starte Loops neu...")
+                            _LOGGER.debug("Reconnect succeeded — restarting loops...")
                             
                             # Re-add all EWB filters after reconnect
                             gateway_serials = await self._get_all_gateway_serials()
@@ -259,10 +259,13 @@ class RX11Wrapper:
                                 await self.rx11_ewb_sensor_clear_filter()
                                 for gateway_serial in gateway_serials:
                                     await self.rx11_ewb_sensor_add_filter(gateway_serial)
-                                _LOGGER.info("✅ %d EWB-Filter neu gesetzt", len(gateway_serials))
+                                _LOGGER.debug("%d EWB filters restored", len(gateway_serials))
                             
-                            # Fetch HW + FW versions before EWB loop (FIFO race prevention)
+                            # Flush buffer + fetch versions before EWB loop (FIFO race prevention)
                             self._invalidate_version_cache("reconnect after disconnect")
+                            await asyncio.get_event_loop().run_in_executor(
+                                None, self._module.flush_serial_buffer
+                            )
                             await self._ensure_versions_fetched()
                             
                             # Restart EWB receive loop
@@ -273,7 +276,7 @@ class RX11Wrapper:
                             
                             # Notify coordinator about reconnection
                             self._coordinator.async_update_listeners()
-                            _LOGGER.info("✅ RX11 vollständig wiederverbunden!")
+                            _LOGGER.info("RX11 reconnected successfully")
                         
                     except Exception as e:
                         _LOGGER.error("❌ Fehler beim Disconnect-Handler: %s", e)
@@ -295,7 +298,7 @@ class RX11Wrapper:
         This is called from the serial handler thread, so we need to be
         thread-safe and schedule any async operations properly.
         """
-        _LOGGER.info("🔄 RX11 Hardware-Reconnect erfolgreich - starte RCV-Loop neu")
+        _LOGGER.debug("RX11 hardware reconnect callback — restarting receive loop")
         
         # Mark as connected
         self._connected = True
@@ -328,8 +331,11 @@ class RX11Wrapper:
                         else:
                             _LOGGER.debug("Keine Gateway-Seriennummern für EWB-Filter gefunden")
                         
-                        # Fetch HW + FW versions before EWB loop (FIFO race prevention)
+                        # Flush buffer + fetch versions before EWB loop (FIFO race prevention)
                         self._invalidate_version_cache("module-level reconnect")
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, self._module.flush_serial_buffer
+                        )
                         await self._ensure_versions_fetched()
                         
                         # Start fresh EWB receive loop (already stopped by disconnect handler)
@@ -520,11 +526,15 @@ class RX11Wrapper:
                     attempt + 1, wait_time,
                 )
                 await asyncio.sleep(wait_time)
+                # Flush serial buffer before retry to clear remaining stale data
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._module.flush_serial_buffer
+                )
         
         if hw_version:
-            _LOGGER.info("✅ Hardware: %s", hw_version)
+            _LOGGER.debug("Hardware: %s", hw_version)
         else:
-            _LOGGER.warning("⚠️ Hardware version query failed after 3 attempts")
+            _LOGGER.warning("Hardware version query failed after 3 attempts")
         
         # Query firmware version with retry and exponential backoff
         fw_version = None
@@ -539,17 +549,21 @@ class RX11Wrapper:
                     attempt + 1, wait_time,
                 )
                 await asyncio.sleep(wait_time)
+                # Flush serial buffer before retry
+                await asyncio.get_event_loop().run_in_executor(
+                    None, self._module.flush_serial_buffer
+                )
         
         if fw_version:
-            _LOGGER.info("✅ Firmware: %s", fw_version)
+            _LOGGER.debug("Firmware: %s", fw_version)
         else:
-            _LOGGER.warning("⚠️ Firmware version query failed after 3 attempts")
+            _LOGGER.warning("Firmware version query failed after 3 attempts")
         
         self._versions_fetched = True
         self._versions_fetched_for = current_key
         
         if hw_version and fw_version:
-            _LOGGER.info("✅ Version info complete: HW=%s, FW=%s (device %s)", hw_version, fw_version, current_key)
+            _LOGGER.info("RX11 connected: HW=%s, FW=%s", hw_version, fw_version)
         
         return bool(hw_version and fw_version)
     
@@ -659,9 +673,9 @@ class RX11Wrapper:
             serial = await self.rx11_ew_receiver_get_serial_by_index(index)
             if serial:
                 found_receivers[index] = serial
-                _LOGGER.info("💾 Found EW receiver at index %d: %s", index, serial[-8:])
+                _LOGGER.debug("Found EW receiver at index %d: %s", index, serial[-8:])
         
-        _LOGGER.info("✅ Scan completed: %d receivers found", len(found_receivers))
+        _LOGGER.debug("Scan completed: %d receivers found", len(found_receivers))
         return found_receivers
     
     async def rx11_ew_receiver_get_next_available(self) -> Optional[tuple[int, str]]:
@@ -781,51 +795,32 @@ class RX11Wrapper:
         
         # Check RX11 internal state
         if hasattr(self._module, '_state_good'):
-            _LOGGER.debug("🔍 RX11 _state_good: %s", self._module._state_good)
+            _LOGGER.debug("RX11 _state_good: %s", self._module._state_good)
             if not self._module._state_good:
-                _LOGGER.error("🔴 RX11 is in bad state (_state_good=False), attempting to recover...")
-                # Try to recover by resetting the state
+                _LOGGER.error("RX11 is in bad state (_state_good=False), attempting to recover...")
                 self._module._state_good = True
-                _LOGGER.info("🔄 Reset _state_good to True")
             
         try:
             # Extract button code from command
-            # Command format: bytes([0x01, button_code, 0x00, 0x00, 0x00]) or bytes([button_code])
-            # The button_code is at index 1 if command starts with 0x01, otherwise at index 0
-            _LOGGER.debug("📦 Command bytes received: %s (len=%d)", command.hex() if isinstance(command, bytes) else str(command), len(command))
-            
-            # Check command format and extract button code
             if len(command) >= 2 and command[0] == 0x01:
-                # New format: bytes([0x01, button_code, ...])
                 button = command[1]
-                _LOGGER.debug("🔢 Using NEW format: button at command[1]")
             elif len(command) > 0:
-                # Old/simple format: bytes([button_code])
                 button = command[0]
-                _LOGGER.debug("🔢 Using OLD format: button at command[0]")
             else:
                 button = 0x00
-                _LOGGER.debug("🔢 Empty command, defaulting to button A")
             
             button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
-            _LOGGER.debug("🔢 Extracted button: %s (code=0x%02X)", button_letter, button)
             
-            # Step 1: Check if this serial is in _used_receivers (from persistent tracking)
+            # Find receiver index
             short_serial = serial_number[-8:].upper()
             receiver_index = None
-            receiver_serial = serial_number  # Default to using the stored serial directly
+            receiver_serial = serial_number
             
-            _LOGGER.debug("🔍 Searching for receiver with serial: %s (input: %s)", short_serial, serial_number)
-            _LOGGER.debug("📋 Available in _used_receivers: %s", {k: v[-8:] for k, v in self._used_receivers.items()})
-            
-            # First check _used_receivers for direct index lookup
+            # Check _used_receivers for direct index lookup
             for index, used_serial in self._used_receivers.items():
-                _LOGGER.debug("🔎 Checking index %d: %s vs %s", index, used_serial[-8:].upper(), short_serial)
                 if used_serial[-8:].upper() == short_serial:
                     receiver_index = index
                     receiver_serial = used_serial
-                    _LOGGER.info("🎯 Found receiver in used_receivers: index %d, serial=%s", 
-                                  receiver_index, receiver_serial[-8:])
                     break
             
             # Step 2: If not found in used_receivers, check device-specific cache
@@ -859,38 +854,24 @@ class RX11Wrapper:
             
             # If we couldn't find index in RX11, use stored serial directly
             if receiver_index is None:
-                _LOGGER.info("⚠️ Receiver not found in RX11 - using stored serial_number: %s", short_serial)
+                _LOGGER.debug("Receiver %s not found in RX11 indices — using stored serial", short_serial)
                 receiver_serial = serial_number
             
-            # Step 3: Send command using receiver serial as gateway
-            # For EW receivers, the gateway is the receiver's own serial
-            # Ensure serial is exactly 32 hex chars (16 bytes) by padding with leading zeros
-            _LOGGER.debug("🔧 Before padding: receiver_serial=%s (len=%d)", receiver_serial, len(receiver_serial))
+            # Send command using receiver serial as gateway
             receiver_serial_padded = receiver_serial.zfill(32)
-            _LOGGER.debug("🔧 After padding: receiver_serial_padded=%s (len=%d)", receiver_serial_padded, len(receiver_serial_padded))
             
             try:
                 gateway_bytes = bytes.fromhex(receiver_serial_padded)
-                _LOGGER.debug("🔧 Gateway bytes length: %d bytes", len(gateway_bytes))
             except ValueError as e:
-                _LOGGER.error("❌ Invalid hex string: %s, error: %s", receiver_serial_padded, e)
+                _LOGGER.error("Invalid hex string for receiver serial: %s", e)
                 return False
-            
-            # Log command being sent
-            button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
-            index_str = f"index {receiver_index}" if receiver_index is not None else "direct serial (old RX11)"
-            _LOGGER.info("📤 Sending command to receiver: %s (%s, button %s)", 
-                          short_serial, index_str, button_letter)
             
             result = await asyncio.get_event_loop().run_in_executor(
                 None, self._module.ew_send_cmd_request, gateway_bytes, button, 5.0
             )
             
-            button_letter = ['A', 'B', 'C', 'D'][button] if button < 4 else '?'
-            
             if result == ErrorCode.SUCCESS:
-                _LOGGER.warning("📢 Command sent to receiver %s: Button %s - SUCCESS", 
-                              short_serial, button_letter)
+                _LOGGER.debug("Command sent to %s: Button %s OK", short_serial, button_letter)
                 return True
             else:
                 # Map error code to human-readable message
@@ -912,7 +893,7 @@ class RX11Wrapper:
                     0xFF: "ERR_FAILSTATE"
                 }
                 error_name = error_names.get(result, f"UNKNOWN_ERROR_{result}")
-                _LOGGER.warning("📢 Command sent to receiver %s: Button %s - FAILED (%s)", 
+                _LOGGER.warning("Command to %s Button %s FAILED: %s", 
                              short_serial, button_letter, error_name)
                 
                 # ERR_FAILSTATE (0xFF) means the RX11 is in a bad state
@@ -961,12 +942,12 @@ class RX11Wrapper:
                     None, self._module.ewb_get_fd_serial_request, index
                 )
                 
-                _LOGGER.info("🔍 Checking EWB index %d: result=%d, serial=%s", 
+                _LOGGER.debug("Checking EWB index %d: result=%d, serial=%s", 
                            index, result, serial.hex() if serial else "None")
                 
                 # If error or empty serial, this index is available
                 if result != ErrorCode.SUCCESS or not serial or serial == bytes(16):
-                    _LOGGER.info("✅ Found available EWB index: %d", index)
+                    _LOGGER.debug("Found available EWB index: %d", index)
                     return index
             
             _LOGGER.warning("⚠️ No available EWB index found in range 0-9")
@@ -1066,7 +1047,7 @@ class RX11Wrapper:
                     
                     if init_success:
                         success_count += 1
-                        _LOGGER.info("✅ State refreshed for %s %s (attempt %d)", 
+                        _LOGGER.debug("State refreshed for %s %s (attempt %d)", 
                                    device_type, device_name, attempt)
                         
                         # Fire state update event so entities can update
@@ -1084,7 +1065,7 @@ class RX11Wrapper:
                                         "source": "initialization",
                                     }
                                 )
-                                _LOGGER.info("📡 Fired state update event for %s after initialization", device_serial[-8:])
+                                _LOGGER.debug("Fired state update event for %s after initialization", device_serial[-8:])
                         
                         break  # Success - no need to retry
                     else:
@@ -1590,7 +1571,9 @@ class RX11Wrapper:
                 # Try to connect
                 try:
                     # Create fresh RxModule instance with clean state
-                    self._module = RxModule(port=self.device_path, baudrate=115200, debug=True)
+                    self._module = RxModule(port=self.device_path, baudrate=115200, debug=False)
+                    # Flag as reconnect so RxModule uses extended startup tolerance
+                    self._module._is_reconnecting = True
                     
                     # Connect
                     success = await asyncio.get_event_loop().run_in_executor(
@@ -1604,6 +1587,11 @@ class RX11Wrapper:
                         
                         # Wait for serial interface to stabilize after reconnect
                         await asyncio.sleep(0.5)
+                        
+                        # Flush any stale data before version verification
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, self._module.flush_serial_buffer
+                        )
                         
                         # Verify connection with hardware version query
                         hw_version = await self.get_hardware_version()

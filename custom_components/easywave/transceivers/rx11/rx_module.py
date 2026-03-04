@@ -509,7 +509,7 @@ class RxModule:
         # After initial connect: 2 seconds
         # After reconnect: 10 seconds (more garbage data on the line)
         self._startup_tolerance_until: float = 0.0  # timestamp until which to tolerate decode errors
-        self._startup_tolerance_duration: float = 2.0  # seconds to tolerate startup noise on initial connect
+        self._startup_tolerance_duration: float = 5.0  # seconds to tolerate startup noise on initial connect
         self._reconnect_startup_tolerance_duration: float = 10.0  # longer tolerance after reconnect
         
         # RX state
@@ -632,7 +632,30 @@ class RxModule:
             # This is especially important after a USB disconnect/reconnect
             self._serial.reset_input_buffer()
             self._serial.reset_output_buffer()
-            # Note: Second buffer clear is done in wrapper.py after connect() to avoid blocking event loop
+            
+            # Timed drain: read and discard all stale bytes from the hardware FIFO.
+            # The RX11 module may still be sending responses to requests from a
+            # previous session. A simple reset_input_buffer() only clears the OS
+            # buffer but does NOT prevent bytes that are still in the USB/UART
+            # pipeline from arriving shortly after. We therefore keep reading for
+            # a short window to guarantee the line is truly idle.
+            drain_end = time.time() + 0.4
+            drained = 0
+            while time.time() < drain_end:
+                try:
+                    waiting = self._serial.in_waiting
+                    if waiting > 0:
+                        self._serial.read(waiting)
+                        drained += waiting
+                    else:
+                        time.sleep(0.02)
+                except Exception:
+                    break
+            if drained > 0:
+                _LOGGER.debug("Drained %d stale bytes from serial buffer during connect", drained)
+            
+            # Final buffer clear after drain
+            self._serial.reset_input_buffer()
             
             # Set startup tolerance period based on whether this is initial connect or reconnect
             # Use longer tolerance after reconnect because there's more garbage on the line
@@ -669,35 +692,80 @@ class RxModule:
             # Use debug level to avoid log spam during reconnect attempts
             _LOGGER.debug("RxModule connection failed: %s", e)
             return False
-    
+
+    def flush_serial_buffer(self):
+        """Flush serial input buffer and reset RX state.
+
+        Call this before sending critical commands (e.g. version queries)
+        to drain any stale data that survived the initial connect drain.
+        Safe to call while the serial handler thread is running.
+        """
+        if not self._serial or not self._serial.is_open:
+            return
+        try:
+            self._serial.reset_input_buffer()
+            # Short timed drain to catch bytes still in USB pipeline
+            drain_end = time.time() + 0.15
+            drained = 0
+            while time.time() < drain_end:
+                waiting = self._serial.in_waiting
+                if waiting > 0:
+                    self._serial.read(waiting)
+                    drained += waiting
+                else:
+                    time.sleep(0.01)
+            if drained > 0:
+                _LOGGER.debug("Flushed %d stale bytes from serial buffer", drained)
+        except Exception:
+            pass
+
     def dispose(self):
-        """Disconnect and cleanup."""
+        """Disconnect and cleanup.
+        
+        Ensures the serial handler thread is fully stopped and all
+        pending hardware data is drained before closing the port.
+        This prevents stale responses from leaking into a subsequent
+        connect() call (the main cause of ICP-length-mismatch errors
+        during integration reinitialisation).
+        """
         self._shutdown_requested = True
         
-        # Wait for thread to finish (use usleep for non-blocking in sync context)
-        import time
-        time.sleep(0.02)  # Minimal sleep in sync context, coordinator calls this properly
-        
-        # Cancel all requests
+        # Cancel all pending requests first so waiting callers unblock
         self.cancel_all_io_request()
         
-        # Wait for serial handler thread
+        # Wait for serial handler thread to exit completely
         if self._serial_handler_thread and self._serial_handler_thread.is_alive():
-            self._serial_handler_thread.join(timeout=1.0)
+            self._serial_handler_thread.join(timeout=3.0)
+            if self._serial_handler_thread.is_alive():
+                _LOGGER.warning("Serial handler thread did not exit within 3s")
+        
+        # Drain any remaining bytes from the hardware FIFO so the OS
+        # buffer is empty when the port is eventually re-opened
+        if self._serial and self._serial.is_open:
+            try:
+                self._serial.reset_input_buffer()
+                self._serial.reset_output_buffer()
+                # Read-drain for up to 200ms to catch late arrivals
+                drain_end = time.time() + 0.2
+                while time.time() < drain_end:
+                    if self._serial.in_waiting > 0:
+                        self._serial.read(self._serial.in_waiting)
+                    else:
+                        time.sleep(0.02)
+            except Exception:
+                pass
         
         # Close serial connection
         if self._serial:
             try:
                 self._serial.close()
             except Exception as e:
-                _LOGGER.error("Error closing serial connection: %s", e)
+                _LOGGER.debug("Error closing serial connection: %s", e)
             finally:
                 self._serial = None
         
         self._connected = False
-        
-        if self.debug:
-            _LOGGER.info("RxModule disconnected")
+        _LOGGER.debug("RxModule disposed")
     
     def _find_easywave_usb_port(self) -> Optional[str]:
         """Find EASYWAVE USB device by VID/PID, handling port changes.
@@ -835,8 +903,8 @@ class RxModule:
             
             # Log health status periodically (every 30s check)
             if time_since_comm >= self._health_check_interval:
-                _LOGGER.info(
-                    "🔍 RX11 Health Check: %.1fs since last comm, "
+                _LOGGER.debug(
+                    "RX11 Health Check: %.1fs since last comm, "
                     "IRPs waiting for IPP=%d, Commands waiting for ICP=%d, "
                     "Continuous RCV requests=%d",
                     time_since_comm, irps_waiting_for_ipp, non_continuous_pending, continuous_pending
@@ -1010,7 +1078,7 @@ class RxModule:
                     
                     if self.debug:
                         hex_str = ' '.join(f'{b:02x}' for b in packet)
-                        _LOGGER.info("Tx-Uart: %s IRP %s", hex_str, req_str)
+                        _LOGGER.debug("Tx-Uart: %s IRP %s", hex_str, req_str)
         
         except (serial.SerialException, OSError) as e:
             if not self._shutdown_requested:
@@ -1080,9 +1148,6 @@ class RxModule:
                             break
                         
                         byte = byte_data[0]
-                        if self.debug:
-                            _LOGGER.info("RX byte: 0x%02x (buf_len=%d, sop=%s, stuffing=%s)", 
-                                        byte, len(self._rx_raw_buffer), self._rx_sop, self._rx_stuffing)
                         self._process_received_byte(byte)
                 except (serial.SerialException, OSError) as e:
                     if not self._shutdown_requested:
@@ -1343,9 +1408,28 @@ class RxModule:
         # Validate ICP length
         if icp.result == ErrorCode.SUCCESS:
             if icp_byte_count != req.expected_icp_byte_count:
-                # Length mismatch is a protocol error - fail this request but don't reconnect
-                _LOGGER.warning("ICP length mismatch for '%s': got %d, expected %d - failing request",
-                            req.req_str, icp_byte_count, req.expected_icp_byte_count)
+                # Length mismatch — likely a stale response from a previous session.
+                # During startup tolerance this is expected (hardware FIFO not yet drained).
+                if in_startup:
+                    _LOGGER.debug(
+                        "ICP length mismatch for '%s' during startup: got %d, expected %d "
+                        "— discarding stale ICP, keeping request alive",
+                        req.req_str, icp_byte_count, req.expected_icp_byte_count,
+                    )
+                    # Re-enqueue the request so the real ICP (correct size)
+                    # can still match it.  This avoids a costly 5 s timeout
+                    # followed by a retry for every stale packet.
+                    if handle != 0:
+                        self._req_pending[handle] = req
+                    # For sync (handle=0) requests there is no stable key to
+                    # re-insert into the sent FIFO, so we let them time out
+                    # and be retried by the caller.
+                    return
+                else:
+                    _LOGGER.warning(
+                        "ICP length mismatch for '%s': got %d, expected %d — failing request",
+                        req.req_str, icp_byte_count, req.expected_icp_byte_count,
+                    )
                 req.icp = ICP(handle=handle, result=ErrorCode.ERR_SIZE_MISMATCH)
                 req.signal()
                 return
@@ -1359,7 +1443,7 @@ class RxModule:
         
         if self.debug:
             hex_str = ' '.join(f'{b:02x}' for b in raw_buffer)
-            _LOGGER.info("Rx-Uart: %s ICP %s", hex_str, req.req_str)
+            _LOGGER.debug("Rx-Uart: %s ICP %s", hex_str, req.req_str)
         
         # Handle ERR_OUT_OF_QUEUE - requeue the request
         if icp.result == ErrorCode.ERR_OUT_OF_QUEUE:

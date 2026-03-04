@@ -67,7 +67,9 @@ async def async_setup_entry(
             if entity_spec.get("type") == "cover":
                 _LOGGER.info("✅ Found cover entity_spec for %s", serial_number)
                 try:
-                    if device_info.get("neo_device"):
+                    # Detect EWneo device: check neo_device flag OR type string (consistent with switch.py)
+                    is_neo_device = device_info.get("neo_device", False) or device_info.get("type", "").startswith("ewneo_")
+                    if is_neo_device:
                         # EWneo-Motor entity - check for multi-motor devices
                         device_type_code = device_info.get("device_type_code", 0)
                         if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
@@ -83,7 +85,7 @@ async def async_setup_entry(
                             entities.append(EasywaveEWneoCover(coordinator, serial_number, device_info, entity_spec))
                             _LOGGER.info("🔧 Restored EWneo-Motor entity for device %s", serial_number[-8:])
                     else:
-                        # Regular cover entity
+                        # Regular cover entity (classic Easywave Receiver)
                         entities.append(EasywaveCover(coordinator, serial_number, device_info, entity_spec))
                 except Exception as e:
                     _LOGGER.warning("Failed to create cover for device %s: %s", 
@@ -104,7 +106,9 @@ async def async_setup_entry(
         new_covers = []
         for entity_spec in entity_specs:
             try:
-                if device_info.get("neo_device"):
+                # Detect EWneo device: check neo_device flag OR type string (consistent with switch.py)
+                is_neo_device = device_info.get("neo_device", False) or device_info.get("type", "").startswith("ewneo_")
+                if is_neo_device:
                     # Check for multi motor devices
                     device_type_code = device_info.get("device_type_code", 0)
                     if device_type_code == 0x08:  # EWB_DT_DUAL_MOTOR
@@ -178,7 +182,10 @@ class EasywaveCover(EasywaveEntity, CoverEntity):
         translation_key = entity_spec.get("translation_key")
         if translation_key:
             self._attr_translation_key = translation_key
-            self._attr_name = None  # Let HA use translation_key
+            # Do NOT set _attr_name here! Setting _attr_name = None would tell HA
+            # "this entity has no name, use device name only" which is WRONG for
+            # multi-channel devices. By not setting _attr_name, HA falls through
+            # to use _attr_translation_key for entity naming (e.g., "Kanal 1").
         else:
             self._attr_name = entity_spec.get("name", device_info.get('name', 'Motor'))
         
@@ -555,7 +562,9 @@ class EasywaveEWneoCover(EasywaveEntity, CoverEntity):
         translation_key = entity_spec.get("translation_key")
         if translation_key:
             self._attr_translation_key = translation_key
-            self._attr_name = None  # Let HA use translation_key
+            # Do NOT set _attr_name here! Setting _attr_name = None would tell HA
+            # "this entity has no name, use device name only" which prevents
+            # translation_key from being used for entity naming.
         else:
             self._attr_name = entity_spec.get("name", f"EWneo-Motor {serial_number}")
         self._attr_unique_id = entity_spec.get("unique_id", f"{device_info['registration_id']}_ewneo_cover_{self._channel}")

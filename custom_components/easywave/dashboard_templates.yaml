@@ -75,9 +75,7 @@ cards:
           **Verfügbare Aktionen für jedes EASYWAVE-Gerät:**
           
           🗑️ **Entfernen**: `easywave_plugin.device_remove`
-          🔄 **Neu erstellen**: `easywave_plugin.device_recreate`  
-          ⏸️ **Deaktivieren**: `easywave_plugin.device_disable`
-          ▶️ **Aktivieren**: `easywave_plugin.device_enable`
+          🔄 **Neu erstellen**: `easywave_plugin.device_recreate`
           
           *Diese Services sind direkt in der Developer Tools > Services verfügbar.*
 
@@ -124,15 +122,6 @@ service: easywave_plugin.device_recreate
 target:
   device_id: "DEVICE_ID_HIER_EINFÜGEN"
 
-# Gerät deaktivieren:
-service: easywave_plugin.device_disable
-target:
-  device_id: "DEVICE_ID_HIER_EINFÜGEN"
-
-# Gerät aktivieren:
-service: easywave_plugin.device_enable
-target:
-  device_id: "DEVICE_ID_HIER_EINFÜGEN"
 
 # ================================
 # 4. AUTOMATIONS-BEISPIELE

@@ -12,7 +12,7 @@ from homeassistant.components.light import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers import entity_registry as er
 
@@ -20,6 +20,7 @@ from .const import DOMAIN, EVENT_FORCE_CREATE
 from .coordinator import EasywaveCoordinator
 from .entity import EasywaveEntity
 from .device_icons import get_entity_config_for_device
+from .translations import translate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +65,12 @@ async def async_setup_entry(
             if entity_spec.get("type") != "light":
                 continue
             try:
-                lt = EasywaveEWReceiverDimmer(coordinator, serial, device_info, entity_spec)
+                # Detect EWneo device: check neo_device flag OR type string (consistent with switch.py)
+                is_neo_device = device_info.get("neo_device", False) or device_info.get("type", "").startswith("ewneo_")
+                if is_neo_device:
+                    lt = EasywaveEWneoLight(coordinator, serial, device_info, entity_spec)
+                else:
+                    lt = EasywaveEWReceiverDimmer(coordinator, serial, device_info, entity_spec)
                 lights.append(lt)
                 coordinator.mark_entity_created(lt.unique_id, lt.name)
             except Exception as e:
@@ -85,7 +91,7 @@ async def async_setup_entry(
         new_lights = []
         for spec in entity_specs:
             try:
-                if device_info.get("neo_device"):
+                if device_info.get("neo_device", False) or device_info.get("type", "").startswith("ewneo_"):
                     lt = EasywaveEWneoLight(coordinator, serial_number, device_info, spec)
                 else:
                     lt = EasywaveEWReceiverDimmer(coordinator, serial_number, device_info, spec)
@@ -616,7 +622,7 @@ class EasywaveEWneoLight(EasywaveEntity, LightEntity):
                 _LOGGER.info("EWneo light %s: Turned on successfully", self.unique_id)
             else:
                 _LOGGER.warning("EWneo light %s: Failed to turn on", self.unique_id)
-                raise ServiceValidationError("Befehl fehlgeschlagen - keine Antwort vom Gerät")
+                raise ServiceValidationError(translate("error.command_no_response", hass=self.hass))
 
         except Exception as e:
             _LOGGER.error("EWneo light %s: Error turning on: %s", self.unique_id, e)
@@ -694,7 +700,7 @@ class EasywaveEWneoLight(EasywaveEntity, LightEntity):
                 _LOGGER.info("EWneo light %s: Turned off successfully", self.unique_id)
             else:
                 _LOGGER.warning("EWneo light %s: Failed to turn off", self.unique_id)
-                raise ServiceValidationError("Befehl fehlgeschlagen - keine Antwort vom Gerät")
+                raise ServiceValidationError(translate("error.command_no_response", hass=self.hass))
 
         except Exception as e:
             _LOGGER.error("EWneo light %s: Error turning off: %s", self.unique_id, e)

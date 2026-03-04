@@ -69,10 +69,10 @@ class StateManager:
         async with self._lock:
             try:
                 if not self.state_file.exists():
-                    _LOGGER.info("📄 Keine State-Datei gefunden, starte mit leer")
+                    _LOGGER.debug("Keine State-Datei gefunden, starte mit leer")
                     return True
                 
-                _LOGGER.info("📖 Lade State aus %s", self.state_file)
+                _LOGGER.debug("Lade State aus %s", self.state_file)
                 
                 data = await self._read_json_file(self.state_file)
                 
@@ -83,7 +83,7 @@ class StateManager:
                 unique_ids_list = data.get("entity_unique_ids", [])
                 self._state["entity_unique_ids"] = set(unique_ids_list) if unique_ids_list else set()
                 
-                _LOGGER.info("✅ Geladen: %d Dashboard-Entities, %d Entity-IDs", 
+                _LOGGER.debug("Geladen: %d Dashboard-Entities, %d Entity-IDs", 
                             len(self._state["dashboard_entities"]),
                             len(self._state["entity_unique_ids"]))
                 

@@ -221,20 +221,19 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 # Get user-defined device name from HA device registry
                 friendly_name = await self._get_device_friendly_name(device_serial)
                 
+                # Get translated notification strings
+                lang = get_language(self.hass)
+                notification_title = translate("notification.ewneo_unreachable_title", lang)
+                notification_message = translate("notification.ewneo_unreachable_message", lang, device_name=friendly_name)
+                
                 # Create persistent notification
                 await self.hass.services.async_call(
                     "persistent_notification",
                     "create",
                     {
                         "notification_id": f"easywave_ewneo_unreachable_{device_serial}",
-                        "title": "⚠️ Easywave neo Gerät nicht erreichbar",
-                        "message": f"**{friendly_name}** antwortet nicht.\n\n"
-                                   f"Der Befehl konnte nicht ausgeführt werden. "
-                                   f"Mögliche Ursachen:\n"
-                                   f"• Gerät ist ausgeschaltet\n"
-                                   f"• Gerät ist zu weit vom Gateway entfernt\n"
-                                   f"• Funkstörungen\n\n"
-                                   f"Das Gerät bleibt bedienbar. Bei erfolgreicher Kommunikation wird diese Meldung automatisch entfernt.",
+                        "title": notification_title,
+                        "message": notification_message,
                     },
                     blocking=False,
                 )
@@ -292,29 +291,28 @@ class EasywaveCoordinator(DataUpdateCoordinator):
             device = self._find_ha_device_entry(device_serial)
             
             if device:
-                # Use name_by_user if set, otherwise use default name
                 if device.name_by_user:
-                    _LOGGER.warning("Found user-defined name '%s' for device %s", device.name_by_user, device_serial[-8:])
+                    _LOGGER.debug("Found user-defined name '%s' for device %s", device.name_by_user, device_serial[-8:])
                     return device.name_by_user
                 elif device.name:
-                    _LOGGER.warning("Found default name '%s' for device %s (no name_by_user set)", device.name, device_serial[-8:])
+                    _LOGGER.debug("Found default name '%s' for device %s", device.name, device_serial[-8:])
                     return device.name
             else:
-                _LOGGER.warning("Device not found in registry for serial %s", device_serial[-8:])
+                _LOGGER.debug("Device not found in registry for serial %s", device_serial[-8:])
             
             # Fallback: Check our internal device info
             device_info = self.devices.get(device_serial, {})
             if device_info.get("name"):
-                _LOGGER.warning("Using internal device name '%s' for %s", device_info["name"], device_serial[-8:])
+                _LOGGER.debug("Using internal device name '%s' for %s", device_info["name"], device_serial[-8:])
                 return device_info["name"]
             
             # Final fallback
-            _LOGGER.warning("No name found for device %s, using serial suffix", device_serial[-8:])
-            return f"Gerät {device_serial[-8:]}"
+            _LOGGER.debug("No name found for device %s, using serial suffix", device_serial[-8:])
+            return translate("config_flow.device_fallback_name", hass=self.hass, serial=device_serial[-8:])
             
         except Exception as e:
             _LOGGER.warning("Could not get friendly name for %s: %s", device_serial[-8:], e)
-            return f"Gerät {device_serial[-8:]}"
+            return translate("config_flow.device_fallback_name", hass=self.hass, serial=device_serial[-8:])
 
     def _get_transmitter_action_label(self, serial_number: str, button: int | None) -> str | None:
         """Return semantic action label for a transmitter button.
@@ -369,24 +367,20 @@ class EasywaveCoordinator(DataUpdateCoordinator):
     def _translate_action_label(self, action_label: str | None) -> str:
         """Translate action label for display in logs and UI.
         
-        Translates raw state keys to German labels for logbook/activity display.
+        Translates raw state keys to localized labels for logbook/activity display.
         """
         if action_label is None:
-            return "Unbekannt"
+            return translate("state_translated.unknown", hass=self.hass)
         
-        translation_map = {
-            "on": "Ein",
-            "off": "Aus",
-            "up": "Auf",
-            "down": "Zu",
-            "stop": "Stopp",
-            "released": "Nicht betätigt",
-            "a": "Taste A",
-            "b": "Taste B",
-            "c": "Taste C",
-            "d": "Taste D",
-        }
-        return translation_map.get(action_label, action_label)
+        translated = translate(f"state_translated.{action_label}", hass=self.hass)
+        # If translate returned the key itself (no translation found), return original
+        if translated == f"state_translated.{action_label}":
+            # Try button labels for a, b, c, d
+            button_translated = translate(f"button.{action_label}", hass=self.hass)
+            if button_translated != f"button.{action_label}":
+                return button_translated
+            return action_label
+        return translated
         _LOGGER.info("Device setup mode deactivated")
     
     def _validate_device_config(self, serial_number: str, device_info: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -1901,6 +1895,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
             self.devices.pop(serial_number, None)
             self._known_devices.discard(serial_number)
             self._devices_with_fired_events.discard(serial_number)
+            self._dispatched_devices.discard(serial_number)
             
             # Step 4: Remove from DeviceManager whitelist
             if self.device_manager.is_whitelisted(serial_number):
@@ -2203,7 +2198,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
         
         # Fire events for all loaded devices that haven't fired yet
         for serial_number, device_info in devices_to_fire:
-            _LOGGER.info("🔥 [fire_pending] Firing EVENT_DEVICE_ADDED for %s", serial_number[-8:])
+            _LOGGER.debug("🔥 [fire_pending] Firing EVENT_DEVICE_ADDED for %s", serial_number[-8:])
             
             self.hass.bus.async_fire(
                 EVENT_DEVICE_ADDED,
@@ -2226,7 +2221,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 platform_entities = [e for e in entities if e.get("type") == platform]
                 if platform_entities:
                     event_name = f"{EVENT_DEVICE_ADDED}_{platform}"
-                    _LOGGER.info("🔥 [fire_pending] Firing %s for %s (%d entities)", 
+                    _LOGGER.debug("[fire_pending] Firing %s for %s (%d entities)", 
                                event_name, serial_number[-8:], len(platform_entities))
                     self.hass.bus.async_fire(
                         event_name,
@@ -3484,11 +3479,11 @@ class EasywaveCoordinator(DataUpdateCoordinator):
             # Fire appropriate event
             if action == "press":
                 self.hass.bus.async_fire("easywave_button_press", event_data)
-                _LOGGER.info("🔘 Button press: %s %s", serial_number[-8:], action_label_translated)
+                _LOGGER.debug("Button press: %s %s", serial_number[-8:], action_label_translated)
                 
             elif action == "release":
                 self.hass.bus.async_fire("easywave_button_release", event_data)
-                _LOGGER.info("🔘 Button release: %s %s", serial_number[-8:], action_label_translated)
+                _LOGGER.debug("Button release: %s %s", serial_number[-8:], action_label_translated)
             
         except Exception as e:
             _LOGGER.error("Error firing button events for %s: %s", serial_number[-8:], e)
@@ -3593,7 +3588,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                         "raw_data": telegram_data.get("raw_data"),
                     }
                     self.hass.bus.async_fire("easywave_sensor_update", temp_event_data)
-                    _LOGGER.info("Fired temperature event for device %s: %.1f°C", 
+                    _LOGGER.debug("Temperature event for %s: %.1f°C", 
                                serial_number, temperature)
                 
                 if humidity is not None:
@@ -3608,7 +3603,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                         "raw_data": telegram_data.get("raw_data"),
                     }
                     self.hass.bus.async_fire("easywave_sensor_update", hum_event_data)
-                    _LOGGER.info("Fired humidity event for device %s: %.1f%%", 
+                    _LOGGER.debug("Humidity event for %s: %.1f%%", 
                                serial_number, humidity)
                 
                 # Also fire a combined sensor update event (legacy support)
@@ -3678,8 +3673,8 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("No matching EWneo device found for telegram from %s", serial_number[-8:])
                 return
                 
-            _LOGGER.info("🔄 Processing EWneo state update for device %s (telegram from %s)", 
-                        target_device_serial[-8:], serial_number[-8:])
+            _LOGGER.debug("Processing EWneo state update for device %s (telegram from %s)", 
+                          target_device_serial[-8:], serial_number[-8:])
             
             # Extract state bytes - can be directly in telegram_data or in raw_data
             state_bytes = []
@@ -3723,7 +3718,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 parsed_state = self._parse_ewneo_state(device_type_code, state_bytes, device_type_name, target_device_serial, mode=query_mode)
                 
                 if parsed_state:
-                    _LOGGER.info("🎯 EWneo device %s: Parsed state update: %s", 
+                    _LOGGER.debug("EWneo device %s: Parsed state update: %s", 
                                target_device_serial[-8:], parsed_state)
                     
                     # Fire an event that EWneo entities can listen to using the device serial (not telegram serial)
@@ -4179,7 +4174,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                     
                     _LOGGER.debug("✅ Using authoritative data from registered_devices.json for %s", serial_number[-8:])
                 
-                    _LOGGER.info("✅ Restoring device %s (type=%s)", 
+                    _LOGGER.debug("Restoring device %s (type=%s)", 
                                serial_number, device_info.get("device_type", "unknown"))
                     
                     # Enhanced RX11-based device restoration
@@ -4222,7 +4217,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 await self.transceiver.register_device(serial_number, device_info)
                 
                 # Create and store device instance using device factory
-                _LOGGER.info("🔧 Attempting to create device instance for %s (type=%s)", 
+                _LOGGER.debug("Creating device instance for %s (type=%s)", 
                            serial_number, device_info.get("device_type"))
                 
                 if hasattr(self.transceiver, 'device_factory'):
@@ -4246,7 +4241,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                                 self.transceiver._device_instances = {}
                             self.transceiver._device_instances[serial_number] = device_instance
             
-                            _LOGGER.info("✅ Created device instance for %s: %s (state query pending)", 
+                            _LOGGER.debug("Created device instance for %s: %s", 
                             serial_number, type(device_instance).__name__)
                         else:
                             _LOGGER.warning("⚠️ Device factory returned None for %s", serial_number)
@@ -4319,7 +4314,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
             if ewneo_index is not None and gateway_serial:
                 device_name = device_info.get("name", f"EWneo Device ({serial_number})")
                 self.mark_ewb_index_used(ewneo_index, gateway_serial, serial_number, device_name)
-                _LOGGER.info("🔄 Restored EWneo EWB index: %d, Gateway: %s, Device: %s", 
+                _LOGGER.debug("Restored EWneo EWB index: %d, Gateway: %s, Device: %s", 
                            ewneo_index, gateway_serial[-8:], serial_number[-8:])
         else:
             _LOGGER.warning("Transceiver does not support restore_rx11_device")
@@ -4424,7 +4419,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                                      entity.get("sensor_type") or entity.get("type"), 
                                      entity.get("unique_id", "N/A")[-20:])
                     
-                    _LOGGER.info("✅ Regenerated %d entity specs for device %s with updated naming", 
+                    _LOGGER.debug("Regenerated %d entity specs for device %s with updated naming", 
                                len(all_entities), serial_number)
                 else:
                     # Regeneration returned empty list — RESTORE backup
@@ -5118,7 +5113,7 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                     }
                 )
                 
-                _LOGGER.info("📊 State update processed for %s (%s): %s", 
+                _LOGGER.debug("State update processed for %s (%s): %s", 
                            serial_number[-8:], device_type_name, parsed_state)
             else:
                 _LOGGER.warning("⚠️ Could not parse state for %s (type 0x%02X)", 
@@ -5702,8 +5697,9 @@ class EasywaveCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("⚠️ Device added event missing serial_number")
                 return
             
-            # Avoid duplicate dispatching
-            if serial_number in self._dispatched_devices:
+            # Avoid duplicate dispatching (unless force_create is set for re-learned devices)
+            force_create = event_data.get("force_create", False)
+            if serial_number in self._dispatched_devices and not force_create:
                 _LOGGER.debug("⏭️  Skipping already-dispatched device: %s", serial_number[-8:])
                 return
             

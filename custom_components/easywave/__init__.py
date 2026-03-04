@@ -12,7 +12,6 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
-from homeassistant.helpers.event import async_call_later
 
 from .const import (
     DOMAIN,
@@ -64,7 +63,7 @@ async def _find_usb_device_path(hass: HomeAssistant, entry: ConfigEntry) -> tupl
     
     # If we have USB identification, use it to find the device
     if vid is not None and pid is not None:
-        _LOGGER.info("🔍 Searching for RX11 device: VID=0x%04X, PID=0x%04X, SN=%s", vid, pid, serial_number)
+        _LOGGER.debug("Searching for RX11 device: VID=0x%04X, PID=0x%04X, SN=%s", vid, pid, serial_number)
         
         try:
             # Run blocking I/O operation in executor to avoid blocking event loop
@@ -119,7 +118,7 @@ async def _find_usb_device_path(hass: HomeAssistant, entry: ConfigEntry) -> tupl
     
     # Fallback: use configured path if it exists
     if configured_path and os.path.exists(configured_path):
-        _LOGGER.info("✅ Using configured device path: %s", configured_path)
+        _LOGGER.debug("Using configured device path: %s", configured_path)
         mfr, prod = usb_device_name(vid, pid)
         device_info = {
             "device": configured_path,
@@ -167,7 +166,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     This prevents the scenario where entities disappear completely during
     HA startup when the USB device is temporarily not detected.
     """
-    _LOGGER.info("Setting up EASYWAVE integration for entry %s", entry.entry_id)
+    _LOGGER.info("Setting up EASYWAVE integration (entry %s)", entry.entry_id[:8])
     
     # Guard against double setup
     hass.data.setdefault(DOMAIN, {})
@@ -192,8 +191,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # and automatically reconnect when the USB device appears.
     usb_offline = (actual_device_path == "unknown")
     if usb_offline:
-        _LOGGER.warning("⚠️ RX11 USB Transceiver nicht gefunden — Offline-Modus. "
-                       "Entitäten werden erstellt, sind aber nicht verfügbar bis das Gerät verbunden wird.")
+        _LOGGER.warning("⚠️ RX11 USB Transceiver not found — Offline mode. "
+                       "Entities will be created but are unavailable until the device is connected.")
         # Use None as device_path — transceiver.connect() will search by VID/PID
         actual_device_path = None
     else:
@@ -224,7 +223,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 1: Create and setup transceiver
     try:
         transceiver = TransceiverFactory.create_transceiver(transceiver_type, actual_device_path)
-        _LOGGER.info("Created %s transceiver instance", transceiver_type.value)
+        _LOGGER.debug("Created %s transceiver instance", transceiver_type.value)
         
         # Set USB device identity from config entry / scan results
         usb_serial = device_info.get("serial_number") or entry.data.get(CONF_USB_SERIAL_NUMBER, "unknown")
@@ -271,7 +270,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not await coordinator.async_setup():
             raise ConfigEntryNotReady("Failed to load device data")
             
-        _LOGGER.info("Coordinator setup completed (transceiver_connected=%s)", 
+        _LOGGER.debug("Coordinator setup completed (transceiver_connected=%s)", 
                      coordinator.transceiver.is_connected if coordinator.transceiver else False)
         
     except ConfigEntryNotReady:
@@ -310,7 +309,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 3: Restore registered devices and sync DeviceManager BEFORE setting up platforms
     _LOGGER.debug("Restoring registered devices...")
     await coordinator.restore_registered_devices_only()
-    _LOGGER.info("✅ Restored %d registered devices", len(coordinator.get_all_registered_devices()))
+    _LOGGER.info("Restored %d registered devices", len(coordinator.get_all_registered_devices()))
     
     # Step 3.1: Entity migration - NOW safe because _registered_devices is loaded
     # Uses BOTH registered_devices AND DeviceManager as valid_serials to prevent data loss
@@ -355,7 +354,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             try:
                 clear_result = await coordinator.transceiver.rx11_ewb_clear_filter()
                 if clear_result:
-                    _LOGGER.info("✅ EWB-Filter erfolgreich geleert vor Platform-Setup")
+                    _LOGGER.debug("EWB filter cleared before platform setup")
                 else:
                     _LOGGER.warning("⚠️ EWB-Filter konnte nicht geleert werden")
             except Exception as e:
@@ -364,7 +363,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 4: Setup platforms
     _LOGGER.debug("Setting up platforms...")
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    _LOGGER.info("✅ Platforms setup complete")
+    _LOGGER.debug("Platforms setup complete")
     
     # Step 4.1: Setup central event dispatcher
     # All platforms have now registered their handlers via coordinator.register_platform_handler()
@@ -372,125 +371,60 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.debug("Setting up central event dispatcher...")
     dispatcher_cleanup = coordinator.setup_event_dispatchers()
     entry.async_on_unload(dispatcher_cleanup)
-    _LOGGER.info("✅ Central event dispatcher setup complete")
+    _LOGGER.debug("Central event dispatcher setup complete")
     
-    # Step 4.5: Setup registry listener for device enable/disable
-    # HA natively handles: device disabled → entities get disabled_by=DEVICE
-    # HA natively handles: device re-enabled → entities get disabled_by=None
-    # BUT: HA does NOT recreate entity Python objects — we must trigger platform re-setup.
-    # IMPORTANT: We only reload PLATFORMS (not the full config entry) so the
-    # coordinator and transceiver connection (RX11) stay alive.
-    device_registry = dr.async_get(hass)
-    _reload_timer = None  # Debounce handle for platform reload
-    
-    # Track disabled devices to detect genuine re-enable transitions.
-    # Without this, ANY device_registry_updated event for an active device
-    # (disabled_by=None) would trigger a reload — including during startup
-    # when entity registration causes device updates. We only want to reload
-    # when a device transitions from disabled → enabled.
-    _disabled_device_ids: set[str] = set()
-    for dev_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
-        if dev_entry.disabled_by is not None:
-            _disabled_device_ids.add(dev_entry.id)
-    _LOGGER.debug("Tracking %d currently disabled devices for re-enable detection", len(_disabled_device_ids))
-    
+    # Step 4.5: Handle device re-enable for immediate entity restoration
+    # When a user re-enables a previously disabled device, HA clears disabled_by
+    # on entities but only schedules the config entry reload after 30 s
+    # (RELOAD_AFTER_UPDATE_DELAY).  We detect the re-enable and trigger an
+    # immediate reload so entities come back within seconds.  The reload
+    # also tears down HA's EntityRegistryDisabledHandler, which cancels the
+    # pending 30 s timer — no double-reload.
     @callback
-    def _on_device_registry_update(event):
-        """Handle device registry updates (device re-enable).
-        
-        When user re-enables a device, HA automatically clears disabled_by on entities.
-        However, entity Python objects only get created during platform setup.
-        We schedule a debounced PLATFORM reload (not full config reload) so the
-        transceiver connection stays alive — no RX11 reconnect needed.
-        
-        IMPORTANT: We track disabled_device_ids to distinguish a genuine re-enable
-        (disabled → enabled) from any other device update. Without this, normal
-        device registry updates during startup would trigger spurious reloads.
-        """
-        nonlocal _reload_timer
-        try:
-            action = event.data.get("action")
-            device_id = event.data.get("device_id")
-            
-            if not device_id or action != "update":
-                return
-            
-            device_entry = device_registry.async_get(device_id)
-            if not device_entry:
-                return
-            
-            # Only react to our integration's devices
-            if entry.entry_id not in (device_entry.config_entries or []):
-                return
-            
-            # Track disable/enable transitions
-            if device_entry.disabled_by is not None:
-                # Device was just disabled — remember it
-                _disabled_device_ids.add(device_id)
-                _LOGGER.debug("Device %s disabled (disabled_by=%s) — tracking for future re-enable", 
-                            device_id[-8:], device_entry.disabled_by)
-                return
-            
-            # Device is enabled. Only react if it was PREVIOUSLY disabled (genuine re-enable).
-            if device_id not in _disabled_device_ids:
-                # Device was already enabled — this is a normal update (name change, entity count, etc.)
-                return
-            
-            # Genuine re-enable: remove from tracking and schedule platform reload
-            _disabled_device_ids.discard(device_id)
-            
-            _LOGGER.info("🔄 Device %s re-enabled — scheduling platform reload to restore entities "
-                        "(transceiver connection stays alive)", device_id[-8:])
-            
-            # Cancel any pending reload (debounce)
-            if _reload_timer is not None:
-                _reload_timer()
-                _reload_timer = None
-            
-            # Schedule platform reload with 1s delay:
-            # - HA needs time to re-enable entities (clear disabled_by) before reload
-            # - Debounce in case multiple devices are re-enabled at once
-            async def _delayed_platform_reload(_now=None):
-                nonlocal _reload_timer
-                _reload_timer = None
-                try:
-                    _LOGGER.info("🔄 Reloading platforms to restore entities (keeping transceiver connection)")
-                    
-                    # 1) Unload all platforms (removes entity objects + event listeners)
-                    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-                    
-                    # 2) Clear stale coordinator state from the previous platform lifecycle.
-                    #    _platform_handlers held closures over the OLD async_add_entities —
-                    #    they become invalid after unload.  _dispatched_devices would prevent
-                    #    the central dispatcher from processing restored devices.
-                    coordinator._platform_handlers.clear()
-                    coordinator._dispatched_devices.clear()
-                    
-                    # 3) Reset session-level entity tracking so platforms don't think
-                    #    entities were "already created this session".
-                    from .entity_registry import get_entity_registry
-                    get_entity_registry().clear()
-                    
-                    # 4) Re-setup all platforms — each one registers fresh handlers
-                    #    and restores entities from coordinator.get_all_devices().
-                    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-                    _LOGGER.info("✅ Platform reload complete — transceiver connection maintained")
-                except Exception as exc:
-                    _LOGGER.error("❌ Platform reload failed: %s", exc, exc_info=True)
-            
-            _reload_timer = async_call_later(hass, 1, _delayed_platform_reload)
-            
-        except Exception as e:
-            _LOGGER.error("Error handling device registry update: %s", e)
-    
-    remove_device_listener = hass.bus.async_listen("device_registry_updated", _on_device_registry_update)
-    entry.async_on_unload(remove_device_listener)
-    _LOGGER.debug("✅ Registry listener installed for device re-enable sync")
+    def _on_device_registry_updated(event) -> None:
+        """React to device registry changes — handle device re-enable."""
+        if event.data.get("action") != "update":
+            return
+
+        changes = event.data.get("changes", {})
+        if "disabled_by" not in changes:
+            return  # disabled_by didn't change
+
+        device_id = event.data.get("device_id")
+        if not device_id:
+            return
+
+        device_registry = dr.async_get(hass)
+        device_entry = device_registry.async_get(device_id)
+        if not device_entry:
+            return
+
+        # Only handle devices belonging to this config entry
+        if entry.entry_id not in device_entry.config_entries:
+            return
+
+        # Re-enable: disabled_by was set (old value in changes) and is now None
+        if device_entry.disabled_by is not None:
+            return  # still disabled or just disabled — nothing to do
+
+        _LOGGER.info(
+            "🔄 Device %s re-enabled (was disabled_by=%s) — scheduling immediate reload",
+            device_entry.name or device_id,
+            changes["disabled_by"],
+        )
+        hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    entry.async_on_unload(
+        hass.bus.async_listen(
+            dr.EVENT_DEVICE_REGISTRY_UPDATED, _on_device_registry_updated
+        )
+    )
+    _LOGGER.debug("Device re-enable listener active")
     
     # Step 5: Fire device events AFTER platforms are ready
     _LOGGER.debug("Firing device events after platform setup...")
     await coordinator.fire_pending_device_events()
-    _LOGGER.info("✅ Device events fired")
+    _LOGGER.debug("Device events fired")
     
     # Note: Device events are now fired after platform setup for proper entity creation
     
@@ -498,7 +432,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         from .services import async_setup_services
         await async_setup_services(hass, entry)
-        _LOGGER.info("✅ Debug services setup complete")
+        _LOGGER.debug("Debug services setup complete")
     except Exception as e:
         _LOGGER.error("Failed to setup services: %s", e)
         # Continue without services
@@ -506,7 +440,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Step 7: Initial data fetch
     try:
         await coordinator.async_config_entry_first_refresh()
-        _LOGGER.info("✅ Initial data refresh completed")
+        _LOGGER.debug("Initial data refresh completed")
         
         # Step 8: Restore gateway filters after initial connection
         if coordinator.transceiver.is_connected:
@@ -657,6 +591,12 @@ async def async_remove_config_entry_device(
     
     # Resolve UUID-based identifier back to serial_number
     serial_number = coordinator.get_serial_by_ha_identifier(identifier_value)
+    if not serial_number and device_entry.serial_number:
+        # Fallback: use the serial_number stored on the HA device entry itself.
+        # This covers cases where _registered_devices lost sync (e.g. failed save).
+        serial_number = device_entry.serial_number
+        _LOGGER.info("🔍 Resolved serial via device_entry.serial_number fallback: %s",
+                     serial_number[-8:] if len(serial_number) > 8 else serial_number)
     if not serial_number:
         _LOGGER.warning("⚠️ Could not resolve identifier %s to serial_number", identifier_value[-8:])
         # Allow deletion anyway — might be an orphaned device

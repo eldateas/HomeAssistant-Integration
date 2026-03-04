@@ -116,7 +116,7 @@ class RX11Transceiver(BaseTransceiver):
         if device_path:
             try:
                 self._rx11_wrapper = RX11Wrapper(device_path)
-                _LOGGER.info("✅ RX11 wrapper initialized successfully")
+                _LOGGER.debug("RX11 wrapper initialized")
             except Exception as error:
                 _LOGGER.error("Failed to initialize RX11 wrapper: %s", error)
                 self._rx11_wrapper = None
@@ -274,7 +274,7 @@ class RX11Transceiver(BaseTransceiver):
             _LOGGER.debug("Device %s is not a supported Easywave USB device", self.device_path)
             return False
         
-        _LOGGER.info("RX11 device %s validated successfully", self.device_path)
+        _LOGGER.debug("RX11 device %s validated", self.device_path)
         return True
     
     def set_coordinator_reference(self, coordinator) -> None:
@@ -304,7 +304,7 @@ class RX11Transceiver(BaseTransceiver):
             
             # First, try the current device path (if available)
             if self.device_path:
-                _LOGGER.info("🔌 Connecting to RX11 at %s...", self.device_path)
+                _LOGGER.debug("Connecting to RX11 at %s...", self.device_path)
             
                 success = await self._try_connect_to_path(self.device_path)
                 if success:
@@ -315,7 +315,7 @@ class RX11Transceiver(BaseTransceiver):
             # If original path failed (or no path set), search for device by VID/PID
             if self.device_path:
                 if not hasattr(self, '_search_logged'):
-                    _LOGGER.info("⚠️ Connection to %s failed, searching for RX11 device by VID/PID...", 
+                    _LOGGER.debug("Connection to %s failed, searching for RX11 device by VID/PID...", 
                                   self.device_path)
                     self._search_logged = True
                 else:
@@ -339,7 +339,7 @@ class RX11Transceiver(BaseTransceiver):
                 if new_path == self.device_path:
                     continue  # Already tried this path
                 
-                _LOGGER.info("🔄 USB device found: %s → %s", self.device_path or "(none)", new_path)
+                _LOGGER.debug("USB device found: %s → %s", self.device_path or "(none)", new_path)
                 
                 # Update the device path in wrapper
                 old_path = self.device_path
@@ -418,7 +418,7 @@ class RX11Transceiver(BaseTransceiver):
             # Log cache statistics before disconnect
             if self._rx11_wrapper and hasattr(self._rx11_wrapper, 'get_cache_stats'):
                 stats = self._rx11_wrapper.get_cache_stats()
-                _LOGGER.info("📊 RX11 Cache Stats: %d total entries, %d valid, %d expired, %d used receivers", 
+                _LOGGER.debug("RX11 Cache Stats: %d total, %d valid, %d expired, %d used receivers", 
                            stats['total_entries'], stats['valid_entries'], 
                            stats['expired_entries'], stats['used_receivers'])
             
@@ -604,14 +604,14 @@ class RX11Transceiver(BaseTransceiver):
             
         self._listening_for_telegram = True
         
-        _LOGGER.info("🔍 Starting telegram listening - main callback: %s, additional callback: %s", 
+        _LOGGER.debug("Starting telegram listening - main callback: %s, additional callback: %s", 
                     bool(self._telegram_callback), bool(callback))
         
         # Start telegram listening thread with internal handler
         success = self._rx11_wrapper.start_telegram_listening(self._handle_telegram)
         
         if success:
-            _LOGGER.info("RX11 telegram listening started")
+            _LOGGER.debug("RX11 telegram listening started")
         else:
             self._listening_for_telegram = False
             
@@ -762,7 +762,7 @@ class RX11Transceiver(BaseTransceiver):
     async def _setup_simple_serial_connection(self) -> bool:
         """Set up simple serial connection as fallback with EASYWAVE protocol support."""
         try:
-            _LOGGER.info("Setting up EASYWAVE protocol serial connection to %s", self.device_path)
+            _LOGGER.debug("Setting up EASYWAVE protocol serial connection to %s", self.device_path)
             
             self._serial_connection = serial.Serial(
                 port=self.device_path,
@@ -780,7 +780,7 @@ class RX11Transceiver(BaseTransceiver):
             # Send initialization sequence
             await self._initialize_easywave_protocol()
             
-            _LOGGER.info("✅ EASYWAVE protocol serial connection established")
+            _LOGGER.debug("EASYWAVE protocol serial connection established")
             return True
             
         except Exception as e:
@@ -790,13 +790,11 @@ class RX11Transceiver(BaseTransceiver):
     def set_telegram_callback(self, callback: Callable) -> None:
         """Set callback function for incoming telegrams."""
         self._telegram_callback = callback
-        _LOGGER.info("🔗 Telegram callback set to: %s (type: %s)", callback, type(callback))
+        _LOGGER.debug("Telegram callback set: %s", type(callback).__name__)
         
         # Verify the callback was stored correctly
         if self._telegram_callback != callback:
-            _LOGGER.error("❌ Callback storage failed! Expected %s, got %s", callback, self._telegram_callback)
-        else:
-            _LOGGER.info("✅ Callback verified and stored successfully")
+            _LOGGER.error("Callback storage failed!")
         
         # Erstelle einen Wrapper-Callback für den RX11 Wrapper
         if self._rx11_wrapper and hasattr(self._rx11_wrapper, 'set_telegram_callback'):
@@ -846,7 +844,7 @@ class RX11Transceiver(BaseTransceiver):
                     _LOGGER.error("❌ Error in telegram callback wrapper: %s", e, exc_info=True)
             
             self._rx11_wrapper.set_telegram_callback(wrapper_callback)
-            _LOGGER.info("🔗 Telegram callback weitergegeben an RX11 Wrapper")
+            _LOGGER.debug("Telegram callback forwarded to RX11 wrapper")
         else:
             _LOGGER.error("❌ Cannot set telegram callback - RX11 wrapper not available or missing method")
         
@@ -960,7 +958,7 @@ class RX11Transceiver(BaseTransceiver):
                         # Sequence: Push (button) -> [Push (battery low 0x80)] -> Release
                         # Battery status is ONLY evaluated on Release
                         
-                        _LOGGER.info("🔍 PRESS processing: serial=%s, raw_byte=0x%02X, is_0x80=%s",
+                        _LOGGER.debug("PRESS processing: serial=%s, raw_byte=0x%02X, is_0x80=%s",
                                    serial_number, raw_button_byte, bool(raw_button_byte & 0x80))
                         
                         if raw_button_byte & 0x80:
@@ -1110,13 +1108,13 @@ class RX11Transceiver(BaseTransceiver):
                             # Bytes 2-7: 48-bit capability field (big-endian)
                             if len(info_data) >= 8:
                                 capabilities = int.from_bytes(info_data[2:8], byteorder='big')
-                                _LOGGER.info("📚 Capabilities raw: 0x%012X (bytes 2-7: %s)", 
-                                           capabilities, info_data[2:8].hex())
+                                _LOGGER.debug("Capabilities raw: 0x%012X (bytes 2-7: %s)", 
+                                               capabilities, info_data[2:8].hex())
                                 
                                 has_humidity = bool(capabilities & (1 << 5))  # Bit 5
                                 has_temperature = bool(capabilities & (1 << 4))  # Bit 4
                                 
-                                _LOGGER.info("📚 Capability bits: Bit5(humidity)=%s, Bit4(temperature)=%s", 
+                                _LOGGER.debug("Capability bits: Bit5(humidity)=%s, Bit4(temperature)=%s", 
                                            has_humidity, has_temperature)
                                 
                                 available_sensors = []
@@ -1138,7 +1136,7 @@ class RX11Transceiver(BaseTransceiver):
                                            serial_number, has_temperature, has_humidity, has_battery, sensor_capabilities)
                         else:
                             # Messwert-Telegramm: Byte 2 = Messtyp, Bytes 3-4 = Wert
-                            _LOGGER.info("📊 MESSWERT-Telegramm empfangen von EWneo-Sensor %s (Byte1=0x%02X, Bit7=0)", 
+                            _LOGGER.debug("MESSWERT-Telegramm von EWneo-Sensor %s (Byte1=0x%02X)", 
                                        serial_number, flags)
                             if len(info_data) >= 5:
                                 measurement_type = (info_data[2] >> 2) & 0x3F  # Bits 7-2
@@ -1186,8 +1184,8 @@ class RX11Transceiver(BaseTransceiver):
                         batt_str = f"{telegram_data.get('battery_level', 'N/A')}%" if 'battery_level' in telegram_data else "N/A"
                         telegram_type = "📚 LERNTELEGRAMM" if is_learn_telegram else "📊 MESSWERT"
                         
-                        _LOGGER.info("%s - EWneo-Sensor %s: Temp=%s, Hum=%s, Batt=%s (raw: %s)",
-                                   telegram_type, serial_number, temp_str, hum_str, batt_str, info_data.hex())
+                        _LOGGER.debug("%s - EWneo-Sensor %s: Temp=%s, Hum=%s, Batt=%s",
+                                   telegram_type, serial_number, temp_str, hum_str, batt_str)
                         
                     except Exception as e:
                         _LOGGER.warning("Error parsing EWneo-Sensor telegram data: %s", e, exc_info=True)
@@ -1196,15 +1194,12 @@ class RX11Transceiver(BaseTransceiver):
             
             # Handle EWB telegrams (info_type == 3) for EWneo devices
             elif info_type == 3:
-                _LOGGER.info("📡 EWB telegram received: Serial=%s, Data=%s", 
+                _LOGGER.debug("EWB telegram received: Serial=%s, Data=%s", 
                            serial_number, info_data.hex() if info_data else "")
                 
                 # EWB telegrams contain state updates for EWneo devices
-                # The info_data contains the state bytes that need to be parsed by the coordinator
                 telegram_data["is_ewb_telegram"] = True
                 telegram_data["state_bytes"] = list(info_data) if info_data else []
-                
-                _LOGGER.info("✅ EWB telegram parsed for coordinator processing")
             
             # Generiere Gerätename
             device_name = f"{device_type.replace('_', ' ').title()} {serial_number}"

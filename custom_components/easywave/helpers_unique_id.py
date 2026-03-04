@@ -28,9 +28,9 @@ def normalize_serial_number(serial: str) -> str:
     if serial.startswith("0x"):
         serial = serial[2:]
     
-    # Validiere dass nur Hex-Zeichen vorhanden sind
+    # Validate that only hex characters are present
     if not re.match(r'^[0-9a-f]+$', serial):
-        raise ValueError(f"Seriennummer enthält nicht-Hex-Zeichen: {serial}")
+        raise ValueError(f"Serial number contains non-hex characters: {serial}")
     
     # Normalisiere Länge auf 32 Zeichen (16 Bytes = 32 Hex-Zeichen)
     if len(serial) < 32:
@@ -112,9 +112,9 @@ def make_unique_id(registration_id: str, entity_type: str, channel: Optional[int
     # registration_id ist bereits eine UUID (lowercase hex) – normalisiere trotzdem
     registration_id = registration_id.strip().lower()
     
-    # Validiere entity_type
+    # Validate entity_type
     if not entity_type or not isinstance(entity_type, str):
-        raise ValueError(f"entity_type muss ein nicht-leerer String sein: {entity_type!r}")
+        raise ValueError(f"entity_type must be a non-empty string: {entity_type!r}")
     
     entity_type = entity_type.lower().strip()
     
@@ -125,17 +125,17 @@ def make_unique_id(registration_id: str, entity_type: str, channel: Optional[int
         try:
             channel_num = int(channel)
             if channel_num < 0 or channel_num > 255:
-                raise ValueError(f"Kanalnummer muss zwischen 0-255 sein: {channel_num}")
+                raise ValueError(f"Channel number must be between 0-255: {channel_num}")
             parts.append(f"ch{channel_num}")
         except (ValueError, TypeError) as e:
-            raise ValueError(f"Ungültige Kanalnummer: {e}")
+            raise ValueError(f"Invalid channel number: {e}")
     
     # suffix wird ignoriert – registration_id ist bereits einzigartig pro Lernvorgang
     
     unique_id = "_".join(parts)
     
-    # Validiere Länge (HA limit ist ~255)
+    # Validate length (HA limit is ~255)
     if len(unique_id) > 255:
-        raise ValueError(f"Unique ID zu lang (max 255): {len(unique_id)} Zeichen")
+        raise ValueError(f"Unique ID too long (max 255): {len(unique_id)} chars")
     
     return unique_id
