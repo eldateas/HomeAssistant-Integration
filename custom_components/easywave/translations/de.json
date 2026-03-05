@@ -794,7 +794,7 @@
       "user_cancelled": "",
       "device_added": "Das Gerät **{device_name}** ist jetzt verfügbar und die Entitäten wurden erstellt.",
       "learning_timeout": "Zeitüberschreitung beim Einlernen des Geräts. Bitte versuchen Sie es erneut.",
-      "no_available_ewneo_index": "Kein verfügbarer Easywave neo Index gefunden. Alle 128 Indizes (0-127) sind bereits verwendet.",
+      "no_available_ewneo_index": "Keine weiteren Seriennummern verfügbar. Bitte löschen Sie einen oder mehrere Easywave neo Empfänger, bevor Sie weitere anlegen.",
       "ewneo_learning_failed": "Easywave neo Empfänger Einlernen fehlgeschlagen. Bitte überprüfen Sie die Verbindung und versuchen Sie es erneut.",
       "ewneo_join_failed": "Verbindung zum Easywave neo Empfänger fehlgeschlagen. Stellen Sie sicher, dass das Gerät im Lernmodus ist.",
       "no_preparation_data": "Vorbereitungsdaten für Easywave neo Empfänger fehlen. Bitte starten Sie den Vorgang erneut.",
@@ -805,7 +805,7 @@
       "no_gateway_serial": "Konnte Gateway-Seriennummer nicht laden",
       "transceiver_not_available": "Der RX11 USB Transceiver ist nicht verbunden.\n\nUm ein neues Gerät hinzuzufügen, muss der RX11 erreichbar sein.\nBitte überprüfen Sie die USB-Verbindung",
       "no_available_receivers": "Keine verfügbaren Empfänger gefunden",
-      "no_receiver_serial": "Konnte Empfänger-Seriennummer nicht laden",
+      "no_receiver_serial": "Keine weiteren Seriennummern verfügbar. Bitte löschen Sie einen oder mehrere Easywave Empfänger, bevor Sie weitere anlegen.",
       "receiver_load_failed": "Empfänger konnte nicht geladen werden",
       "device_creation_error": "Fehler beim Erstellen des Geräts",
       "unknown": "Unbekannter Fehler aufgetreten"
@@ -879,7 +879,7 @@
   "device_automation": {
     "trigger_type": {
       "button_press": "in Zustand \"{subtype}\" gewechselt",
-      "button_release": "{subtype} nicht betätigt",
+      "button_release": "in Zustand \"{subtype}\" gewechselt",
       "channel_on": "{subtype} betätigt",
       "channel_off": "{subtype} nicht betätigt",
       "gateway_connected": "Gateway verbunden",
@@ -890,6 +890,16 @@
       "B": "Taste B",
       "C": "Taste C",
       "D": "Taste D",
+      "a": "Taste A",
+      "b": "Taste B",
+      "c": "Taste C",
+      "d": "Taste D",
+      "on": "Ein",
+      "off": "Aus",
+      "up": "Auf",
+      "down": "Zu",
+      "stop": "Stopp",
+      "released": "Nicht betätigt",
       "connected": "Verbunden",
       "disconnected": "Getrennt"
     }
@@ -1191,6 +1201,38 @@
       "stop": "Stopp",
       "released": "Nicht betätigt",
       "unknown": "Unbekannt"
+    },
+    "device_trigger": {
+      "button_press": {
+        "name": "Zustand gewechselt zu {subtype}"
+      },
+      "button_release": {
+        "name": "{subtype}"
+      },
+      "channel_on": {
+        "name": "Taste {subtype} betätigt"
+      },
+      "channel_off": {
+        "name": "Taste {subtype} nicht betätigt"
+      },
+      "gateway_connected": {
+        "name": "Gateway verbunden"
+      },
+      "gateway_disconnected": {
+        "name": "Gateway getrennt"
+      },
+      "subtype": {
+        "on": "Ein",
+        "off": "Aus",
+        "up": "Auf",
+        "down": "Zu",
+        "stop": "Stopp",
+        "released": "Nicht betätigt",
+        "a": "Taste A",
+        "b": "Taste B",
+        "c": "Taste C",
+        "d": "Taste D"
+      }
     },
     "config_flow": {
       "operating_mode_1": "1-Tast-Bedienung",

@@ -20,7 +20,7 @@ from homeassistant.const import (
     CONF_TYPE,
 )
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
@@ -107,6 +107,7 @@ def _get_device_info_for_serial(hass: HomeAssistant, serial_number: str) -> dict
 
 
 def _get_transmitter_trigger_map(
+    hass: HomeAssistant,
     device_info: dict[str, Any] | None,
     serial_number: str,
 ) -> list[tuple[str, str]]:
@@ -117,7 +118,6 @@ def _get_transmitter_trigger_map(
     from .entity_specs import create_entity_specs_for_device
     from .const import BUTTON_LABELS
 
-    lang = get_language(hass) if hass else None
     specs = create_entity_specs_for_device(serial_number, device_info)
 
     trigger_map: list[tuple[str, str]] = []
@@ -234,83 +234,188 @@ async def async_get_triggers(
             },
         ]
     
+    # Try to get device info from coordinator
     device_info = _get_device_info_for_serial(hass, serial_number)
-    if not device_info:
-        _LOGGER.warning("No device info found for serial %s, cannot generate triggers", serial_number)
-        return []
     
-    trigger_map = _get_transmitter_trigger_map(device_info, serial_number)
-    _LOGGER.debug("Generated trigger map for %s: %s", serial_number, trigger_map)
+    # Determine operating mode from device_info or entity inspection
+    operating_type = None
+    usage_type = "switch"
+    grouping_mode = "single"
+    button_count = 4
+    switch_mode = "impulse"
     
-    # Determine which event types are relevant based on operating_type and usage_type
-    operating_type = device_info.get("operating_type", "1")
-    usage_type = device_info.get("usage_type", "permanent")
-    switch_mode = device_info.get("switch_mode", "impulse")
-    grouping_mode = device_info.get("grouping_mode", "single")
-
-    # Trigger-Generierung basierend auf Betriebsmodus:
-    # - 3-Tast: Zustandswechsel zu "AUF", "STOPP", "ZU"
-    # - 2-Tast: Zustandswechsel zu "EIN"/"AUS" bzw. "AUF"/"ZU"
-    # - 1-Tast Gruppe: Zustand = Taste XY
-    # - 1-Tast Einzel: "betätigt"/"losgelassen" (Press/Release per Button)
+    if device_info:
+        operating_type = device_info.get("operating_type")
+        usage_type = device_info.get("usage_type", "switch")
+        grouping_mode = device_info.get("grouping_mode", "single")
+        button_count = device_info.get("button_count", 4)
+        switch_mode = device_info.get("switch_mode", "impulse")
     
-    if operating_type == "2" or operating_type == "3":
-        # 2-Tast und 3-Tast: Trigger für Zustandswechsel
-        # trigger_map enthält bereits die Zustände (Ein/Aus, Auf/Zu, Auf/Zu/Stopp)
-        for subtype_label, _button_name in trigger_map:
+    # If no operating_type from device_info, infer from registered entities
+    if not operating_type:
+        entity_registry = er.async_get(hass)
+        device_entities = [
+            entry for entry in entity_registry.entities.values()
+            if entry.device_id == device_id and entry.domain in ("sensor", "binary_sensor")
+        ]
+        
+        for entity in device_entities:
+            uid = entity.unique_id or ""
+            # Skip battery-related entities
+            if "battery" in uid:
+                continue
+            
+            # State sensor/binary_sensor → 2-Tast or 3-Tast
+            # unique_id pattern: <reg_id>_state or <reg_id>_state_ch<N>
+            if "_state" in uid and "_button" not in uid and "_press" not in uid and "_last_" not in uid:
+                # Binary sensor with "opening" device_class → 2-Tast Rollladen
+                if entity.domain == "binary_sensor":
+                    dev_cls = getattr(entity, "original_device_class", None)
+                    if dev_cls is not None and "opening" in str(dev_cls):
+                        operating_type = "2"
+                        usage_type = "cover"
+                    else:
+                        operating_type = "2"
+                        usage_type = "switch"
+                    break
+                
+                # Enum sensor — check options to distinguish 2-Tast vs 3-Tast
+                state = hass.states.get(entity.entity_id)
+                if state:
+                    options = state.attributes.get("options", [])
+                    if "stop" in options:
+                        operating_type = "3"
+                        usage_type = "cover"
+                    elif "up" in options or "down" in options:
+                        operating_type = "2"
+                        usage_type = "cover"
+                    elif "on" in options or "off" in options:
+                        operating_type = "2"
+                        usage_type = "switch"
+                    else:
+                        operating_type = "2"
+                else:
+                    # State not yet available — default to 2-Tast switch
+                    operating_type = "2"
+                break
+            
+            # Per-button sensor → 1-Tast Einzeln
+            # unique_id pattern: <reg_id>_button_ch<N>
+            elif "_button_" in uid and "_last_" not in uid:
+                operating_type = "1"
+                grouping_mode = "single"
+                break
+            
+            # Last-button sensor → 1-Tast Gruppe
+            # unique_id pattern: <reg_id>_last_button
+            elif "_last_button" in uid:
+                operating_type = "1"
+                grouping_mode = "group"
+                state = hass.states.get(entity.entity_id)
+                if state:
+                    options = state.attributes.get("options", [])
+                    letter_options = [o for o in options if o in ("a", "b", "c", "d")]
+                    if letter_options:
+                        button_count = len(letter_options)
+                    if "released" in options:
+                        switch_mode = "impulse"
+                    else:
+                        switch_mode = "permanent"
+                break
+    
+    # Final fallback: default to 1-button single mode
+    if not operating_type:
+        operating_type = "1"
+    
+    _LOGGER.debug(
+        "Trigger generation for %s: operating_type=%s, usage_type=%s, grouping_mode=%s, switch_mode=%s, device_info=%s",
+        serial_number[-8:], operating_type, usage_type, grouping_mode, switch_mode,
+        "found" if device_info else "NOT FOUND"
+    )
+    
+    # --- Trigger-Generierung basierend auf Betriebsmodus ---
+    
+    if operating_type == "2":
+        # 2-Tast-Bedienung: Zustandswechsel Ein/Aus oder Auf/Zu
+        if usage_type == "cover":
+            state_keys = ["up", "down"]
+        else:
+            state_keys = ["on", "off"]
+        
+        for state_key in state_keys:
             triggers.append(
                 {
                     CONF_PLATFORM: "device",
                     CONF_DOMAIN: DOMAIN,
                     CONF_DEVICE_ID: device_id,
                     CONF_TYPE: TRIGGER_TYPE_BUTTON_PRESS,
-                    CONF_SUBTYPE: subtype_label,
+                    CONF_SUBTYPE: state_key,
+                }
+            )
+    
+    elif operating_type == "3":
+        # 3-Tast-Bedienung: Zustandswechsel Auf/Zu/Stopp
+        for state_key in ["up", "down", "stop"]:
+            triggers.append(
+                {
+                    CONF_PLATFORM: "device",
+                    CONF_DOMAIN: DOMAIN,
+                    CONF_DEVICE_ID: device_id,
+                    CONF_TYPE: TRIGGER_TYPE_BUTTON_PRESS,
+                    CONF_SUBTYPE: state_key,
                 }
             )
     
     elif operating_type == "1":
-        # 1-Tast-Bedienung: Abhängig von Modus
-        if grouping_mode == "single":
-            # Einzelmodus: Trigger pro Taste (betätigt/losgelassen)
+        if grouping_mode == "group":
+            # Gruppenmodus: "Taste A", "Taste B", etc.
             button_labels = ["A", "B", "C", "D"]
-            button_count = device_info.get("button_count", 4)
-            for i in range(button_count):
-                button_label = button_labels[i]
-                # betätigt Trigger
-                triggers.append(
-                    {
-                        CONF_PLATFORM: "device",
-                        CONF_DOMAIN: DOMAIN,
-                        CONF_DEVICE_ID: device_id,
-                        CONF_TYPE: TRIGGER_TYPE_CHANNEL_ON,
-                        CONF_SUBTYPE: button_label,
-                    }
-                )
-                # losgelassen Trigger (immer, für Impuls und Dauer)
-                triggers.append(
-                    {
-                        CONF_PLATFORM: "device",
-                        CONF_DOMAIN: DOMAIN,
-                        CONF_DEVICE_ID: device_id,
-                        CONF_TYPE: TRIGGER_TYPE_CHANNEL_OFF,
-                        CONF_SUBTYPE: button_label,
-                    }
-                )
-        
-        elif grouping_mode == "group":
-            # Gruppenmodus: Zustand = Taste XY (trigger_map enthält Tastenlabels)
-            for subtype_label, _button_name in trigger_map:
+            for i in range(min(button_count, 4)):
                 triggers.append(
                     {
                         CONF_PLATFORM: "device",
                         CONF_DOMAIN: DOMAIN,
                         CONF_DEVICE_ID: device_id,
                         CONF_TYPE: TRIGGER_TYPE_BUTTON_PRESS,
-                        CONF_SUBTYPE: subtype_label,
+                        CONF_SUBTYPE: button_labels[i].lower(),
+                    }
+                )
+            # "Nicht betätigt" / released trigger (only for impulse mode)
+            if switch_mode == "impulse":
+                triggers.append(
+                    {
+                        CONF_PLATFORM: "device",
+                        CONF_DOMAIN: DOMAIN,
+                        CONF_DEVICE_ID: device_id,
+                        CONF_TYPE: TRIGGER_TYPE_BUTTON_RELEASE,
+                        CONF_SUBTYPE: "released",
+                    }
+                )
+        else:
+            # Einzelmodus: "Taste A betätigt" / "Taste A nicht betätigt"
+            button_labels = ["A", "B", "C", "D"]
+            for i in range(min(button_count, 4)):
+                triggers.append(
+                    {
+                        CONF_PLATFORM: "device",
+                        CONF_DOMAIN: DOMAIN,
+                        CONF_DEVICE_ID: device_id,
+                        CONF_TYPE: TRIGGER_TYPE_CHANNEL_ON,
+                        CONF_SUBTYPE: button_labels[i],
+                    }
+                )
+                triggers.append(
+                    {
+                        CONF_PLATFORM: "device",
+                        CONF_DOMAIN: DOMAIN,
+                        CONF_DEVICE_ID: device_id,
+                        CONF_TYPE: TRIGGER_TYPE_CHANNEL_OFF,
+                        CONF_SUBTYPE: button_labels[i],
                     }
                 )
     
-    _LOGGER.debug("Created %d triggers for device %s", len(triggers), device_id)
+    _LOGGER.info("Created %d triggers for device %s: %s", len(triggers), serial_number[-8:],
+                [(t[CONF_TYPE], t[CONF_SUBTYPE]) for t in triggers])
     return triggers
 
 
@@ -363,9 +468,6 @@ async def async_attach_trigger(
         )
     
     # Handle transmitter button triggers
-    device_info = _get_device_info_for_serial(hass, serial_number)
-    trigger_map = dict(_get_transmitter_trigger_map(device_info, serial_number))
-    button_name = trigger_map.get(subtype_label, subtype_label)
     
     # Map trigger types to event types (RX11 grundfunktionen)
     event_type_map = {
@@ -377,47 +479,28 @@ async def async_attach_trigger(
     
     event_type = event_type_map.get(trigger_type, "easywave_button_press")
     
-    # Reverse translation map: translated label -> raw event value
-    # Build dynamically from translations to support all languages
-    label_to_event_value = {}
-    hass = config.get("hass")
-    if hass:
-        for raw, key in [("on", "state_translated.on"), ("off", "state_translated.off"),
-                         ("up", "state_translated.up"), ("down", "state_translated.down"),
-                         ("stop", "state_translated.stop"), ("released", "state_translated.released")]:
-            translated = translate(key, hass=hass)
-            label_to_event_value[translated] = raw
-        # Button labels
-        for letter in ["A", "B", "C", "D"]:
-            idx = ord(letter) - ord("A")
-            label = get_button_label(idx, hass=hass)
-            label_to_event_value[label] = letter.lower()
+    # Determine event matching based on subtype
+    # Subtypes are raw keys: "on", "off", "up", "down", "stop", "released", "a"-"d", "A"-"D"
     
-    event_match_key = "button_name"
-    event_match_value = button_name
-    
-    # For translated state labels (2/3-button and group mode), match by action_label with raw value
-    if subtype_label in label_to_event_value:
-        event_match_key = "action_label"
-        event_match_value = label_to_event_value[subtype_label]
-    elif subtype_label != button_name and button_name in ["A", "B", "C", "D"]:
-        # For group mode triggers with translated labels (e.g., "Taste A")
-        event_match_key = "action_label"
-        event_match_value = button_name.lower()  # "A" -> "a"
-    elif subtype_label != button_name:
+    if subtype_label in ("on", "off", "up", "down", "stop"):
+        # State trigger: match by action_label (raw key from coordinator)
         event_match_key = "action_label"
         event_match_value = subtype_label
-
-    # For 1-button press/release and channel on/off triggers, match by button index
-    if trigger_type in (
-        TRIGGER_TYPE_BUTTON_PRESS,
-        TRIGGER_TYPE_BUTTON_RELEASE,
-        TRIGGER_TYPE_CHANNEL_ON,
-        TRIGGER_TYPE_CHANNEL_OFF,
-    ):
-        if subtype_label in ["A", "B", "C", "D"]:
-            event_match_key = "button"
-            event_match_value = ["A", "B", "C", "D"].index(subtype_label)
+    elif subtype_label in ("a", "b", "c", "d"):
+        # Group mode button trigger: match by action_label
+        event_match_key = "action_label"
+        event_match_value = subtype_label
+    elif subtype_label == "released":
+        # Released trigger: match release event for any button
+        event_match_key = "is_release"
+        event_match_value = True
+    elif subtype_label in ("A", "B", "C", "D"):
+        # Single mode button trigger: match by button index
+        event_match_key = "button"
+        event_match_value = ["A", "B", "C", "D"].index(subtype_label)
+    else:
+        event_match_key = "action_label"
+        event_match_value = subtype_label
 
     # Create event config that matches events from coordinator
     event_config = event_trigger.TRIGGER_SCHEMA(

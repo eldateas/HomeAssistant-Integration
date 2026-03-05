@@ -25,11 +25,11 @@ DOCS_URL_BASE: Final = "https://github.com/eldateas/HomeAssistant-Integration/tr
 # ═══════════════════════════════════════════════════════════════════════════
 USB_DEVICE_NAMES: Final = {
     (0x155A, 0x1014): {
-        "manufacturer": "ELDAT EaS GmbH",
+        "manufacturer": "ELDAT",
         "product": "RX11 USB Transceiver",
     },
     # (0x155A, 0x1015): {
-    #     "manufacturer": "ELDAT EaS GmbH",
+    #     "manufacturer": "ELDAT",
     #     "product": "RX21 USB Transceiver",
     # },
 }

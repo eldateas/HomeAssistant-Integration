@@ -1,7 +1,7 @@
 {
   "domain": "easywave",
   "name": "Easywave",
-  "version": "0.6.8",
+  "version": "0.6.1",
   "documentation": "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs/index.md",
   "dependencies": [],
   "codeowners": [
@@ -23,6 +23,7 @@
     "binary_sensor",
     "button",
     "cover",
+    "device_trigger",
     "light",
     "select",
     "sensor",
@@ -33,7 +34,7 @@
     {
       "vid": "155A",
       "pid": "1014",
-      "manufacturer": "EASYWAVE*",
+      "manufacturer": "ELDAT*",
       "description": "*RX11*"
     }
   ],

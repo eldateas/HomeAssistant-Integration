@@ -881,7 +881,7 @@
   "device_automation": {
     "trigger_type": {
       "button_press": "changé à l'état \"{subtype}\"",
-      "button_release": "{subtype} non appuyé",
+      "button_release": "changé à l'état \"{subtype}\"",
       "channel_on": "{subtype} appuyé",
       "channel_off": "{subtype} non appuyé",
       "gateway_connected": "Passerelle connectée",
@@ -892,6 +892,16 @@
       "B": "Bouton B",
       "C": "Bouton C",
       "D": "Bouton D",
+      "a": "Bouton A",
+      "b": "Bouton B",
+      "c": "Bouton C",
+      "d": "Bouton D",
+      "on": "Activé",
+      "off": "Désactivé",
+      "up": "Haut",
+      "down": "Bas",
+      "stop": "Stop",
+      "released": "Non appuyé",
       "connected": "Connecté",
       "disconnected": "Déconnecté"
     }
@@ -1193,6 +1203,38 @@
       "stop": "Stop",
       "released": "Non appuyé",
       "unknown": "Inconnu"
+    },
+    "device_trigger": {
+      "button_press": {
+        "name": "État changé à {subtype}"
+      },
+      "button_release": {
+        "name": "{subtype}"
+      },
+      "channel_on": {
+        "name": "Bouton {subtype} enfoncé"
+      },
+      "channel_off": {
+        "name": "Bouton {subtype} non enfoncé"
+      },
+      "gateway_connected": {
+        "name": "Passerelle connectée"
+      },
+      "gateway_disconnected": {
+        "name": "Passerelle déconnectée"
+      },
+      "subtype": {
+        "on": "Activé",
+        "off": "Désactivé",
+        "up": "Haut",
+        "down": "Bas",
+        "stop": "Stop",
+        "released": "Non appuyé",
+        "a": "Bouton A",
+        "b": "Bouton B",
+        "c": "Bouton C",
+        "d": "Bouton D"
+      }
     },
     "config_flow": {
       "operating_mode_1": "Fonctionnement 1 bouton",

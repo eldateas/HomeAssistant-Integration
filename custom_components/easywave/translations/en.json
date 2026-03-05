@@ -881,7 +881,7 @@
   "device_automation": {
     "trigger_type": {
       "button_press": "changed to state \"{subtype}\"",
-      "button_release": "{subtype} not pressed",
+      "button_release": "changed to state \"{subtype}\"",
       "channel_on": "{subtype} pressed",
       "channel_off": "{subtype} not pressed",
       "gateway_connected": "Gateway connected",
@@ -892,6 +892,16 @@
       "B": "Button B",
       "C": "Button C",
       "D": "Button D",
+      "a": "Button A",
+      "b": "Button B",
+      "c": "Button C",
+      "d": "Button D",
+      "on": "On",
+      "off": "Off",
+      "up": "Up",
+      "down": "Down",
+      "stop": "Stop",
+      "released": "Not pressed",
       "connected": "Connected",
       "disconnected": "Disconnected"
     }

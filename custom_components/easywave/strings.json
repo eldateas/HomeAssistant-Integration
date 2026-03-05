@@ -881,7 +881,7 @@
   "device_automation": {
     "trigger_type": {
       "button_press": "changed to state \"{subtype}\"",
-      "button_release": "{subtype} not pressed",
+      "button_release": "changed to state \"{subtype}\"",
       "channel_on": "{subtype} pressed",
       "channel_off": "{subtype} not pressed",
       "gateway_connected": "Gateway connected",
@@ -892,6 +892,16 @@
       "B": "Button B",
       "C": "Button C",
       "D": "Button D",
+      "a": "Button A",
+      "b": "Button B",
+      "c": "Button C",
+      "d": "Button D",
+      "on": "On",
+      "off": "Off",
+      "up": "Up",
+      "down": "Down",
+      "stop": "Stop",
+      "released": "Not pressed",
       "connected": "Connected",
       "disconnected": "Disconnected"
     }
@@ -1193,6 +1203,38 @@
       "stop": "Stop",
       "released": "Not pressed",
       "unknown": "Unknown"
+    },
+    "device_trigger": {
+      "button_press": {
+        "name": "State changed to {subtype}"
+      },
+      "button_release": {
+        "name": "{subtype}"
+      },
+      "channel_on": {
+        "name": "Button {subtype} pressed"
+      },
+      "channel_off": {
+        "name": "Button {subtype} not pressed"
+      },
+      "gateway_connected": {
+        "name": "Gateway connected"
+      },
+      "gateway_disconnected": {
+        "name": "Gateway disconnected"
+      },
+      "subtype": {
+        "on": "On",
+        "off": "Off",
+        "up": "Up",
+        "down": "Down",
+        "stop": "Stop",
+        "released": "Not pressed",
+        "a": "Button A",
+        "b": "Button B",
+        "c": "Button C",
+        "d": "Button D"
+      }
     },
     "config_flow": {
       "operating_mode_1": "1-Button Operation",
