@@ -78,9 +78,30 @@ GATEWAY_TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
 # Combined schema for validation
 TRIGGER_SCHEMA = vol.Any(TRANSMITTER_TRIGGER_SCHEMA, GATEWAY_TRIGGER_SCHEMA)
 
+# Sensor type identifiers used to detect EWneo/EW sensor devices
+_SENSOR_TYPE_IDENTIFIERS = ["temperature", "humidity", "wind_speed", "rain"]
+
+# Receiver device types — these should NOT get button triggers.
+# Receivers use standard HA entity state triggers (switch on/off, cover open/close, etc.).
+_RECEIVER_DEVICE_TYPES = {
+    "ew_receiver",
+    "ewneo_switch",
+    "ewneo_dimmer",
+    "ewneo_motor",
+    "ewneo_dual_switch",
+    "ewneo_quad_switch",
+    "ewneo_dual_motor",
+    "ewneo_quad_motor",
+}
+
 
 def _get_device_info_for_serial(hass: HomeAssistant, serial_number: str) -> dict[str, Any] | None:
-    """Find device info in coordinator by serial number."""
+    """Find device info in coordinator by serial number or registration_id.
+
+    The HA device registry identifier may be a registration_id (UUID) for
+    newer devices or the hardware serial number for legacy devices.  This
+    helper tries both lookup strategies.
+    """
     domain_data = hass.data.get(DOMAIN, {})
 
     for entry_id, entry_data in domain_data.items():
@@ -94,16 +115,119 @@ def _get_device_info_for_serial(hass: HomeAssistant, serial_number: str) -> dict
             continue
 
         for dev_serial, dev_info in coordinator.devices.items():
-            # First try exact match
+            # 1) Exact serial match
             if dev_serial == serial_number:
                 return dev_info
-            # Fallback: match by last 8 characters
+            # 2) Match by registration_id (UUID-based identifier)
+            reg_id = dev_info.get("registration_id")
+            if not reg_id:
+                extra = dev_info.get("extra_data", {})
+                reg_id = extra.get("registration_id") if extra else None
+            if reg_id and reg_id == serial_number:
+                return dev_info
+            # 3) Fallback: match by last 8 characters
             if len(dev_serial) >= 8 and len(serial_number) >= 8:
                 if dev_serial[-8:] == serial_number[-8:]:
                     return dev_info
 
-    _LOGGER.warning("⚠️ No device info found for serial %s", serial_number)
+    _LOGGER.debug("No device info found for identifier %s", serial_number)
     return None
+
+
+def _is_sensor_device(
+    device_info: dict[str, Any] | None,
+    device_id: str,
+    hass: HomeAssistant,
+) -> bool:
+    """Check if the device is an EWneo/EW sensor (measurement device, not a transmitter).
+    
+    EWneo sensors report measurement values (temperature, humidity, wind, rain)
+    and should NOT get button press/release triggers.
+    """
+    if device_info:
+        device_type = device_info.get("type") or device_info.get("device_type", "")
+        extra_data = device_info.get("extra_data", {})
+        device_type = device_type or extra_data.get("type", "")
+        if device_type in ("ew_sensor", "ewneo_sensor"):
+            return True
+    
+    # Fallback: check entity registry for sensor-type entities (temperature, humidity, etc.)
+    entity_registry = er.async_get(hass)
+    device_entities = [
+        entry for entry in entity_registry.entities.values()
+        if entry.device_id == device_id
+    ]
+    
+    for entity in device_entities:
+        uid = entity.unique_id or ""
+        # EWneo sensor unique_ids contain sensor type names
+        for sensor_type in _SENSOR_TYPE_IDENTIFIERS:
+            if f"_{sensor_type}" in uid:
+                return True
+    
+    return False
+
+
+def _is_receiver_device(
+    device_info: dict[str, Any] | None,
+    device_id: str,
+    hass: HomeAssistant,
+) -> bool:
+    """Check if the device is an Easywave Receiver or Easywave neo Receiver.
+
+    Receivers are controlled actuators (switches, dimmers, motors, covers).
+    They should NOT get button press/release triggers because they do not
+    have physical buttons.  State changes are already exposed through
+    standard Home Assistant entity triggers (state change, numeric state, etc.).
+    """
+    if device_info:
+        device_type = device_info.get("type") or device_info.get("device_type", "")
+        extra_data = device_info.get("extra_data", {})
+        device_type = device_type or extra_data.get("type", "")
+        if device_type in _RECEIVER_DEVICE_TYPES:
+            return True
+
+        # EWneo devices identified by device_type_code (0x03-0x0B)
+        device_type_code = device_info.get("device_type_code")
+        if device_type_code is None:
+            device_type_code = extra_data.get("device_type_code", 0)
+        if device_type_code and 0x03 <= device_type_code <= 0x0B:
+            return True
+
+        # neo_device flag from DeviceManager
+        if device_info.get("neo_device") or extra_data.get("neo_device"):
+            return True
+
+        # receiver_kind is only set on ew_receiver / neo receivers
+        if device_info.get("receiver_kind") or extra_data.get("receiver_kind"):
+            return True
+
+    # Fallback: check entity registry for receiver-type platforms (switch, cover, light)
+    # that are NOT transmitter-state entities
+    entity_registry = er.async_get(hass)
+    device_entities = [
+        entry for entry in entity_registry.entities.values()
+        if entry.device_id == device_id
+    ]
+
+    has_actuator_entity = False
+    has_transmitter_entity = False
+    for entity in device_entities:
+        uid = entity.unique_id or ""
+        # Transmitter entities use channel-based unique_id patterns:
+        #   _button_ch<N>, _state, _state_ch<N>, _press_state_ch<N>, _last_button
+        # Note: _button_ch is specific to transmitters — receivers use _button_a/b/c/d or _toggle
+        if any(k in uid for k in ("_button_ch", "_state", "_press", "_last_button")):
+            has_transmitter_entity = True
+            break
+        # Actuator platforms (switch, cover, light, button) indicate a receiver
+        if entity.domain in ("switch", "cover", "light", "button"):
+            has_actuator_entity = True
+
+    if has_actuator_entity and not has_transmitter_entity:
+        return True
+
+    return False
 
 
 def _get_transmitter_trigger_map(
@@ -237,19 +361,42 @@ async def async_get_triggers(
     # Try to get device info from coordinator
     device_info = _get_device_info_for_serial(hass, serial_number)
     
+    # EWneo Sensor devices use standard HA entity triggers (state change,
+    # numeric state above/below threshold, etc.) — no custom device triggers needed.
+    if _is_sensor_device(device_info, device_id, hass):
+        return []
+
+    # Receiver devices (Easywave Receiver, Easywave neo Receiver) should NOT
+    # get button triggers.  They are actuators without physical buttons.
+    # Users can use standard HA entity state triggers for state changes.
+    if _is_receiver_device(device_info, device_id, hass):
+        _LOGGER.debug(
+            "Device %s is a receiver — skipping button triggers",
+            serial_number[-8:],
+        )
+        return []
+    
     # Determine operating mode from device_info or entity inspection
     operating_type = None
     usage_type = "switch"
     grouping_mode = "single"
     button_count = 4
     switch_mode = "impulse"
+    detected_button_type = None  # For 1-button transmitters: which button (A/B/C/D) was learned
     
     if device_info:
-        operating_type = device_info.get("operating_type")
-        usage_type = device_info.get("usage_type", "switch")
-        grouping_mode = device_info.get("grouping_mode", "single")
-        button_count = device_info.get("button_count", 4)
-        switch_mode = device_info.get("switch_mode", "impulse")
+        extra_data = device_info.get("extra_data", {})
+        operating_type = device_info.get("operating_type") or extra_data.get("operating_type")
+        usage_type = device_info.get("usage_type") or extra_data.get("usage_type", "switch")
+        grouping_mode = device_info.get("grouping_mode") or extra_data.get("grouping_mode", "single")
+        # Use explicit None check — button_count could be 0 or other falsy int
+        bc = device_info.get("button_count")
+        if bc is None:
+            bc = extra_data.get("button_count")
+        if bc is not None:
+            button_count = int(bc)
+        switch_mode = device_info.get("switch_mode") or extra_data.get("switch_mode", "impulse")
+        detected_button_type = device_info.get("detected_button_type") or extra_data.get("detected_button_type")
     
     # If no operating_type from device_info, infer from registered entities
     if not operating_type:
@@ -304,6 +451,14 @@ async def async_get_triggers(
             elif "_button_" in uid and "_last_" not in uid:
                 operating_type = "1"
                 grouping_mode = "single"
+                # Count how many per-button entities actually exist for this device
+                button_entities = [
+                    e for e in device_entities
+                    if "_button_" in (e.unique_id or "") and "_last_" not in (e.unique_id or "")
+                    and "battery" not in (e.unique_id or "")
+                ]
+                if button_entities:
+                    button_count = len(button_entities)
                 break
             
             # Last-button sensor → 1-Tast Gruppe
@@ -328,10 +483,24 @@ async def async_get_triggers(
         operating_type = "1"
     
     _LOGGER.debug(
-        "Trigger generation for %s: operating_type=%s, usage_type=%s, grouping_mode=%s, switch_mode=%s, device_info=%s",
+        "Trigger generation for %s: operating_type=%s, usage_type=%s, grouping_mode=%s, "
+        "switch_mode=%s, button_count=%s, detected_button_type=%s, device_info=%s",
         serial_number[-8:], operating_type, usage_type, grouping_mode, switch_mode,
+        button_count, detected_button_type,
         "found" if device_info else "NOT FOUND"
     )
+    
+    # --- Determine which button indices are actually present ---
+    # For 1-button transmitters with detected_button_type, only that specific button exists.
+    # For multi-button transmitters, buttons 0..button_count-1 exist.
+    all_labels = ["A", "B", "C", "D"]
+    
+    if button_count == 1 and detected_button_type and detected_button_type.upper() in all_labels:
+        # 1-button transmitter: only the learned button
+        active_indices = [all_labels.index(detected_button_type.upper())]
+    else:
+        # Multi-button: buttons 0..button_count-1
+        active_indices = list(range(min(button_count, 4)))
     
     # --- Trigger-Generierung basierend auf Betriebsmodus ---
     
@@ -368,16 +537,15 @@ async def async_get_triggers(
     
     elif operating_type == "1":
         if grouping_mode == "group":
-            # Gruppenmodus: "Taste A", "Taste B", etc.
-            button_labels = ["A", "B", "C", "D"]
-            for i in range(min(button_count, 4)):
+            # Gruppenmodus: Trigger pro vorhandener Taste
+            for i in active_indices:
                 triggers.append(
                     {
                         CONF_PLATFORM: "device",
                         CONF_DOMAIN: DOMAIN,
                         CONF_DEVICE_ID: device_id,
                         CONF_TYPE: TRIGGER_TYPE_BUTTON_PRESS,
-                        CONF_SUBTYPE: button_labels[i].lower(),
+                        CONF_SUBTYPE: all_labels[i].lower(),
                     }
                 )
             # "Nicht betätigt" / released trigger (only for impulse mode)
@@ -392,16 +560,15 @@ async def async_get_triggers(
                     }
                 )
         else:
-            # Einzelmodus: "Taste A betätigt" / "Taste A nicht betätigt"
-            button_labels = ["A", "B", "C", "D"]
-            for i in range(min(button_count, 4)):
+            # Einzelmodus: "Taste X betätigt" / "Taste X nicht betätigt" pro vorhandener Taste
+            for i in active_indices:
                 triggers.append(
                     {
                         CONF_PLATFORM: "device",
                         CONF_DOMAIN: DOMAIN,
                         CONF_DEVICE_ID: device_id,
                         CONF_TYPE: TRIGGER_TYPE_CHANNEL_ON,
-                        CONF_SUBTYPE: button_labels[i],
+                        CONF_SUBTYPE: all_labels[i],
                     }
                 )
                 triggers.append(
@@ -410,7 +577,7 @@ async def async_get_triggers(
                         CONF_DOMAIN: DOMAIN,
                         CONF_DEVICE_ID: device_id,
                         CONF_TYPE: TRIGGER_TYPE_CHANNEL_OFF,
-                        CONF_SUBTYPE: button_labels[i],
+                        CONF_SUBTYPE: all_labels[i],
                     }
                 )
     
