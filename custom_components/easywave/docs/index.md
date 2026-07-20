@@ -1,10 +1,12 @@
 # Easywave Integration – User Documentation
 
-> **Version:** 0.6.x | **Last Updated:** February 2026
+> **Version:** 0.7.0 | **Last Updated:** July 2026
 
 🇩🇪 **[Deutsche Version](index_de.md)**
 
 This documentation describes the setup and usage of the Easywave Integration for Home Assistant (e.g. **Home Assistant Green**) with the RX11 USB transceiver.
+
+> **Note (0.7.0):** Devices are stored in config subentries (CORE-compatible). After upgrading from 0.6.x, recreate automations/device triggers. See [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 

@@ -1,231 +1,390 @@
-"""Base entity for EASYWAVE integration."""
-from __future__ import annotations
+"""Base entities for the Easywave integration."""
 
-import logging
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, override
 
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN, DEVICE_ICONS, DEVICE_TYPE_CODE_MAP
-from .coordinator import EasywaveCoordinator
-from .helpers import build_model_description
-from .translations import get_language, t_receiver, t_transmitter, t_sensor_device, DEFAULT_LANGUAGE
+from .const import (
+    CONF_ACTUATOR_SERIAL,
+    CONF_BUTTON_COUNT,
+    CONF_CHANNELS,
+    CONF_DEVICE_TYPE_CODE,
+    CONF_GROUPING_MODE,
+    CONF_OPERATING_TYPE,
+    CONF_RECEIVER_KIND,
+    CONF_RECEIVER_SERIAL,
+    CONF_RX11_INDEX,
+    CONF_SENSOR_CAPABILITIES,
+    CONF_SENSOR_SERIAL,
+    CONF_SWITCH_MODE,
+    CONF_TRANSMITTER_SERIAL,
+    DEVICE_TYPE_CODE_DIMMER,
+    DEVICE_TYPE_CODE_DUAL_MOTOR,
+    DEVICE_TYPE_CODE_DUAL_SWITCH,
+    DEVICE_TYPE_CODE_MOTOR,
+    DEVICE_TYPE_CODE_QUAD_MOTOR,
+    DEVICE_TYPE_CODE_QUAD_SWITCH,
+    DEVICE_TYPE_CODE_SWITCH,
+    DOMAIN,
+    TRANSMITTER_GROUPING_GROUP,
+    TRANSMITTER_SWITCH_PERMANENT,
+)
 
-_LOGGER = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from . import EasywaveConfigEntry
+    from .coordinator import EasywaveCoordinator
 
 
-class EasywaveEntity(CoordinatorEntity):
-    """Base class for EASYWAVE entities."""
+@dataclass
+class EasywaveDeviceEntry:
+    """Device configuration stored as a gateway config subentry."""
+
+    device_id: str
+    title: str
+    data: dict[str, Any]
+    subentry_id: str
+
+
+def _transmitter_model(data: dict[str, Any]) -> str:
+    """Return a human-readable model string describing the transmitter configuration."""
+    op = str(data.get(CONF_OPERATING_TYPE, "1"))
+    parts: list[str] = []
+    if op == "1":
+        parts.append("1-Button Operation")
+        count = data.get(CONF_BUTTON_COUNT, 1)
+        parts.append(f"{count} Button{'s' if count != 1 else ''}")
+        grouping = data.get(CONF_GROUPING_MODE, TRANSMITTER_GROUPING_GROUP)
+        parts.append(
+            "Group" if grouping == TRANSMITTER_GROUPING_GROUP else "Individual"
+        )
+        mode = data.get(CONF_SWITCH_MODE, "")
+        parts.append("Permanent" if mode == TRANSMITTER_SWITCH_PERMANENT else "Impulse")
+    elif op == "2":
+        parts.append("2-Button Operation")
+        parts.append(str(data.get("usage_type") or "switch").title())
+    elif op == "3":
+        parts.append("3-Button Cover Operation")
+    return ", ".join(parts) or "Easywave Transmitter"
+
+
+def _neo_sensor_model(data: dict[str, Any]) -> str:
+    """Return a human-readable model string for an EWneo sensor."""
+    capabilities = data.get(CONF_SENSOR_CAPABILITIES, 0)
+    parts = ["Easywave neo sensor"]
+    if (capabilities >> 4) & 1:
+        parts.append("Temperature")
+    if (capabilities >> 5) & 1:
+        parts.append("Humidity")
+    if (capabilities >> 6) & 1:
+        parts.append("Wind")
+    if (capabilities >> 7) & 1:
+        parts.append("Rain")
+    return ", ".join(parts)
+
+
+def _receiver_model(data: dict[str, Any]) -> str:
+    """Return a human-readable model for an EW receiver."""
+    kind = str(data.get(CONF_RECEIVER_KIND, "impulse")).replace("_", " ")
+    return f"Easywave Receiver ({kind})"
+
+
+def _actuator_model(data: dict[str, Any]) -> str:
+    """Return a human-readable model for an EWneo actuator."""
+    code = int(data.get(CONF_DEVICE_TYPE_CODE, 0))
+    names = {
+        DEVICE_TYPE_CODE_SWITCH: "EWneo Switch",
+        DEVICE_TYPE_CODE_DIMMER: "EWneo Dimmer",
+        DEVICE_TYPE_CODE_MOTOR: "EWneo Motor",
+        DEVICE_TYPE_CODE_DUAL_SWITCH: "EWneo Dual Switch",
+        DEVICE_TYPE_CODE_QUAD_SWITCH: "EWneo Quad Switch",
+        DEVICE_TYPE_CODE_DUAL_MOTOR: "EWneo Dual Motor",
+        DEVICE_TYPE_CODE_QUAD_MOTOR: "EWneo Quad Motor",
+    }
+    channels = data.get(CONF_CHANNELS, 1)
+    base = names.get(code, f"EWneo Actuator 0x{code:02X}")
+    if channels and channels > 1:
+        return f"{base} ({channels} ch)"
+    return base
+
+
+class EasywaveTransmitterEntity(Entity):
+    """Base entity for an Easywave transmitter."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
 
     def __init__(
         self,
-        coordinator: EasywaveCoordinator,
-        serial_number: str,
-        device_info: Dict[str, Any],
+        entry: EasywaveConfigEntry,
+        device: EasywaveDeviceEntry,
+        unique_id_suffix: str,
     ) -> None:
-        """Initialize entity."""
-        super().__init__(coordinator)
-        
-        self._serial_number = serial_number
-        
-        # CRITICAL: Remove ALL fields that could link to old/wrong config entries
-        # Home Assistant will automatically use the correct config_entry_id from the platform
-        cleaned_device_info = device_info.copy() if device_info else {}
-        for problematic_field in ['config_entry_id', 'via_device', 'config_subentry_id', 
-                                  'via_device_id', 'entry_id']:
-            cleaned_device_info.pop(problematic_field, None)
-        
-        self._device_info = cleaned_device_info
-        self._attr_has_entity_name = True
-        
-        # Set coordinator context to None for default behavior
-        self.coordinator_context = None
-        
-        # Set default icon based on device type from initial device_info
-        device_type = cleaned_device_info.get("type", "unknown")
-        if device_type == "unknown" and "device_type_code" in cleaned_device_info:
-            device_type_code = cleaned_device_info.get("device_type_code")
-            device_type = DEVICE_TYPE_CODE_MAP.get(device_type_code, device_type)
-        
-        if not hasattr(self, '_attr_icon'):
-            self._attr_icon = DEVICE_ICONS.get(device_type, "mdi:devices")
-    
-    def _get_gateway_identifier(self) -> tuple | None:
-        """Get the RX11 gateway identifier for via_device linkage.
-        
-        Returns the identifier tuple for the RX11 gateway device if available,
-        enabling devices to inherit the gateway's availability status.
-        """
-        if hasattr(self.coordinator, 'config_entry') and self.coordinator.config_entry:
-            return (DOMAIN, f"{self.coordinator.config_entry.entry_id}_gateway")
-        return None
-    
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device info - dynamically generated from current coordinator data.
-        
-        Devices are linked to the RX11 gateway via via_device, which allows
-        Home Assistant to inherit the gateway's availability status automatically.
-        """
-        # Get current device info from coordinator (always up-to-date)
-        # Check both registered_devices and devices for the most complete data
-        current_device_info = (
-            self.coordinator._registered_devices.get(self._serial_number) or 
-            self.coordinator.devices.get(self._serial_number) or 
-            self._device_info
-        )
-        
-        # Get device type
-        device_type = current_device_info.get("type", "unknown")
-        if device_type == "unknown" and "device_type_code" in current_device_info:
-            device_type_code = current_device_info.get("device_type_code")
-            device_type = DEVICE_TYPE_CODE_MAP.get(device_type_code, device_type)
-        
-        # Get language for translations
-        lang = get_language(self.hass) if self.hass else DEFAULT_LANGUAGE
-        
-        # Build model description with current data (language-aware)
-        model_description = build_model_description(device_type, current_device_info, lang)
-        
-        # Check if device already exists in registry
-        # If the device exists and has a name_by_user, keep the original default name
-        # so that HA continues to use the user-defined override
-        existing_default_name = None
-        # Derive the HA device identifier: UUID-based registration_id for new
-        # devices, serial_number for legacy devices without registration_id.
-        device_identifier = current_device_info.get('registration_id') or self._serial_number
-        if self.hass:
-            from homeassistant.helpers import device_registry as dr
-            device_registry = dr.async_get(self.hass)
-            existing_device = device_registry.async_get_device(identifiers={(DOMAIN, device_identifier)})
-            if not existing_device:
-                # Fallback: try legacy serial-based identifier (migration)
-                existing_device = device_registry.async_get_device(identifiers={(DOMAIN, self._serial_number)})
-            if existing_device:
-                # Device exists - use the existing default name to preserve name_by_user
-                existing_default_name = existing_device.name
-        
-        # Generate device name (default name for new devices, or use existing default)
-        if existing_default_name:
-            # Use existing default name - this preserves name_by_user
-            device_name = existing_default_name
-        elif device_type.startswith("ewneo_") and device_type != "ewneo_sensor":
-            # EWneo bidirectional devices: prefer stored name from config_flow
-            # (includes user renames from device_confirm_rename step).
-            # This ensures entity.device_info and config_flow.device_save use the
-            # SAME name source, preventing inconsistent entity_ids when entities
-            # are created before the HA device registry entry exists.
-            stored_name = current_device_info.get("name")
-            if stored_name:
-                device_name = stored_name
-            else:
-                # Fallback: generate from ewneo_index
-                ewneo_index = current_device_info.get("ewneo_index")
-                receiver_label = t_receiver(lang)
-                if ewneo_index is not None:
-                    device_name = f"Easywave neo {receiver_label} #{ewneo_index + 1}"
-                else:
-                    device_name = f"Easywave neo {receiver_label} {self._serial_number[-4:]}"
-        else:
-            # Other devices: use existing name or generate default
-            device_name = current_device_info.get("name")
-            if not device_name:
-                device_name = f"Easywave device {self._serial_number}"
-        
-        # Get gateway identifier for via_device linkage
-        # This links devices to the RX11 gateway, allowing inheritance of availability status
-        gateway_identifier = self._get_gateway_identifier()
-        
-        # Return device_info with via_device to link to RX11 gateway
-        # Use registration_id (UUID) as device identifier so that each
-        # learn cycle creates a brand new HA device entry — no tombstone
-        # collision with previously deleted/disabled devices.
-        # The serial_number is passed as a separate DeviceInfo field for display.
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_identifier)},
-            serial_number=self._serial_number,
-            name=device_name,
-            model=model_description,
-            via_device=gateway_identifier,
+        """Initialize the transmitter entity."""
+        self._entry = entry
+        self._transmitter_serial: str = device.data[CONF_TRANSMITTER_SERIAL]
+        self._device_id: str = device.device_id
+        self._device_data = device.data
+
+        self._attr_unique_id = f"{device.device_id}_{unique_id_suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device.device_id)},
+            name=device.title,
+            manufacturer="ELDAT",
+            model=_transmitter_model(device.data),
+            via_device=(DOMAIN, entry.entry_id),
         )
 
     @property
-    def serial_number(self) -> str:
-        """Return device serial number."""
-        return self._serial_number
+    def _coordinator(self) -> EasywaveCoordinator:
+        """Return the coordinator from the shared runtime data."""
+        return self._entry.runtime_data.coordinator
 
-    @property
-    def device_type(self) -> str:
-        """Return device type."""
-        return self._device_info.get("type", "unknown")
-
-    @property
-    def extra_state_attributes(self) -> Dict[str, Any]:
-        """Return additional state attributes."""
-        # Get current device info from coordinator (always up-to-date)
-        current_device_info = (
-            self.coordinator._registered_devices.get(self._serial_number) or 
-            self.coordinator.devices.get(self._serial_number) or 
-            self._device_info
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates and register for telegram dispatch."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self.async_write_ha_state)
         )
-        
-        attributes = {
-            "serial_number": self._serial_number,
-        }
-        
-        # Add EWneo index if available (for bidirectional EWneo devices)
-        ewneo_index = current_device_info.get("ewneo_index")
-        if ewneo_index is not None:
-            attributes["ewneo_index"] = ewneo_index
-        
-        return attributes
+        coordinator = self._coordinator
+        coordinator.register_transmitter_entities([self])
+        self.async_on_remove(lambda: coordinator.unregister_transmitter_entity(self))
 
-    def _is_rx11_connected(self) -> bool:
-        """Check if the RX11 transceiver is connected.
-        
-        This is the base availability check that all entities inherit.
-        Subclasses can add additional availability checks on top of this.
-        """
-        # Check coordinator update success
-        if not self.coordinator.last_update_success:
-            return False
-        
-        # Check transceiver connection
-        transceiver = getattr(self.coordinator, 'transceiver', None)
-        if transceiver and hasattr(transceiver, 'is_connected'):
-            return transceiver.is_connected
-        
-        return True
+    @property
+    def transmitter_serial(self) -> str:
+        """Return the transmitter serial for matching telegrams."""
+        return self._transmitter_serial
 
+    @property
+    def device_id(self) -> str:
+        """Return the device id (used for device identifier lookup)."""
+        return self._device_id
+
+    @override
     @property
     def available(self) -> bool:
-        """Return True if entity is available - follows RX11 connection status.
-        
-        This base implementation checks the RX11 transceiver connection.
-        Since devices are linked via via_device to the RX11 gateway,
-        Home Assistant will automatically propagate unavailability.
-        
-        Subclasses can override this to add additional device-specific
-        availability checks (e.g., timeout, reachability) while still
-        inheriting the RX11 connection status via the base check.
-        """
-        return self._is_rx11_connected()
+        """Return if entity is available (transceiver connected)."""
+        return self._coordinator.transceiver.is_connected
 
+    def handle_battery_status(self, is_low: bool) -> None:
+        """Handle a battery status update from a PUSH telegram."""
+
+    def handle_telegram(self, event: Any) -> None:
+        """Handle an incoming transmitter telegram."""
+
+
+class EasywaveNeoSensorEntity(Entity):
+    """Base entity for an Easywave neo sensor."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        entry: EasywaveConfigEntry,
+        device: EasywaveDeviceEntry,
+        unique_id_suffix: str,
+    ) -> None:
+        """Initialize the neo sensor entity."""
+        self._entry = entry
+        self._sensor_serial: str = device.data[CONF_SENSOR_SERIAL]
+        self._device_id: str = device.device_id
+
+        self._attr_unique_id = f"{device.device_id}_{unique_id_suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device.device_id)},
+            name=device.title,
+            manufacturer="ELDAT",
+            model=_neo_sensor_model(device.data),
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def _coordinator(self) -> EasywaveCoordinator:
+        """Return the coordinator from the shared runtime data."""
+        return self._entry.runtime_data.coordinator
+
+    @override
     async def async_added_to_hass(self) -> None:
-        """When entity is added to hass."""
+        """Subscribe to coordinator updates and register for telegram dispatch."""
         await super().async_added_to_hass()
-        _LOGGER.debug("Added entity: %s (%s)", self.name, self._serial_number)
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self.async_write_ha_state)
+        )
+        coordinator = self._coordinator
+        coordinator.register_sensor_entities([self])
+        self.async_on_remove(lambda: coordinator.unregister_sensor_entity(self))
 
-    async def async_will_remove_from_hass(self) -> None:
-        """When entity will be removed from hass."""
-        await super().async_will_remove_from_hass()
-        _LOGGER.debug("Removing entity: %s (%s)", self.name, self._serial_number)
-        
-        # Purge history/recorder data for this entity when it's removed
-        try:
-            if self.entity_id:
-                await self.coordinator._purge_entity_history([self.entity_id])
-                _LOGGER.info("🧹 Entity history purged: %s", self.entity_id)
-        except Exception as e:
-            _LOGGER.debug("Could not purge history for entity %s: %s", self.entity_id, e)
+    @property
+    def sensor_serial(self) -> str:
+        """Return the sensor serial for matching telegrams."""
+        return self._sensor_serial
+
+    @override
+    @property
+    def available(self) -> bool:
+        """Return if entity is available (transceiver connected)."""
+        return self._coordinator.transceiver.is_connected
+
+    def handle_telegram(self, event: Any) -> None:
+        """Handle an incoming neo sensor telegram."""
+        raise NotImplementedError
+
+
+class EasywaveReceiverEntity(Entity):
+    """Base entity for an Easywave EW receiver (TX from Home Assistant)."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        entry: EasywaveConfigEntry,
+        device: EasywaveDeviceEntry,
+        unique_id_suffix: str,
+    ) -> None:
+        """Initialize the receiver entity."""
+        self._entry = entry
+        self._receiver_serial: str = device.data[CONF_RECEIVER_SERIAL]
+        self._rx11_index: int = int(device.data[CONF_RX11_INDEX])
+        self._device_id: str = device.device_id
+        self._device_data = device.data
+
+        self._attr_unique_id = f"{device.device_id}_{unique_id_suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device.device_id)},
+            name=device.title,
+            manufacturer="ELDAT",
+            model=_receiver_model(device.data),
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def _coordinator(self) -> EasywaveCoordinator:
+        """Return the coordinator from the shared runtime data."""
+        return self._entry.runtime_data.coordinator
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self.async_write_ha_state)
+        )
+
+    @property
+    def receiver_serial(self) -> str:
+        """Return the receiver serial hex."""
+        return self._receiver_serial
+
+    @property
+    def rx11_index(self) -> int:
+        """Return the RX11 transmitter index used to send commands."""
+        return self._rx11_index
+
+    @property
+    def device_id(self) -> str:
+        """Return the device id."""
+        return self._device_id
+
+    @override
+    @property
+    def available(self) -> bool:
+        """Return if entity is available (transceiver connected)."""
+        return self._coordinator.transceiver.is_connected
+
+    async def async_send_button(self, button: int) -> bool:
+        """Send an EW button command via the RX11 index serial."""
+        return await self._coordinator.async_send_ew_button(self._rx11_index, button)
+
+
+class EasywaveNeoActuatorEntity(Entity):
+    """Base entity for an Easywave neo bidirectional actuator."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self,
+        entry: EasywaveConfigEntry,
+        device: EasywaveDeviceEntry,
+        unique_id_suffix: str,
+        *,
+        channel: int | None = None,
+    ) -> None:
+        """Initialize the neo actuator entity."""
+        self._entry = entry
+        self._actuator_serial: str = device.data[CONF_ACTUATOR_SERIAL]
+        self._gateway_serial: str = str(device.data.get("gateway_serial") or "")
+        self._device_type_code: int = int(device.data[CONF_DEVICE_TYPE_CODE])
+        self._ewneo_index: int = int(device.data.get("ewneo_index", 0))
+        self._channel = channel
+        self._device_id: str = device.device_id
+        self._device_data = device.data
+        self._parsed_state: Any = None
+
+        suffix = unique_id_suffix
+        if channel is not None:
+            suffix = f"{unique_id_suffix}_ch{channel}"
+        self._attr_unique_id = f"{device.device_id}_{suffix}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device.device_id)},
+            name=device.title,
+            manufacturer="ELDAT",
+            model=_actuator_model(device.data),
+            via_device=(DOMAIN, entry.entry_id),
+        )
+
+    @property
+    def _coordinator(self) -> EasywaveCoordinator:
+        """Return the coordinator from the shared runtime data."""
+        return self._entry.runtime_data.coordinator
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates and register for EWB dispatch."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self.async_write_ha_state)
+        )
+        coordinator = self._coordinator
+        coordinator.register_actuator_entities([self])
+        self.async_on_remove(lambda: coordinator.unregister_actuator_entity(self))
+
+    @property
+    def actuator_serial(self) -> str:
+        """Return the actuator serial hex."""
+        return self._actuator_serial
+
+    @property
+    def device_type_code(self) -> int:
+        """Return the EWB device type code."""
+        return self._device_type_code
+
+    @property
+    def device_id(self) -> str:
+        """Return the device id."""
+        return self._device_id
+
+    @override
+    @property
+    def available(self) -> bool:
+        """Return if entity is available (transceiver connected)."""
+        return self._coordinator.transceiver.is_connected
+
+    def handle_state(self, state: Any) -> None:
+        """Handle a parsed EWB state update."""
+        self._parsed_state = state
+        self.async_write_ha_state()
+
+    async def async_change_state(self, command: Any, *, mode: int = 0) -> Any:
+        """Send an EWB change-state command and return the parsed response state."""
+        return await self._coordinator.async_ewb_change_state(
+            gateway_serial=self._gateway_serial,
+            actuator_serial=self._actuator_serial,
+            device_type_code=self._device_type_code,
+            mode=mode,
+            command=command,
+        )

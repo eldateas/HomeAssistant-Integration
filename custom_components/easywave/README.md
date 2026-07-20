@@ -1,38 +1,69 @@
-# Easywave Integration for Home Assistant
+# Easywave (HACS)
 
-[![License](https://img.shields.io/github/license/eldateas/HomeAssistant-Integration)](LICENSE)
+Custom integration for ELDAT Easywave / EWneo via the RX11 USB transceiver.
 
-Custom integration for Home Assistant to control and monitor ELDAT Easywave / EWneo radio devices via the **RX11 USB Transceiver**.
+**Version:** 0.7.0
 
-## Features
+## Architecture
 
-- Easywave transmitters (1/2/3/4-button, impulse & permanent modes)
-- Easywave receivers (switches, motors, heating)
-- EWneo bidirectional actuators (switches, motors)
-- EWneo sensors (temperature, humidity)
-- Device triggers for automations
-- Automatic device backup & migration
+This release aligns storage and identity with the upcoming Home Assistant **CORE** Easywave integration:
 
-## Documentation
+- One hub config entry (RX11)
+- Devices stored in typed **bucket subentries** (`easywave_transmitter`, `easywave_neo_sensor`, `easywave_receiver`, `easywave_neo_actuator`)
+- Serial-stable device / entity IDs for a later seamless CORE switch
+- Protocol via [`easywave-home-control`](https://pypi.org/project/easywave-home-control/)
 
-- 🇬🇧 [English User Guide](docs/index.md)
-- 🇩🇪 [Deutsche Anleitung](docs/index_de.md)
+## Upgrade from 0.6.x
 
-## Test Coverage
+1. Update the integration.
+2. Restart Home Assistant.
+3. Devices are migrated automatically from JSON → subentries.
+4. Recreate automations and device triggers (entity unique IDs changed).
 
-| Metric | Value |
-|--------|-------|
-| **Tests** | 774 |
-| **Coverage** | 32% |
-| **Framework** | pytest + pytest-homeassistant-custom-component |
+Archived JSON files land in `config/easywave/migrated/`.
 
-Run tests locally:
+## Supported devices
+
+| Type | Platforms |
+|------|-----------|
+| EW transmitter | sensor / binary_sensor + triggers |
+| EWneo sensor | sensor |
+| EW receiver | button / switch / cover |
+| EWneo switch / dimmer / motor | switch / light / cover |
+
+## Docs
+
+See [docs/index.md](docs/index.md).
+
+## Validation (CI & local)
+
+GitHub Actions workflow: [`.github/workflows/validate.yaml`](../../.github/workflows/validate.yaml)
+
+- **Hassfest** — Home Assistant integration structure/manifest
+- **HACS** — same checks used for default-repository inclusion
+- **Unit tests** — `tests/easywave`
+
+Locally (from the repository root):
 
 ```bash
-pip install pytest pytest-asyncio pytest-homeassistant-custom-component pytest-cov
-pytest --timeout=15 --cov=custom_components/easywave
+./scripts/validate.sh           # hassfest + HACS (if Docker) + tests
+./scripts/validate.sh hassfest  # only hassfest
+./scripts/validate.sh hacs      # only HACS (needs Docker)
+./scripts/validate.sh tests     # only unit tests
 ```
 
-## License
+Without Docker, hassfest falls back to a sibling `HomeAssistant-Core` checkout (`CORE_PATH` override possible).
 
-See [LICENSE](LICENSE) for details.
+For HACS without GitHub API access:
+
+```bash
+export HACS_IGNORE="brands description topics issues archived"
+./scripts/validate.sh hacs
+```
+
+For full HACS checks (recommended before a `hacs/default` PR):
+
+```bash
+export GITHUB_TOKEN=ghp_…
+./scripts/validate.sh hacs
+```
