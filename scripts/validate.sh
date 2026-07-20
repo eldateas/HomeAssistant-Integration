@@ -9,11 +9,13 @@
 #
 # Environment:
 #   GITHUB_TOKEN       Optional; improves HACS checks that call the GitHub API
-#                      (description, topics, issues, brands, archived).
+#                      (description, topics, issues, archived).
 #   GITHUB_REPOSITORY  Defaults to git remote owner/name if detectable.
 #   HACS_IGNORE        Space-separated HACS checks to skip (empty for default-store grade).
 #                      Example for offline/local-only:
-#                        HACS_IGNORE="brands description topics issues archived"
+#                        HACS_IGNORE="description topics issues archived"
+#                      Note: brands are shipped in custom_components/easywave/brand/
+#                      (HA 2026.3+); the home-assistant/brands repo is not required.
 #   CORE_PATH          Optional path to a Home Assistant Core checkout (for
 #                      hassfest fallback without Docker). Defaults to
 #                      ../HomeAssistant-Core relative to this repo.
@@ -125,7 +127,7 @@ run_hacs() {
   fi
   if [[ -z "${GITHUB_TOKEN:-}" ]]; then
     echo "${YELLOW}Warning: GITHUB_TOKEN unset — GitHub metadata checks may fail.${RESET}"
-    echo "${YELLOW}  Tip: export GITHUB_TOKEN=…  or set HACS_IGNORE=\"brands description topics issues archived\"${RESET}"
+    echo "${YELLOW}  Tip: export GITHUB_TOKEN=…  or set HACS_IGNORE=\"description topics issues archived\"${RESET}"
   fi
 
   docker pull -q ghcr.io/hacs/action:main >/dev/null

@@ -54,10 +54,12 @@ Locally (from the repository root):
 
 Without Docker, hassfest falls back to a sibling `HomeAssistant-Core` checkout (`CORE_PATH` override possible).
 
+Brand icons/logos ship in `custom_components/easywave/brand/` (Home Assistant 2026.3+). A PR to `home-assistant/brands` is **not** required for HACS custom integrations.
+
 For HACS without GitHub API access:
 
 ```bash
-export HACS_IGNORE="brands description topics issues archived"
+export HACS_IGNORE="description topics issues archived"
 ./scripts/validate.sh hacs
 ```
 

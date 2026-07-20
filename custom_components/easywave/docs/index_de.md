@@ -61,7 +61,7 @@ Die Easywave Integration ermöglicht die Steuerung und Überwachung von ELDAT Fu
 
 | Komponente | Anforderung |
 |------------|-------------|
-| **Home Assistant** | Version 2024.1.0 oder höher |
+| **Home Assistant** | Version 2026.3.0 oder höher |
 | **Hardware** | Home Assistant Green, Yellow, oder anderer Linux-basierter Host |
 | **RX11 USB-Transceiver** | VID: 0x155A, PID: 0x1014 |
 

@@ -4,7 +4,12 @@ rules:
     status: exempt
     comment: Integration does not register custom actions.
   appropriate-polling: done
-  brands: done
+  brands:
+    status: done
+    comment: >-
+      Custom integration ships icon/logo in brand/; the home-assistant/brands
+      repository is not required for HACS. When merging into Core, move images
+      to the brands repository and drop the local brand/ folder.
   common-modules: done
   config-flow: done
   config-flow-test-coverage: done

@@ -1,7 +1,11 @@
-# Validate integration with hassfest and HACS (same checks used for default-repo inclusion).
+# Validate integration with hassfest and HACS.
+#
+# Brand images ship in custom_components/easywave/brand/ (HA 2026.3+);
+# home-assistant/brands is not required for this custom integration.
 #
 # Docs:
 #   https://developers.home-assistant.io/blog/2020/04/16/hassfest/
+#   https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api/
 #   https://www.hacs.xyz/docs/publish/action/
 
 name: Validate

@@ -20,6 +20,7 @@ All Easywave work (HACS custom component and later CORE extensions) must preserv
 
 - Port HACS bucket types/fields/entity unique IDs first; UX/docs second.
 - Do not rename existing storage keys or unique_id suffixes without a migration path that preserves entity registry entries.
+- HACS ships brand images in `brand/`; for Core contribution move them to `home-assistant/brands` and remove the local `brand/` folder (custom integrations do not need the brands repository).
 
 ## Switch path (do not break)
 
