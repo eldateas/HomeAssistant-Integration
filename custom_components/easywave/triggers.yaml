@@ -1,3 +1,7 @@
+# HACS/custom: omit supported_features — HA only resolves
+# homeassistant.components.<domain> enums (CORE-only). Sensors still set
+# Easywave*Feature flags for runtime filtering.
+
 button_press_a:
   target:
     primary_entities_only: true
@@ -5,8 +9,6 @@ button_press_a:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveTransmitterFeature.BUTTON_A
 
 button_press_b:
   target:
@@ -15,8 +17,6 @@ button_press_b:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveTransmitterFeature.BUTTON_B
 
 button_press_c:
   target:
@@ -25,8 +25,6 @@ button_press_c:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveTransmitterFeature.BUTTON_C
 
 button_press_d:
   target:
@@ -35,8 +33,6 @@ button_press_d:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveTransmitterFeature.BUTTON_D
 
 button_release:
   target:
@@ -45,8 +41,6 @@ button_release:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveTransmitterFeature.BUTTON_RELEASE
 
 gateway_connected:
   target:
@@ -55,8 +49,6 @@ gateway_connected:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveGatewayFeature.GATEWAY_STATUS
 
 gateway_disconnected:
   target:
@@ -65,5 +57,3 @@ gateway_disconnected:
       - integration: easywave
         domain: sensor
         device_class: enum
-        supported_features:
-          - easywave.EasywaveGatewayFeature.GATEWAY_STATUS
