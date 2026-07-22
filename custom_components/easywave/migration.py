@@ -94,6 +94,57 @@ def _load_json_devices(path: Path) -> dict[str, dict[str, Any]]:
     return {}
 
 
+def _merge_device_maps(
+    *maps: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Merge device maps; later maps win on serial collision."""
+    combined: dict[str, dict[str, Any]] = {}
+    for device_map in maps:
+        for serial, info in device_map.items():
+            combined[str(serial)] = _flatten_device_info(info)
+    return combined
+
+
+def _load_legacy_device_maps(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """Load 0.6.x JSON devices from live paths, then archived migrated copies."""
+    base = _easywave_dir(hass)
+    registered = _load_json_devices(base / _REGISTERED_FILE)
+    managed = _load_json_devices(base / _MANAGED_FILE)
+    combined = _merge_device_maps(managed, registered)
+    if combined:
+        return combined
+
+    # Recovery: setup may have failed before migration archived files, or the
+    # user restored an old backup into migrated/. Prefer newest archive names.
+    migrated = base / "migrated"
+    if not migrated.is_dir():
+        return {}
+    archived_registered = sorted(
+        migrated.glob(f"{_REGISTERED_FILE}*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    archived_managed = sorted(
+        migrated.glob(f"{_MANAGED_FILE}*"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    recovered_registered = (
+        _load_json_devices(archived_registered[0]) if archived_registered else {}
+    )
+    recovered_managed = (
+        _load_json_devices(archived_managed[0]) if archived_managed else {}
+    )
+    recovered = _merge_device_maps(recovered_managed, recovered_registered)
+    if recovered:
+        _LOGGER.warning(
+            "Loaded %d Easywave devices from archived JSON under %s",
+            len(recovered),
+            migrated,
+        )
+    return recovered
+
+
 def _device_type(info: dict[str, Any]) -> str:
     return str(info.get("device_type") or info.get("type") or "").lower()
 
@@ -321,21 +372,12 @@ async def async_migrate_json_devices(
         _LOGGER.debug("Subentries already contain devices; skipping JSON migration")
         return counts
 
-    base = _easywave_dir(hass)
-    registered = await hass.async_add_executor_job(
-        _load_json_devices, base / _REGISTERED_FILE
-    )
-    managed = await hass.async_add_executor_job(
-        _load_json_devices, base / _MANAGED_FILE
-    )
-    # registered_devices is authoritative in 0.6.10; merge managed first so
-    # devices only present there are not lost when registered is partial.
-    combined: dict[str, dict[str, Any]] = {}
-    for serial, info in managed.items():
-        combined[str(serial)] = _flatten_device_info(info)
-    for serial, info in registered.items():
-        combined[str(serial)] = _flatten_device_info(info)
+    combined = await hass.async_add_executor_job(_load_legacy_device_maps, hass)
     if not combined:
+        _LOGGER.debug(
+            "No legacy Easywave JSON devices found under %s (or migrated/)",
+            _easywave_dir(hass),
+        )
         return counts
 
     buckets: dict[str, dict[str, dict[str, Any]]] = {

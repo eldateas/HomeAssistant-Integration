@@ -1,5 +1,12 @@
 # Easywave Integration Changelog
 
+## 0.7.1 — Fix 0.6.10 hub upgrade
+
+### Fixed
+- Config entry **VERSION** set to **2** (same as HACS 0.6.x). VERSION 1 rejected existing hubs with “version higher than current”, so the RX11 never loaded and JSON→subentry migration never ran.
+- Hub unique_id `rx11_*` normalized to CORE-style `easywave_*`.
+- JSON migration can recover devices from `config/easywave/migrated/` if live JSON was already archived.
+
 ## 0.7.0 — CORE storage architecture (breaking)
 
 ### Breaking changes

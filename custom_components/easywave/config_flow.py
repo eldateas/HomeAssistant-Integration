@@ -46,7 +46,9 @@ _LOGGER = logging.getLogger(__name__)
 class EasywaveConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the config flow for Easywave gateway setup."""
 
-    VERSION = 1
+    # Must be >= HACS 0.6.x entry version (2). Downgrade is rejected by HA and
+    # leaves the hub unloaded — JSON→subentry migration never runs.
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize."""

@@ -11,6 +11,7 @@ from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from .const import (
     CONF_DEVICE_PATH,
     CONF_USB_PID,
+    CONF_USB_SERIAL_NUMBER,
     DOMAIN,
     EasywaveGatewayFeature as EasywaveGatewayFeature,
     EasywaveTransmitterFeature as EasywaveTransmitterFeature,
@@ -45,8 +46,49 @@ _PLATFORMS: list[Platform] = [
 ]
 
 
+def _normalize_hub_unique_id(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Rewrite legacy HACS 0.6 unique_id ``rx11_*`` to CORE ``easywave_*``."""
+    unique_id = entry.unique_id
+    if not unique_id or not unique_id.startswith("rx11_"):
+        return
+    serial = unique_id.removeprefix("rx11_")
+    if not serial or serial == "unknown":
+        serial = str(entry.data.get(CONF_USB_SERIAL_NUMBER) or "").strip() or "unknown"
+    new_unique_id = f"easywave_{serial}"
+    if new_unique_id == unique_id:
+        return
+    _LOGGER.info(
+        "Normalizing Easywave hub unique_id %s → %s", unique_id, new_unique_id
+    )
+    hass.config_entries.async_update_entry(entry, unique_id=new_unique_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entry schema to the current VERSION.
+
+    HACS 0.6.x already used VERSION 2. This handler covers older VERSION 1
+    entries and keeps the stored major version aligned so setup can proceed.
+    """
+    if entry.version > 2:
+        _LOGGER.error(
+            "Easywave config entry %s has unsupported version %s",
+            entry.title,
+            entry.version,
+        )
+        return False
+
+    if entry.version < 2:
+        data = dict(entry.data)
+        hass.config_entries.async_update_entry(entry, data=data, version=2)
+        _LOGGER.info("Migrated Easywave config entry '%s' to version 2", entry.title)
+
+    _normalize_hub_unique_id(hass, entry)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: EasywaveConfigEntry) -> bool:
     """Set up the Easywave gateway config entry."""
+    _normalize_hub_unique_id(hass, entry)
     await async_migrate_json_devices(hass, entry)
     await async_sync_bucket_subentry_titles(hass, entry)
 
