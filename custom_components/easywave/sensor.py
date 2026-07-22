@@ -35,6 +35,8 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_NEO_SENSOR,
     ENTRY_TYPE_TRANSMITTER,
+    EVENT_TYPE_BATTERY_LOW,
+    EVENT_TYPE_BATTERY_NORMAL,
     EVENT_TYPE_GATEWAY_CONNECTED,
     EVENT_TYPE_GATEWAY_DISCONNECTED,
     TRANSMITTER_SWITCH_IMPULSE,
@@ -260,7 +262,7 @@ class EasywaveTransmitterLastButtonSensor(EasywaveTransmitterEntity, RestoreSens
     """Enum sensor showing the last button pressed on a type-1 group transmitter."""
 
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_translation_key = "last_button"
+    _attr_translation_key = "transmitter_last_button"
     _attr_icon = "mdi:radiobox-marked"
 
     def __init__(
@@ -496,23 +498,32 @@ _BATTERY_OPTIONS = [_BATTERY_STATE_OK, _BATTERY_STATE_LOW]
 
 
 class EasywaveTransmitterBatterySensor(EasywaveTransmitterEntity, RestoreSensor):
-    """Legacy enum battery sensor — kept for compatibility; prefer binary_sensor."""
+    """Diagnostic battery-state sensor for an Easywave transmitter (CORE-aligned).
+
+    Requires two consecutive non-low PUSH telegrams to clear an existing
+    warning (_CLEAR_THRESHOLD) to avoid spurious OK flashes on restart.
+    """
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_translation_key = "battery"
+    _attr_translation_key = "battery_warning"
     _attr_options = _BATTERY_OPTIONS
+
     _CLEAR_THRESHOLD = 2
 
     def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
-        """Initialize."""
-        super().__init__(entry, device, "battery_enum")
+        """Initialize the transmitter battery sensor."""
+        super().__init__(entry, device, "battery_warning")
         self._native_value: str | None = None
         self._ok_streak: int = 0
 
     @override
     async def async_added_to_hass(self) -> None:
-        """Restore."""
+        """Subscribe to coordinator and restore last known battery state.
+
+        Restore BEFORE calling super() to prevent the coordinator listener
+        from overwriting the restored value.
+        """
         if (last_data := await self.async_get_last_sensor_data()) is not None:
             native = last_data.native_value
             if native in _BATTERY_OPTIONS:
@@ -522,18 +533,35 @@ class EasywaveTransmitterBatterySensor(EasywaveTransmitterEntity, RestoreSensor)
     @override
     @property
     def native_value(self) -> str | None:
-        """Return battery state."""
+        """Return the current battery state."""
         return self._native_value
+
+    @override
+    @property
+    def icon(self) -> str:
+        """Return a battery icon reflecting the current state."""
+        if self._native_value == _BATTERY_STATE_LOW:
+            return "mdi:battery-alert"
+        if self._native_value == _BATTERY_STATE_OK:
+            return "mdi:battery"
+        return "mdi:battery-unknown"
+
+    @callback
+    def handle_telegram(self, event: ButtonPushEvent | ButtonReleaseEvent) -> None:
+        """Battery state is updated via handle_battery_status."""
 
     @override
     @callback
     def handle_battery_status(self, is_low: bool) -> None:
-        """Update battery enum."""
+        """Update battery state from the LOWBAT flag of a PUSH telegram."""
         if is_low:
             self._ok_streak = 0
             if self._native_value != _BATTERY_STATE_LOW:
                 self._native_value = _BATTERY_STATE_LOW
                 self.async_write_ha_state()
+                self._coordinator.fire_device_event(
+                    self._device_id, EVENT_TYPE_BATTERY_LOW, subtype="low"
+                )
             return
         if self._native_value == _BATTERY_STATE_OK:
             return
@@ -542,6 +570,9 @@ class EasywaveTransmitterBatterySensor(EasywaveTransmitterEntity, RestoreSensor)
             self._native_value = _BATTERY_STATE_OK
             self._ok_streak = 0
             self.async_write_ha_state()
+            self._coordinator.fire_device_event(
+                self._device_id, EVENT_TYPE_BATTERY_NORMAL, subtype="ok"
+            )
 
 
 class EasywaveNeoSensorTemperatureSensor(EasywaveNeoSensorEntity, RestoreSensor):
@@ -549,7 +580,7 @@ class EasywaveNeoSensorTemperatureSensor(EasywaveNeoSensorEntity, RestoreSensor)
 
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_translation_key = "temperature"
+    _attr_translation_key = "neo_sensor_temperature"
 
     def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
         """Initialize the temperature sensor."""
@@ -591,7 +622,7 @@ class EasywaveNeoSensorHumiditySensor(EasywaveNeoSensorEntity, RestoreSensor):
 
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_translation_key = "humidity"
+    _attr_translation_key = "neo_sensor_humidity"
 
     def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
         """Initialize the humidity sensor."""

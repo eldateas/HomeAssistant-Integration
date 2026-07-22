@@ -44,9 +44,9 @@
       "step": {
         "actuator_confirm": {
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           },
-          "description": "The neo actuator was successfully paired (type {type_code}, {channels} channel(s)).\n\nEnter a name for the new device:",
+          "description": "The neo actuator was successfully paired ({device_type_name}, {channels} channel(s)).\n\nEnter a name for the new device:",
           "title": "Learning Successful"
         },
         "actuator_intro": {
@@ -100,7 +100,7 @@
         },
         "sensor_confirm": {
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           },
           "data_description": {
             "title": "The name for this Easywave neo sensor."
@@ -133,9 +133,9 @@
       "step": {
         "receiver_confirm": {
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           },
-          "description": "Receiver index {index} ({kind}) is ready.\n\nPut the physical receiver into programming mode, then save with a name:",
+          "description": "Put the physical receiver into programming mode, then enter a name for the new device:",
           "title": "Learning Successful"
         },
         "receiver_kind": {
@@ -207,7 +207,7 @@
         },
         "transmitter_confirm": {
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           },
           "description": "The transmitter was successfully learned!\n\nEnter a name for the new device:",
           "title": "Learning Successful"
@@ -348,10 +348,17 @@
         }
       },
       "battery_warning": {
-        "name": "Battery Warning"
+        "name": "Alerte batterie"
       }
     },
     "sensor": {
+      "battery_warning": {
+        "name": "Batterie",
+        "state": {
+          "low": "Faible",
+          "ok": "OK"
+        }
+      },
       "gateway_status": {
         "name": "Connection Status",
         "state": {
@@ -371,21 +378,6 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "Button A",
-          "b": "Button B",
-          "c": "Button C",
-          "d": "Button D"
-        }
-      },
-      "last_button": {
-        "name": "State",
-        "state": {
-          "on": "On",
-          "off": "Off",
-          "up": "Up",
-          "down": "Down",
-          "stop": "Stop",
-          "released": "Not pressed",
           "a": "Button A",
           "b": "Button B",
           "c": "Button C",
@@ -456,12 +448,6 @@
           "released": "Not pressed"
         }
       },
-      "temperature": {
-        "name": "Temperature"
-      },
-      "humidity": {
-        "name": "Humidity"
-      },
       "wind_speed": {
         "name": "Wind Speed"
       },
@@ -470,6 +456,22 @@
       },
       "battery": {
         "name": "Battery"
+      },
+      "transmitter_last_button": {
+        "name": "State",
+        "state": {
+          "a": "Button A",
+          "b": "Button B",
+          "c": "Button C",
+          "d": "Button D",
+          "released": "Not pressed"
+        }
+      },
+      "neo_sensor_temperature": {
+        "name": "Temperature"
+      },
+      "neo_sensor_humidity": {
+        "name": "Humidity"
       }
     },
     "button": {

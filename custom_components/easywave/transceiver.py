@@ -15,7 +15,9 @@ from easywave_home_control import (
     GatewayConfig,
     GatewayInfo,
 )
-from easywave_home_control.codec import EwbRcvEvent, EwbState
+from easywave_home_control.codec import EwbRcvEvent, EwbState, parse_ewb_rcv
+from easywave_home_control.codec.exceptions import CodecError
+from easywave_home_control.protocols.rx11_rx2x.protocol import ErrorCode, InfoType
 
 from homeassistant.core import HomeAssistant
 
@@ -120,8 +122,73 @@ class RX11Transceiver:
         return await self._gateway.reconnect()
 
     async def receive_telegram(self, timeout: float = 30.0) -> EwbRcvEvent | None:
-        """Wait for an EW/EWneo telegram."""
+        """Wait for an EW/EWneo telegram via EW_RCV_EX."""
         return await self._gateway.ew.receive_ex(timeout=timeout)
+
+    async def receive_ewb_telegram(
+        self,
+        timeout: float | None = 60.0,
+        *,
+        device_type_for_serial: Callable[[bytes], int | None] | None = None,
+    ) -> EwbRcvEvent | None:
+        """Wait for an EWB_RCV telegram (neo status, sensors, EW buttons).
+
+        For ``TM_IT_EWBIDI_STATE``, ``device_type_for_serial`` must resolve the
+        actuator type so the codec can parse typed state.
+
+        On timeout/non-success the pending hardware request is cancelled — the
+        low-level ``ewb_rcv_request`` does not remove timed-out requests itself,
+        which otherwise leaves a zombie RCV that swallows later telegrams.
+        """
+        device = self._gateway.device
+        if device is None:
+            return None
+        try:
+            raw = await device.ewb_rcv_request(timeout=timeout)
+        except TimeoutError:
+            await self.cancel_pending_receives()
+            return None
+        except OSError as err:
+            _LOGGER.debug("EWB_RCV failed: %s", err)
+            await self.cancel_pending_receives()
+            return None
+
+        if raw is None:
+            await self.cancel_pending_receives()
+            return None
+        result_code, info_type, serial, info_data = raw
+        if result_code != ErrorCode.SUCCESS:
+            # Timed-out / superseded / canceled — flush so the next poll is clean.
+            if result_code not in (
+                ErrorCode.ERR_CANCELED,
+                ErrorCode.ERR_SUPERSEDED,
+            ):
+                await self.cancel_pending_receives()
+            return None
+        device_type: int | None = None
+        if info_type == InfoType.TM_IT_EWBIDI_STATE:
+            if device_type_for_serial is not None:
+                device_type = device_type_for_serial(serial)
+            if device_type is None:
+                _LOGGER.debug(
+                    "Ignoring EWB state from unknown actuator …%s",
+                    serial.hex()[-8:],
+                )
+                return None
+        try:
+            event = parse_ewb_rcv(
+                info_type, serial, info_data, device_type=device_type
+            )
+        except CodecError as err:
+            _LOGGER.debug("Failed to parse EWB_RCV: %s", err)
+            return None
+        _LOGGER.debug(
+            "EWB_RCV info_type=%s serial=…%s type=%s",
+            info_type,
+            serial.hex()[-8:],
+            type(event).__name__,
+        )
+        return event
 
     async def cancel_pending_receives(self) -> None:
         """Cancel pending receive requests on the hardware."""
@@ -139,6 +206,25 @@ class RX11Transceiver:
     async def get_ewb_gateway_serial(self, index: int) -> bytes | None:
         """Return the EWB gateway serial for an index."""
         return await self._gateway.ewb.get_gateway_serial(index)
+
+    async def ewb_add_gateway_filter(self, gateway: bytes) -> bool:
+        """Add an EWB gateway serial to the receive filter (needed before join).
+
+        ``ERR_SERIAL_FILTER`` (filter already present) is treated as success,
+        matching HACS 0.6 and the pairing example workflow.
+        """
+        device = self._gateway.device
+        if device is None:
+            return False
+        async with self._gateway.io_cancel_lock:
+            result = await device.ewb_add_nfilter_request(
+                gateway, timeout=self._gateway.request_timeout
+            )
+        return result in (ErrorCode.SUCCESS, ErrorCode.ERR_SERIAL_FILTER)
+
+    async def ewb_clear_gateway_filter(self) -> bool:
+        """Clear the EWB receive filter."""
+        return await self._gateway.ewb.clear_gateway_filter()
 
     async def send_ew_command(self, index: int, button: int) -> bool:
         """Send an EW button command using the serial of the given RX11 index."""

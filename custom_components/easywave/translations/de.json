@@ -44,9 +44,9 @@
       "step": {
         "actuator_confirm": {
           "title": "Einlernen erfolgreich",
-          "description": "Der neo Empfänger wurde erfolgreich gepaart (Typ {type_code}, {channels} Kanal/Kanäle).\n\nGeben Sie einen Namen für das neue Gerät ein:",
+          "description": "Der neo Empfänger wurde erfolgreich gepaart ({device_type_name}, {channels} Kanal/Kanäle).\n\nGeben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           }
         },
         "actuator_intro": {
@@ -102,7 +102,7 @@
           "title": "Einlernen erfolgreich",
           "description": "Der Sensor wurde erfolgreich eingelernt!\n\nErkannte Sensoren:\n{sensor_list}\n\nGeben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           },
           "data_description": {
             "title": "Der Name für diesen Easywave neo Sensor."
@@ -133,9 +133,9 @@
       "step": {
         "receiver_confirm": {
           "title": "Einlernen erfolgreich",
-          "description": "Empfänger-Index {index} ({kind}) ist bereit.\n\nVersetzen Sie den physischen Empfänger in den Programmiermodus und speichern Sie mit einem Namen:",
+          "description": "Versetzen Sie den physischen Empfänger in den Programmiermodus und geben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           }
         },
         "receiver_kind": {
@@ -209,7 +209,7 @@
           "title": "Einlernen erfolgreich",
           "description": "Der Sender wurde erfolgreich eingelernt!\n\nGeben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "[%key:common::config_flow::data::name%]"
+            "title": "Name"
           }
         },
         "transmitter_grouping": {
@@ -352,6 +352,13 @@
       }
     },
     "sensor": {
+      "battery_warning": {
+        "name": "Batterie",
+        "state": {
+          "low": "Schwach",
+          "ok": "OK"
+        }
+      },
       "gateway_status": {
         "name": "Verbindungsstatus",
         "state": {
@@ -371,21 +378,6 @@
           "up": "Auf",
           "down": "Zu",
           "stop": "Stopp",
-          "a": "Taste A",
-          "b": "Taste B",
-          "c": "Taste C",
-          "d": "Taste D"
-        }
-      },
-      "last_button": {
-        "name": "Zustand",
-        "state": {
-          "on": "Ein",
-          "off": "Aus",
-          "up": "Auf",
-          "down": "Zu",
-          "stop": "Stopp",
-          "released": "Nicht betätigt",
           "a": "Taste A",
           "b": "Taste B",
           "c": "Taste C",
@@ -456,12 +448,6 @@
           "released": "Nicht betätigt"
         }
       },
-      "temperature": {
-        "name": "Temperatur"
-      },
-      "humidity": {
-        "name": "Luftfeuchtigkeit"
-      },
       "wind_speed": {
         "name": "Windgeschwindigkeit"
       },
@@ -470,6 +456,22 @@
       },
       "battery": {
         "name": "Batterie"
+      },
+      "transmitter_last_button": {
+        "name": "Zustand",
+        "state": {
+          "a": "Taste A",
+          "b": "Taste B",
+          "c": "Taste C",
+          "d": "Taste D",
+          "released": "Nicht betätigt"
+        }
+      },
+      "neo_sensor_temperature": {
+        "name": "Temperatur"
+      },
+      "neo_sensor_humidity": {
+        "name": "Luftfeuchtigkeit"
       }
     },
     "button": {

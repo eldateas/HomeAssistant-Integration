@@ -1,5 +1,6 @@
 """Subentry flow for adding Easywave neo actuators."""
 
+import logging
 import time
 from typing import Any
 
@@ -19,8 +20,15 @@ from .const import (
     ENTRY_TYPE_NEO_ACTUATOR,
     EWB_LEARNING_TIMEOUT,
     device_id_for_neo_actuator,
+    ewneo_device_type_label,
     normalize_serial_hex,
 )
+from .devices import get_devices
+
+_LOGGER = logging.getLogger(__name__)
+
+# Short join attempts match HACS 0.6 / firmware RF timeout behaviour.
+_EWB_JOIN_ATTEMPT_TIMEOUT = 2.0
 
 
 class EasywaveNeoActuatorSubentryFlowHandler(
@@ -77,32 +85,78 @@ class EasywaveNeoActuatorSubentryFlowHandler(
         return await self.async_step_learn_timeout(user_input)
 
     async def _do_learning(self, coordinator: Any) -> dict[str, Any] | None:
-        """Join an EWneo actuator on a free gateway index."""
+        """Join an EWneo actuator on a free gateway index.
+
+        Follows the easywave-home-control pairing sequence:
+        exclusive IO → EWB_GET_FD_SERIAL → EWB_ADD_NFILTER → EWB_JOIN_DEVICE.
+        """
         index = coordinator.allocate_ewneo_index()
         if index is None:
-            return None
-        gateway = await coordinator.transceiver.get_ewb_gateway_serial(index)
-        if gateway is None:
+            _LOGGER.error("No free EWB gateway index available for neo actuator learn")
             return None
 
+        # Listener must be stopped first — concurrent EW_RCV_EX blocks short EWB
+        # requests and made get_gateway_serial / join fail immediately.
         await coordinator.suspend_telegram_listener()
         try:
-            deadline = time.monotonic() + EWB_LEARNING_TIMEOUT
-            remaining = max(1.0, deadline - time.monotonic())
-            joined = await coordinator.transceiver.ewb_join_device(
-                gateway, timeout=remaining
-            )
-            if joined is None:
+            gateway = await coordinator.transceiver.get_ewb_gateway_serial(index)
+            if gateway is None:
+                _LOGGER.error(
+                    "Failed to load EWB gateway serial for index %s", index
+                )
                 return None
-            device_type, receiver = joined
-            return {
-                "ewneo_index": index,
-                "gateway_serial": normalize_serial_hex(gateway),
-                "actuator_serial": normalize_serial_hex(receiver),
-                "device_type_code": int(device_type),
-            }
+
+            if not await coordinator.transceiver.ewb_add_gateway_filter(gateway):
+                _LOGGER.error(
+                    "Failed to add EWB gateway filter for index %s", index
+                )
+                return None
+
+            _LOGGER.info(
+                "EWB join waiting on index %s gateway …%s (timeout %ss)",
+                index,
+                normalize_serial_hex(gateway)[-8:],
+                EWB_LEARNING_TIMEOUT,
+            )
+
+            deadline = time.monotonic() + EWB_LEARNING_TIMEOUT
+            while time.monotonic() < deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                joined = await coordinator.transceiver.ewb_join_device(
+                    gateway,
+                    timeout=min(_EWB_JOIN_ATTEMPT_TIMEOUT, remaining),
+                )
+                if joined is not None:
+                    device_type, receiver = joined
+                    _LOGGER.info(
+                        "EWB join success: type=0x%02X serial=…%s",
+                        int(device_type),
+                        normalize_serial_hex(receiver)[-8:],
+                    )
+                    return {
+                        "ewneo_index": index,
+                        "gateway_serial": normalize_serial_hex(gateway),
+                        "actuator_serial": normalize_serial_hex(receiver),
+                        "device_type_code": int(device_type),
+                    }
+
+            _LOGGER.warning(
+                "EWB join timed out after %ss (index %s)",
+                EWB_LEARNING_TIMEOUT,
+                index,
+            )
+            return None
+        except (OSError, TimeoutError, ValueError) as err:
+            _LOGGER.error("EWB neo actuator learning failed: %s", err)
+            return None
         finally:
             coordinator.resume_telegram_listener()
+
+    def _type_label(self, type_code: int) -> str:
+        """Return a localized friendly type label for the confirm UI."""
+        return ewneo_device_type_label(type_code, self.hass.config.language)
 
     async def async_step_actuator_confirm(
         self, user_input: dict[str, Any] | None = None
@@ -123,6 +177,9 @@ class EasywaveNeoActuatorSubentryFlowHandler(
             return self.async_abort(reason="already_configured")
 
         if user_input is not None and "title" in user_input:
+            title = str(user_input["title"]).strip() or self._next_default_name(
+                ENTRY_TYPE_NEO_ACTUATOR
+            )
             data = {
                 CONF_ENTRY_TYPE: ENTRY_TYPE_NEO_ACTUATOR,
                 CONF_ACTUATOR_SERIAL: serial_hex,
@@ -131,24 +188,32 @@ class EasywaveNeoActuatorSubentryFlowHandler(
                 CONF_DEVICE_TYPE_CODE: type_code,
                 CONF_CHANNELS: DEVICE_TYPE_CODE_TO_CHANNELS.get(type_code, 1),
             }
+            # Runtime/position capability is detected automatically from EWB state
+            # (MotorFullState.runtime_measured / bit 7), not asked in the UI.
             return await self._async_save_device(
-                title=user_input["title"],
+                title=title,
                 unique_id=unique_id,
                 data=data,
             )
 
+        type_label = self._type_label(type_code)
+        count = sum(
+            1
+            for device in get_devices(self._get_entry())
+            if device.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_NEO_ACTUATOR
+        )
         return self.async_show_form(
             step_id="actuator_confirm",
             data_schema=vol.Schema(
                 {
                     vol.Required(
                         "title",
-                        default=self._next_default_name(ENTRY_TYPE_NEO_ACTUATOR),
+                        default=f"Easywave neo {type_label} {count + 1}",
                     ): str,
                 }
             ),
             description_placeholders={
-                "type_code": f"0x{type_code:02X}",
+                "device_type_name": type_label,
                 "channels": str(DEVICE_TYPE_CODE_TO_CHANNELS.get(type_code, 1)),
             },
         )

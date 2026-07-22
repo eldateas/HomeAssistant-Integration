@@ -167,8 +167,4 @@ class EasywaveReceiverSubentryFlowHandler(
                     ): str,
                 }
             ),
-            description_placeholders={
-                "index": str(self._rx11_index),
-                "kind": self._receiver_kind,
-            },
         )

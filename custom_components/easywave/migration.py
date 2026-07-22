@@ -36,6 +36,8 @@ from .const import (
     CONF_SWITCH_MODE,
     CONF_TRANSMITTER_SERIAL,
     CONF_USAGE_TYPE,
+    CONF_RUNTIME_MEASURED,
+    DEVICE_TYPE_CODE_MOTOR_TYPES,
     DEVICE_TYPE_CODE_TO_CHANNELS,
     DOMAIN,
     ENTRY_TYPE_NEO_ACTUATOR,
@@ -100,6 +102,56 @@ def _title(info: dict[str, Any], fallback: str) -> str:
     return str(info.get("name") or info.get("title") or fallback)
 
 
+def _flatten_device_info(info: dict[str, Any]) -> dict[str, Any]:
+    """Flatten managed_devices ``extra_data`` into top-level fields.
+
+    HACS 0.6.10 stores operating_type / sensor lists / indices extras inside
+    ``extra_data`` on ManagedDevice while ``registered_devices.json`` keeps
+    them flat. Migration accepts both shapes.
+    """
+    flat = dict(info)
+    extra = flat.pop("extra_data", None)
+    if isinstance(extra, dict):
+        for key, value in extra.items():
+            flat.setdefault(key, value)
+    return flat
+
+
+def _sensor_capability_bits(info: dict[str, Any]) -> int:
+    """Build CORE bitmask from HACS 0.6.10 sensor fields.
+
+    In 0.6.10 ``sensor_capabilities`` is typically a *list of names*
+    (temperature/humidity/battery), not the CORE integer bitmask. Also
+    consult ``available_sensors`` / ``sensor_types`` / ``measurement_types``.
+    """
+    raw = info.get("sensor_capabilities")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.isdigit():
+        return int(raw)
+
+    names: set[str] = set()
+    if isinstance(raw, list):
+        names.update(str(item).lower() for item in raw)
+    for key in ("available_sensors", "sensor_types", "measurement_types"):
+        items = info.get(key) or []
+        if isinstance(items, list):
+            names.update(str(item).lower() for item in items)
+
+    capabilities = 0
+    if "battery" in names or info.get("has_battery"):
+        capabilities |= 1 << 0
+    if "temperature" in names or "temp" in names:
+        capabilities |= 1 << 4
+    if "humidity" in names or "hum" in names:
+        capabilities |= 1 << 5
+    if "wind" in names or "wind_speed" in names:
+        capabilities |= 1 << 6
+    if "rain" in names:
+        capabilities |= 1 << 7
+    return capabilities
+
+
 def _map_transmitter(serial: str, info: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     serial_hex = normalize_serial_hex(info.get("serial_number") or serial)
     device_id = device_id_for_transmitter(serial_hex)
@@ -125,24 +177,10 @@ def _map_transmitter(serial: str, info: dict[str, Any]) -> tuple[str, dict[str, 
 def _map_neo_sensor(serial: str, info: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     serial_hex = normalize_serial_hex(info.get("serial_number") or serial)
     device_id = device_id_for_neo_sensor(serial_hex)
-    capabilities = info.get("sensor_capabilities")
-    if capabilities is None:
-        capabilities = 0
-        available = info.get("available_sensors") or info.get("sensor_types") or []
-        if isinstance(available, list):
-            lowered = {str(item).lower() for item in available}
-            if "temperature" in lowered or "temp" in lowered:
-                capabilities |= 1 << 4
-            if "humidity" in lowered or "hum" in lowered:
-                capabilities |= 1 << 5
-            if "wind" in lowered:
-                capabilities |= 1 << 6
-            if "rain" in lowered:
-                capabilities |= 1 << 7
     data = {
         CONF_ENTRY_TYPE: ENTRY_TYPE_NEO_SENSOR,
         CONF_SENSOR_SERIAL: serial_hex,
-        CONF_SENSOR_CAPABILITIES: int(capabilities),
+        CONF_SENSOR_CAPABILITIES: _sensor_capability_bits(info),
     }
     return device_id, data
 
@@ -200,6 +238,15 @@ def _map_neo_actuator(
         CONF_DEVICE_TYPE_CODE: type_code,
         CONF_CHANNELS: int(channels),
     }
+    if type_code in DEVICE_TYPE_CODE_MOTOR_TYPES:
+        initial = info.get("initial_state") if isinstance(info.get("initial_state"), dict) else {}
+        runtime = info.get(CONF_RUNTIME_MEASURED)
+        if runtime is None:
+            runtime = initial.get("runtime_measured")
+        if runtime is None:
+            runtime = initial.get("supports_position")
+        if runtime is not None:
+            data[CONF_RUNTIME_MEASURED] = bool(runtime)
     return device_id, data
 
 
@@ -278,11 +325,17 @@ async def async_migrate_json_devices(
     registered = await hass.async_add_executor_job(
         _load_json_devices, base / _REGISTERED_FILE
     )
-    if not registered:
-        registered = await hass.async_add_executor_job(
-            _load_json_devices, base / _MANAGED_FILE
-        )
-    if not registered:
+    managed = await hass.async_add_executor_job(
+        _load_json_devices, base / _MANAGED_FILE
+    )
+    # registered_devices is authoritative in 0.6.10; merge managed first so
+    # devices only present there are not lost when registered is partial.
+    combined: dict[str, dict[str, Any]] = {}
+    for serial, info in managed.items():
+        combined[str(serial)] = _flatten_device_info(info)
+    for serial, info in registered.items():
+        combined[str(serial)] = _flatten_device_info(info)
+    if not combined:
         return counts
 
     buckets: dict[str, dict[str, dict[str, Any]]] = {
@@ -292,8 +345,15 @@ async def async_migrate_json_devices(
         ENTRY_TYPE_NEO_ACTUATOR: {},
     }
 
-    for serial, info in registered.items():
-        converted = _convert_device(serial, info)
+    for serial, info in combined.items():
+        try:
+            converted = _convert_device(serial, info)
+        except Exception:  # noqa: BLE001 — one bad record must not abort migration
+            _LOGGER.exception(
+                "Failed to convert device %s during JSON migration", serial[-8:]
+            )
+            counts["skipped"] += 1
+            continue
         if converted is None:
             counts["skipped"] += 1
             continue

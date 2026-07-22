@@ -132,9 +132,11 @@ class EasywaveNeoSwitch(EasywaveNeoActuatorEntity, SwitchEntity):
         return "mdi:light-switch" if self.is_on else "mdi:light-switch-off"
 
     @override
-    def handle_state(self, state: Any) -> None:
+    def handle_state(self, state: Any, *, mode: int = 0) -> None:
         """Update from parsed switch state."""
-        super().handle_state(state)
+        if self._channel is not None and int(mode) != int(self._channel):
+            return
+        super().handle_state(state, mode=mode)
         if isinstance(state, SwitchOnOffState):
             self._attr_is_on = state.position == SwitchPosition.ON
         self.async_write_ha_state()

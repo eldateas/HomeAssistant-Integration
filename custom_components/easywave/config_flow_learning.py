@@ -180,9 +180,13 @@ class EasywaveDeviceFlowMixin:
         entity_prefix = f"component.{DOMAIN}.entity.sensor."
         items: list[str] = []
         if learned_device.get("measures_temperature"):
-            items.append(entity_translations[f"{entity_prefix}temperature.name"])
+            items.append(
+                entity_translations[f"{entity_prefix}neo_sensor_temperature.name"]
+            )
         if learned_device.get("measures_humidity"):
-            items.append(entity_translations[f"{entity_prefix}humidity.name"])
+            items.append(
+                entity_translations[f"{entity_prefix}neo_sensor_humidity.name"]
+            )
         if not items:
             unknown = selector_translations[
                 f"component.{DOMAIN}.selector.sensor_type.options.unknown"

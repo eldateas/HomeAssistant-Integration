@@ -57,9 +57,9 @@ class EasywaveNeoDimmer(EasywaveNeoActuatorEntity, LightEntity):
         return "mdi:lightbulb-on" if self.is_on else "mdi:lightbulb-off"
 
     @override
-    def handle_state(self, state: Any) -> None:
+    def handle_state(self, state: Any, *, mode: int = 0) -> None:
         """Update from parsed dimmer state."""
-        super().handle_state(state)
+        super().handle_state(state, mode=mode)
         if isinstance(state, DimmerLevelState):
             level = int(state.current_level or 0)
             self._attr_brightness = max(0, min(255, int(level * 255 / 100)))

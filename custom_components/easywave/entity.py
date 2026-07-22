@@ -9,7 +9,6 @@ from homeassistant.helpers.entity import Entity
 from .const import (
     CONF_ACTUATOR_SERIAL,
     CONF_BUTTON_COUNT,
-    CONF_CHANNELS,
     CONF_DEVICE_TYPE_CODE,
     CONF_GROUPING_MODE,
     CONF_OPERATING_TYPE,
@@ -20,16 +19,10 @@ from .const import (
     CONF_SENSOR_SERIAL,
     CONF_SWITCH_MODE,
     CONF_TRANSMITTER_SERIAL,
-    DEVICE_TYPE_CODE_DIMMER,
-    DEVICE_TYPE_CODE_DUAL_MOTOR,
-    DEVICE_TYPE_CODE_DUAL_SWITCH,
-    DEVICE_TYPE_CODE_MOTOR,
-    DEVICE_TYPE_CODE_QUAD_MOTOR,
-    DEVICE_TYPE_CODE_QUAD_SWITCH,
-    DEVICE_TYPE_CODE_SWITCH,
     DOMAIN,
     TRANSMITTER_GROUPING_GROUP,
     TRANSMITTER_SWITCH_PERMANENT,
+    ewneo_device_type_label,
 )
 
 if TYPE_CHECKING:
@@ -93,20 +86,8 @@ def _receiver_model(data: dict[str, Any]) -> str:
 def _actuator_model(data: dict[str, Any]) -> str:
     """Return a human-readable model for an EWneo actuator."""
     code = int(data.get(CONF_DEVICE_TYPE_CODE, 0))
-    names = {
-        DEVICE_TYPE_CODE_SWITCH: "EWneo Switch",
-        DEVICE_TYPE_CODE_DIMMER: "EWneo Dimmer",
-        DEVICE_TYPE_CODE_MOTOR: "EWneo Motor",
-        DEVICE_TYPE_CODE_DUAL_SWITCH: "EWneo Dual Switch",
-        DEVICE_TYPE_CODE_QUAD_SWITCH: "EWneo Quad Switch",
-        DEVICE_TYPE_CODE_DUAL_MOTOR: "EWneo Dual Motor",
-        DEVICE_TYPE_CODE_QUAD_MOTOR: "EWneo Quad Motor",
-    }
-    channels = data.get(CONF_CHANNELS, 1)
-    base = names.get(code, f"EWneo Actuator 0x{code:02X}")
-    if channels and channels > 1:
-        return f"{base} ({channels} ch)"
-    return base
+    label = ewneo_device_type_label(code, "en")
+    return f"Easywave neo {label}"
 
 
 class EasywaveTransmitterEntity(Entity):
@@ -374,7 +355,7 @@ class EasywaveNeoActuatorEntity(Entity):
         """Return if entity is available (transceiver connected)."""
         return self._coordinator.transceiver.is_connected
 
-    def handle_state(self, state: Any) -> None:
+    def handle_state(self, state: Any, *, mode: int = 0) -> None:
         """Handle a parsed EWB state update."""
         self._parsed_state = state
         self.async_write_ha_state()

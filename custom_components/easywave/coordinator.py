@@ -22,16 +22,21 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_ACTUATOR_SERIAL,
+    CONF_CHANNELS,
+    CONF_DEVICE_TYPE_CODE,
     CONF_ENTRY_TYPE,
     CONF_EWNEO_INDEX,
+    CONF_GATEWAY_SERIAL,
     CONF_RX11_INDEX,
     DEVICE_SCAN_INTERVAL,
+    DEVICE_TYPE_CODE_MOTOR_TYPES,
     DOMAIN,
     ENTRY_TYPE_NEO_ACTUATOR,
     ENTRY_TYPE_RECEIVER,
     EVENT_EASYWAVE,
     EVENT_TYPE_BUTTON_PRESS,
     EVENT_TYPE_BUTTON_RELEASE,
+    neo_motor_full_mode,
     normalize_serial_hex,
 )
 from .devices import get_devices
@@ -93,6 +98,7 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if connected:
                 self._register_transceiver_callbacks()
                 self._update_gateway_device()
+                await self.async_restore_ewb_filters()
                 await self.async_restore_actuator_states()
             else:
                 _LOGGER.warning(
@@ -154,6 +160,7 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.is_offline = False
                     self._register_transceiver_callbacks()
                     self._update_gateway_device()
+                    await self.async_restore_ewb_filters()
                     await self.async_restore_actuator_states()
                     # Restart telegram listener if any entities need it
                     if self._has_telegram_listeners:
@@ -306,11 +313,27 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._start_telegram_listener()
 
     async def _telegram_listener_loop(self) -> None:
-        """Continuously listen for all EW/EWneo telegrams and dispatch."""
+        """Continuously listen for EW/EWB telegrams and dispatch.
+
+        When neo actuators are registered, listen via EWB_RCV (HACS 0.6 /
+        library HA pattern) so spontaneous actuator status updates arrive.
+        EWB_RCV also delivers EW button and sensor telegrams. Otherwise use
+        EW_RCV_EX for transmitters and neo sensors.
+        """
         try:
             while not self.is_offline and self._has_telegram_listeners:
                 try:
-                    telegram = await self.transceiver.receive_telegram(timeout=30.0)
+                    if self._actuator_entities:
+                        # Long poll like HACS 0.6 — short timeouts left zombie
+                        # EWB_RCV requests that swallowed spontaneous status.
+                        telegram = await self.transceiver.receive_ewb_telegram(
+                            timeout=300.0,
+                            device_type_for_serial=self._actuator_type_for_serial,
+                        )
+                    else:
+                        telegram = await self.transceiver.receive_telegram(
+                            timeout=30.0
+                        )
                     if telegram is None:
                         continue
                     self._dispatch_telegram(telegram)
@@ -324,6 +347,32 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await asyncio.sleep(1.0)
         finally:
             await self._clear_listener_task()
+
+    def _actuator_type_for_serial(self, serial: bytes) -> int | None:
+        """Resolve EWB device type for a receiver serial (EWB_RCV parse)."""
+        for entity in list(self._actuator_entities):
+            if _serial_hex_matches(serial, entity.actuator_serial):
+                return int(entity.device_type_code)
+        serial_hex = serial.hex().lower()
+        for device in get_devices(self.config_entry):
+            if device.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_NEO_ACTUATOR:
+                continue
+            stored = device.data.get(CONF_ACTUATOR_SERIAL)
+            if isinstance(stored, str) and stored.lower() == serial_hex:
+                type_code = device.data.get(CONF_DEVICE_TYPE_CODE)
+                return int(type_code) if type_code is not None else None
+        return None
+
+    @staticmethod
+    def _entity_matches_mode(entity: Any, mode: int) -> bool:
+        """Return True if a multi-channel entity should accept this command mode."""
+        channel = getattr(entity, "_channel", None)
+        if channel is None:
+            return True
+        type_code = int(getattr(entity, "device_type_code", 0) or 0)
+        if type_code in DEVICE_TYPE_CODE_MOTOR_TYPES:
+            return int(mode) == neo_motor_full_mode(type_code, int(channel))
+        return int(channel) == int(mode)
 
     @callback
     def _dispatch_telegram(self, event: EwbRcvEvent) -> None:
@@ -416,15 +465,32 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def _dispatch_actuator_state(self, event: EwbStateChangeEvent) -> None:
-        """Dispatch an EWB state change to matching actuator entities."""
+        """Dispatch an EWB state change to matching actuator entities.
+
+        Mode filtering is left to the entity (summary vs per-channel motor
+        modes). Dropping mode!=0 here broke single-motor opening updates when
+        firmware reported a non-zero mode byte.
+        """
         serial_hex = event.receiver_serial.hex()
         matched = False
         for entity in list(self._actuator_entities):
-            if _serial_hex_matches(event.receiver_serial, entity.actuator_serial):
-                entity.handle_state(event.state)
-                matched = True
-        if not matched:
-            _LOGGER.debug("Received EWB state from unknown actuator: %s", serial_hex)
+            if not _serial_hex_matches(event.receiver_serial, entity.actuator_serial):
+                continue
+            entity.handle_state(event.state, mode=event.mode)
+            matched = True
+        if matched:
+            _LOGGER.debug(
+                "Dispatched EWB state …%s mode=%s → %s",
+                serial_hex[-8:],
+                event.mode,
+                type(event.state).__name__,
+            )
+        else:
+            _LOGGER.debug(
+                "Received EWB state from unknown actuator: %s (mode=%s)",
+                serial_hex,
+                event.mode,
+            )
 
     def used_rx11_indices(self) -> set[int]:
         """Return RX11 indices already allocated to receivers."""
@@ -457,9 +523,9 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return used
 
     def allocate_ewneo_index(self) -> int | None:
-        """Allocate the next free EWB gateway index (0-255)."""
+        """Allocate the next free EWB gateway index (0-127 on RX11)."""
         used = self.used_ewneo_indices()
-        for index in range(256):
+        for index in range(128):
             if index not in used:
                 return index
         return None
@@ -489,40 +555,117 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if state is not None:
             for entity in list(self._actuator_entities):
-                if normalize_serial_hex(entity.actuator_serial) == normalize_serial_hex(
+                if normalize_serial_hex(entity.actuator_serial) != normalize_serial_hex(
                     actuator_serial
                 ):
-                    entity.handle_state(state)
+                    continue
+                if not self._entity_matches_mode(entity, mode):
+                    continue
+                entity.handle_state(state, mode=mode)
+        return state
+
+    async def async_restore_ewb_filters(self) -> None:
+        """Re-add EWB gateway filters for all known neo actuators after connect."""
+        if self.is_offline:
+            return
+        seen: set[str] = set()
+        for device in get_devices(self.config_entry):
+            if device.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_NEO_ACTUATOR:
+                continue
+            gateway_serial = device.data.get(CONF_GATEWAY_SERIAL)
+            if not gateway_serial:
+                continue
+            serial_hex = normalize_serial_hex(str(gateway_serial))
+            if serial_hex in seen:
+                continue
+            seen.add(serial_hex)
+            try:
+                ok = await self.transceiver.ewb_add_gateway_filter(
+                    bytes.fromhex(serial_hex)
+                )
+            except (OSError, TimeoutError, ValueError) as err:
+                _LOGGER.debug("Failed to restore EWB filter …%s: %s", serial_hex[-8:], err)
+                continue
+            if ok:
+                _LOGGER.debug("Restored EWB filter for gateway …%s", serial_hex[-8:])
+            else:
+                _LOGGER.warning(
+                    "Could not restore EWB filter for gateway …%s", serial_hex[-8:]
+                )
+
+    async def async_query_actuator_state(
+        self,
+        *,
+        gateway_serial: str,
+        actuator_serial: str,
+        device_type_code: int,
+        mode: int,
+    ) -> Any:
+        """Run EWB_QUERY_STATE for one actuator mode and dispatch the result."""
+        if self.is_offline:
+            return None
+        try:
+            state = await self.transceiver.ewb_query_state(
+                bytes.fromhex(normalize_serial_hex(gateway_serial)),
+                bytes.fromhex(normalize_serial_hex(actuator_serial)),
+                int(device_type_code),
+                mode=int(mode),
+            )
+        except (OSError, TimeoutError, ValueError) as err:
+            _LOGGER.debug(
+                "EWB_QUERY_STATE failed for …%s mode %s: %s",
+                normalize_serial_hex(actuator_serial)[-8:],
+                mode,
+                err,
+            )
+            return None
+        if state is None:
+            return None
+        for entity in list(self._actuator_entities):
+            if normalize_serial_hex(entity.actuator_serial) != normalize_serial_hex(
+                actuator_serial
+            ):
+                continue
+            if not self._entity_matches_mode(entity, mode):
+                continue
+            entity.handle_state(state, mode=mode)
         return state
 
     async def async_restore_actuator_states(self) -> None:
-        """Query known neo actuators after connect/reconnect."""
+        """Query known neo actuators after connect/reconnect.
+
+        Motors use per-channel full modes (single: 0, dual: 2/10, quad: 2/10/18/26)
+        so ``runtime_measured`` (bit 7) is read from each channel's MotorFullState.
+        """
         if self.is_offline:
             return
         for device in get_devices(self.config_entry):
             if device.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_NEO_ACTUATOR:
                 continue
-            gateway_serial = device.data.get("gateway_serial")
+            gateway_serial = device.data.get(CONF_GATEWAY_SERIAL) or device.data.get(
+                "gateway_serial"
+            )
             actuator_serial = device.data.get(CONF_ACTUATOR_SERIAL)
-            type_code = device.data.get("device_type_code")
+            type_code = device.data.get(CONF_DEVICE_TYPE_CODE) or device.data.get(
+                "device_type_code"
+            )
             if not gateway_serial or not actuator_serial or type_code is None:
                 continue
-            try:
-                state = await self.transceiver.ewb_query_state(
-                    bytes.fromhex(normalize_serial_hex(str(gateway_serial))),
-                    bytes.fromhex(normalize_serial_hex(str(actuator_serial))),
-                    int(type_code),
+            channels = int(device.data.get(CONF_CHANNELS, 1) or 1)
+            type_code_int = int(type_code)
+            if type_code_int in DEVICE_TYPE_CODE_MOTOR_TYPES:
+                query_modes = [
+                    neo_motor_full_mode(type_code_int, ch) for ch in range(channels)
+                ]
+            else:
+                query_modes = list(range(max(1, channels)))
+            for mode in query_modes:
+                await self.async_query_actuator_state(
+                    gateway_serial=str(gateway_serial),
+                    actuator_serial=str(actuator_serial),
+                    device_type_code=type_code_int,
+                    mode=mode,
                 )
-            except (OSError, TimeoutError, ValueError) as err:
-                _LOGGER.debug("Failed to restore actuator %s: %s", actuator_serial, err)
-                continue
-            if state is None:
-                continue
-            for entity in list(self._actuator_entities):
-                if normalize_serial_hex(entity.actuator_serial) == normalize_serial_hex(
-                    str(actuator_serial)
-                ):
-                    entity.handle_state(state)
 
     def fire_device_event(
         self,

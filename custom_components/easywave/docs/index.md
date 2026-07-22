@@ -376,8 +376,8 @@ automation:
   - alias: "Transmitter battery warning"
     trigger:
       - platform: state
-        entity_id: binary_sensor.ew_transmitter_abc123_battery_warning
-        to: "on"
+        entity_id: sensor.ew_transmitter_abc123_battery_warning
+        to: "low"
     action:
       - service: notify.mobile_app
         data:

@@ -66,6 +66,13 @@
       }
     },
     "sensor": {
+      "battery_warning": {
+        "default": "mdi:battery-unknown",
+        "state": {
+          "ok": "mdi:battery",
+          "low": "mdi:battery-alert"
+        }
+      },
       "gateway_status": {
         "default": "mdi:usb",
         "state": {
@@ -85,16 +92,6 @@
           "up": "mdi:window-shutter-open",
           "down": "mdi:window-shutter",
           "stop": "mdi:stop-circle"
-        }
-      },
-      "last_button": {
-        "default": "mdi:radiobox-marked",
-        "state": {
-          "a": "mdi:alpha-a-circle",
-          "b": "mdi:alpha-b-circle",
-          "c": "mdi:alpha-c-circle",
-          "d": "mdi:alpha-d-circle",
-          "released": "mdi:radiobox-blank"
         }
       },
       "state_1": {
@@ -166,6 +163,16 @@
         "state": {
           "ok": "mdi:battery",
           "low": "mdi:battery-alert"
+        }
+      },
+      "transmitter_last_button": {
+        "default": "mdi:radiobox-marked",
+        "state": {
+          "a": "mdi:alpha-a-circle",
+          "b": "mdi:alpha-b-circle",
+          "c": "mdi:alpha-c-circle",
+          "d": "mdi:alpha-d-circle",
+          "released": "mdi:radiobox-blank"
         }
       }
     }

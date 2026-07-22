@@ -180,6 +180,7 @@ CONF_EWNEO_INDEX: Final = "ewneo_index"
 CONF_GATEWAY_SERIAL: Final = "gateway_serial"
 CONF_DEVICE_TYPE_CODE: Final = "device_type_code"
 CONF_CHANNELS: Final = "channels"
+CONF_RUNTIME_MEASURED: Final = "runtime_measured"
 
 # Grouping modes for transmitters
 TRANSMITTER_GROUPING_GROUP: Final = "group"
@@ -238,6 +239,63 @@ DEVICE_TYPE_CODE_TO_CHANNELS: Final = {
     DEVICE_TYPE_CODE_DUAL_MOTOR: 2,
     DEVICE_TYPE_CODE_QUAD_MOTOR: 4,
 }
+
+DEVICE_TYPE_CODE_MOTOR_TYPES: Final = frozenset(
+    {
+        DEVICE_TYPE_CODE_MOTOR,
+        DEVICE_TYPE_CODE_DUAL_MOTOR,
+        DEVICE_TYPE_CODE_QUAD_MOTOR,
+    }
+)
+
+# EWB mode for MotorFullState per 0-based channel (library dual/quad layout).
+DEVICE_TYPE_CODE_TO_MOTOR_FULL_MODES: Final = {
+    DEVICE_TYPE_CODE_MOTOR: (0,),
+    DEVICE_TYPE_CODE_DUAL_MOTOR: (2, 10),
+    DEVICE_TYPE_CODE_QUAD_MOTOR: (2, 10, 18, 26),
+}
+
+
+def neo_motor_full_mode(device_type_code: int, channel: int | None = None) -> int:
+    """Return the EWB mode used for full motor state of a channel."""
+    modes = DEVICE_TYPE_CODE_TO_MOTOR_FULL_MODES.get(int(device_type_code), (0,))
+    if channel is None:
+        return int(modes[0])
+    index = max(0, min(int(channel), len(modes) - 1))
+    return int(modes[index])
+
+
+# Friendly type labels shown during learn confirm (HACS 0.6 style).
+EWNEO_DEVICE_TYPE_LABELS_DE: Final = {
+    DEVICE_TYPE_CODE_SWITCH: "Schalter",
+    DEVICE_TYPE_CODE_DIMMER: "Dimmer",
+    DEVICE_TYPE_CODE_MOTOR: "Motor",
+    DEVICE_TYPE_CODE_DUAL_SWITCH: "2-fach Schalter",
+    DEVICE_TYPE_CODE_QUAD_SWITCH: "4-fach Schalter",
+    DEVICE_TYPE_CODE_DUAL_MOTOR: "2-fach Motor",
+    DEVICE_TYPE_CODE_QUAD_MOTOR: "4-fach Motor",
+}
+
+EWNEO_DEVICE_TYPE_LABELS_EN: Final = {
+    DEVICE_TYPE_CODE_SWITCH: "Switch",
+    DEVICE_TYPE_CODE_DIMMER: "Dimmer",
+    DEVICE_TYPE_CODE_MOTOR: "Motor",
+    DEVICE_TYPE_CODE_DUAL_SWITCH: "2-channel Switch",
+    DEVICE_TYPE_CODE_QUAD_SWITCH: "4-channel Switch",
+    DEVICE_TYPE_CODE_DUAL_MOTOR: "2-channel Motor",
+    DEVICE_TYPE_CODE_QUAD_MOTOR: "4-channel Motor",
+}
+
+
+def ewneo_device_type_label(type_code: int, language: str | None = None) -> str:
+    """Return a localized friendly name for an EWneo device type code."""
+    lang = (language or "en").lower()
+    labels = (
+        EWNEO_DEVICE_TYPE_LABELS_DE
+        if lang.startswith("de")
+        else EWNEO_DEVICE_TYPE_LABELS_EN
+    )
+    return labels.get(int(type_code), f"0x{int(type_code):02X}")
 
 # HACS legacy device_type strings → type codes (migration)
 HACS_ACTUATOR_TYPE_TO_CODE: Final = {

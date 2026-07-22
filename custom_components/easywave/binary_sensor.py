@@ -20,8 +20,6 @@ from .const import (
     CONF_SENSOR_CAPABILITIES,
     ENTRY_TYPE_NEO_SENSOR,
     ENTRY_TYPE_TRANSMITTER,
-    EVENT_TYPE_BATTERY_LOW,
-    EVENT_TYPE_BATTERY_NORMAL,
 )
 from .devices import get_devices
 from .entity import EasywaveDeviceEntry, EasywaveNeoSensorEntity, EasywaveTransmitterEntity
@@ -47,56 +45,6 @@ async def async_setup_entry(
                     [EasywaveNeoBatteryBinarySensor(entry, device)],
                     config_subentry_id=device.subentry_id,
                 )
-
-
-class EasywaveTransmitterBatteryBinarySensor(
-    EasywaveTransmitterEntity, RestoreEntity, BinarySensorEntity
-):
-    """Battery warning binary sensor (HACS: Battery Warning / Batteriestatus)."""
-
-    _attr_device_class = BinarySensorDeviceClass.BATTERY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_translation_key = "battery_warning"
-    _CLEAR_THRESHOLD = 2
-
-    def __init__(
-        self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry
-    ) -> None:
-        """Initialize."""
-        super().__init__(entry, device, "battery_warning")
-        self._attr_is_on = False
-        self._ok_streak = 0
-
-    @override
-    async def async_added_to_hass(self) -> None:
-        """Restore last battery warning state."""
-        if (last := await self.async_get_last_state()) is not None:
-            self._attr_is_on = last.state == "on"
-        await super().async_added_to_hass()
-
-    @override
-    @callback
-    def handle_battery_status(self, is_low: bool) -> None:
-        """Update from LOWBAT flag."""
-        if is_low:
-            self._ok_streak = 0
-            if not self._attr_is_on:
-                self._attr_is_on = True
-                self.async_write_ha_state()
-                self._coordinator.fire_device_event(
-                    self._device_id, EVENT_TYPE_BATTERY_LOW, subtype="low"
-                )
-            return
-        if not self._attr_is_on:
-            return
-        self._ok_streak += 1
-        if self._ok_streak >= self._CLEAR_THRESHOLD:
-            self._attr_is_on = False
-            self._ok_streak = 0
-            self.async_write_ha_state()
-            self._coordinator.fire_device_event(
-                self._device_id, EVENT_TYPE_BATTERY_NORMAL, subtype="ok"
-            )
 
 
 class EasywaveTransmitterCoverStateBinarySensor(

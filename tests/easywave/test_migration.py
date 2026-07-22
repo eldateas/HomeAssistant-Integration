@@ -155,6 +155,108 @@ def test_convert_neo_sensor_capabilities_from_list() -> None:
     assert (capabilities >> 5) & 1
 
 
+def test_convert_neo_sensor_hacs_list_capabilities_field() -> None:
+    """0.6.10 stores sensor_capabilities as a name list, not a bitmask."""
+    serial = "1" * 32
+    result = migration._convert_device(
+        serial,
+        {
+            "device_type": "ewneo_sensor",
+            "name": "Climate",
+            "sensor_capabilities": ["temperature", "humidity", "battery"],
+        },
+    )
+    assert result is not None
+    capabilities = int(result[2]["sensor_capabilities"])
+    assert capabilities & 1  # battery
+    assert (capabilities >> 4) & 1
+    assert (capabilities >> 5) & 1
+
+
+def test_convert_neo_sensor_empty_capabilities_falls_back() -> None:
+    """Empty list capabilities must not crash; use available_sensors."""
+    serial = "2" * 32
+    result = migration._convert_device(
+        serial,
+        {
+            "device_type": "ewneo_sensor",
+            "sensor_capabilities": [],
+            "available_sensors": ["temperature"],
+        },
+    )
+    assert result is not None
+    capabilities = int(result[2]["sensor_capabilities"])
+    assert (capabilities >> 4) & 1
+    assert not ((capabilities >> 5) & 1)
+
+
+def test_flatten_managed_extra_data() -> None:
+    """managed_devices.json nests TX fields under extra_data."""
+    flat = migration._flatten_device_info(
+        {
+            "device_type": "ew_transmitter",
+            "name": "Remote",
+            "serial_number": "a" * 32,
+            "extra_data": {
+                "operating_type": "2",
+                "button_count": 4,
+                "grouping_mode": "group",
+                "usage_type": "cover",
+            },
+        }
+    )
+    assert flat["operating_type"] == "2"
+    assert flat["usage_type"] == "cover"
+    assert "extra_data" not in flat
+
+
+def test_convert_transmitter_from_flattened_managed() -> None:
+    """Transmitter fields from managed extra_data survive flatten+convert."""
+    serial = "3" * 32
+    info = migration._flatten_device_info(
+        {
+            "device_type": "ew_transmitter",
+            "serial_number": serial,
+            "name": "Cover Remote",
+            "extra_data": {
+                "operating_type": "2",
+                "button_count": 2,
+                "usage_type": "cover",
+                "switch_mode": "impulse",
+            },
+        }
+    )
+    result = migration._convert_device(serial, info)
+    assert result is not None
+    _entry_type, _device_id, data = result
+    assert data["operating_type"] == "2"
+    assert data["usage_type"] == "cover"
+    assert data["button_count"] == 2
+
+
+def test_convert_neo_actuator_via_indices_ewb() -> None:
+    """Managed devices may only expose ewneo index under indices.ewb."""
+    serial = "4" * 32
+    result = migration._convert_device(
+        serial,
+        {
+            "device_type": "ewneo_motor",
+            "name": "Blind",
+            "neo_device": True,
+            "indices": {"ewb": 5},
+            "gateway_serial": "d" * 32,
+            "channels": 1,
+        },
+    )
+    assert result is not None
+    entry_type, device_id, data = result
+    assert entry_type == const.ENTRY_TYPE_NEO_ACTUATOR
+    assert device_id == const.device_id_for_neo_actuator(
+        serial, const.DEVICE_TYPE_CODE_MOTOR
+    )
+    assert data["ewneo_index"] == 5
+
+
 def test_load_registered_devices_envelope(tmp_path: Path) -> None:
     """registered_devices.json envelope is parsed."""
     path = tmp_path / "registered_devices.json"
@@ -174,6 +276,28 @@ def test_load_registered_devices_envelope(tmp_path: Path) -> None:
     assert ("a" * 32) in devices_map
 
 
+def test_load_managed_devices_v3_envelope(tmp_path: Path) -> None:
+    """managed_devices.json v3.0 envelope is parsed like registered."""
+    path = tmp_path / "managed_devices.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": "3.0",
+                "devices": {
+                    "b" * 32: {
+                        "device_type": "ew_receiver",
+                        "name": "Plug",
+                        "rx11_index": 2,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    devices_map = migration._load_json_devices(path)
+    assert ("b" * 32) in devices_map
+
+
 def test_skip_receiver_without_index() -> None:
     """Receivers without index are skipped."""
     assert (
@@ -183,3 +307,80 @@ def test_skip_receiver_without_index() -> None:
         )
         is None
     )
+
+
+def test_realistic_0610_device_set_converts() -> None:
+    """Representative 0.6.10 registered_devices payload converts without error."""
+    devices = {
+        "a" * 32: {
+            "device_type": "ew_transmitter",
+            "type": "ew_transmitter",
+            "name": "Wandschalter",
+            "serial_number": "a" * 32,
+            "operating_type": "1",
+            "button_count": 4,
+            "grouping_mode": "group",
+            "switch_mode": "impulse",
+            "registration_id": "deadbeef" * 4,
+            "entities": [{"unique_id": "deadbeef" * 4 + "_battery"}],
+        },
+        "b" * 32: {
+            "device_type": "ewneo_sensor",
+            "type": "ewneo_sensor",
+            "name": "Klima",
+            "serial_number": "b" * 32,
+            "sensor_capabilities": ["temperature", "humidity", "battery"],
+            "available_sensors": ["temperature", "humidity", "battery"],
+            "sensor_types": ["temperature", "humidity"],
+            "has_battery": True,
+        },
+        "c" * 32: {
+            "device_type": "ew_receiver",
+            "type": "ew_receiver",
+            "name": "Steckdose",
+            "serial_number": "c" * 32,
+            "rx11_index": 3,
+            "receiver_kind": "impulse",
+            "operating_mode": "1",
+        },
+        "d" * 32: {
+            "device_type": "ewneo_dual_motor",
+            "type": "ewneo_dual_motor",
+            "name": "Jalousie",
+            "serial_number": "d" * 32,
+            "neo_device": True,
+            "ewneo_index": 7,
+            "gateway_serial": "e" * 32,
+            "device_type_code": const.DEVICE_TYPE_CODE_DUAL_MOTOR,
+            "channels": 2,
+            "initial_state": {"runtime_measured": True},
+        },
+    }
+    converted = []
+    for serial, info in devices.items():
+        result = migration._convert_device(serial, info)
+        assert result is not None, f"failed for {info['device_type']}"
+        converted.append(result)
+
+    types = {entry_type for entry_type, _, _ in converted}
+    assert types == {
+        const.ENTRY_TYPE_TRANSMITTER,
+        const.ENTRY_TYPE_NEO_SENSOR,
+        const.ENTRY_TYPE_RECEIVER,
+        const.ENTRY_TYPE_NEO_ACTUATOR,
+    }
+    sensor_caps = next(
+        data["sensor_capabilities"]
+        for entry_type, _, data in converted
+        if entry_type == const.ENTRY_TYPE_NEO_SENSOR
+    )
+    assert sensor_caps & 1
+    assert (sensor_caps >> 4) & 1
+    assert (sensor_caps >> 5) & 1
+    motor = next(
+        data
+        for entry_type, _, data in converted
+        if entry_type == const.ENTRY_TYPE_NEO_ACTUATOR
+    )
+    assert motor["runtime_measured"] is True
+    assert motor["ewneo_index"] == 7
