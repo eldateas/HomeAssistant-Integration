@@ -15,7 +15,7 @@
       },
       "ports": {
         "data": {
-          "device_path": "[%key:common::config_flow::data::usb_path%]"
+          "device_path": "USB device path"
         },
         "data_description": {
           "device_path": "The serial port your RX11 USB Transceiver is connected to."
@@ -28,7 +28,7 @@
   "config_subentries": {
     "easywave_neo_actuator": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Device is already configured",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
         "learning_cancelled": "Learning mode was cancelled.",
@@ -72,7 +72,7 @@
     },
     "easywave_neo_sensor": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Device is already configured",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
         "learning_cancelled": "Learning mode was cancelled.",
@@ -119,7 +119,7 @@
     },
     "easywave_receiver": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Device is already configured",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
         "index_serial_unavailable": "Could not read the transmitter serial for the allocated index.",
@@ -162,7 +162,7 @@
     },
     "easywave_transmitter": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Device is already configured",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
         "learning_cancelled": "Learning mode was cancelled.",

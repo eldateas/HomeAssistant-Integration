@@ -15,7 +15,7 @@
       },
       "ports": {
         "data": {
-          "device_path": "[%key:common::config_flow::data::usb_path%]"
+          "device_path": "USB-Gerätepfad"
         },
         "data_description": {
           "device_path": "The serial port your RX11 USB Transceiver is connected to."
@@ -28,7 +28,7 @@
   "config_subentries": {
     "easywave_neo_actuator": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Gerät ist bereits konfiguriert",
         "device_added": "Das Gerät wurde erfolgreich hinzugefügt.",
         "device_not_connected": "Der RX11 USB Transceiver ist nicht verbunden.\n\nZum Hinzufügen eines neuen Geräts muss der RX11 erreichbar sein.\nBitte prüfen Sie die USB-Verbindung.",
         "learning_cancelled": "Einlernmodus wurde abgebrochen.",
@@ -72,7 +72,7 @@
     },
     "easywave_neo_sensor": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Gerät ist bereits konfiguriert",
         "device_added": "Das Gerät wurde erfolgreich hinzugefügt.",
         "device_not_connected": "Der RX11 USB Transceiver ist nicht verbunden.\n\nZum Hinzufügen eines neuen Geräts muss der RX11 erreichbar sein.\nBitte prüfen Sie die USB-Verbindung.",
         "learning_cancelled": "Einlernmodus wurde abgebrochen.",
@@ -119,7 +119,7 @@
     },
     "easywave_receiver": {
       "abort": {
-        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "already_configured": "Gerät ist bereits konfiguriert",
         "device_added": "Das Gerät wurde erfolgreich hinzugefügt.",
         "device_not_connected": "Der RX11 USB Transceiver ist nicht verbunden.\n\nZum Hinzufügen eines neuen Geräts muss der RX11 erreichbar sein.\nBitte prüfen Sie die USB-Verbindung.",
         "index_serial_unavailable": "Die Sender-Seriennummer für den zugewiesenen Index konnte nicht gelesen werden.",

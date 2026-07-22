@@ -257,6 +257,40 @@ def test_convert_neo_actuator_via_indices_ewb() -> None:
     assert data["ewneo_index"] == 5
 
 
+def test_load_legacy_from_migrated_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery path reads archived JSON when live files are gone."""
+    base = tmp_path / "easywave"
+    migrated = base / "migrated"
+    migrated.mkdir(parents=True)
+    (migrated / "registered_devices.json").write_text(
+        json.dumps(
+            {
+                "version": "2.0",
+                "devices": {
+                    "a" * 32: {
+                        "device_type": "ew_transmitter",
+                        "name": "TX",
+                        "operating_type": "1",
+                        "button_count": 2,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _Hass:
+        class config:
+            config_dir = str(tmp_path)
+
+    monkeypatch.setattr(migration, "_easywave_dir", lambda hass: base)
+    devices = migration._load_legacy_device_maps(_Hass())
+    assert ("a" * 32) in devices
+    assert devices["a" * 32]["device_type"] == "ew_transmitter"
+
+
 def test_load_registered_devices_envelope(tmp_path: Path) -> None:
     """registered_devices.json envelope is parsed."""
     path = tmp_path / "registered_devices.json"
