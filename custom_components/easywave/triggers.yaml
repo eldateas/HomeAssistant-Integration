@@ -1,0 +1,59 @@
+# HACS/custom: omit supported_features — HA only resolves
+# homeassistant.components.<domain> enums (CORE-only). Sensors still set
+# Easywave*Feature flags for runtime filtering.
+
+button_press_a:
+  target:
+    primary_entities_only: true
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum
+
+button_press_b:
+  target:
+    primary_entities_only: true
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum
+
+button_press_c:
+  target:
+    primary_entities_only: true
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum
+
+button_press_d:
+  target:
+    primary_entities_only: true
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum
+
+button_release:
+  target:
+    primary_entities_only: true
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum
+
+gateway_connected:
+  target:
+    primary_entities_only: false
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum
+
+gateway_disconnected:
+  target:
+    primary_entities_only: false
+    entity:
+      - integration: easywave
+        domain: sensor
+        device_class: enum

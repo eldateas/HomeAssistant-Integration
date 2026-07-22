@@ -1,10 +1,12 @@
 # Easywave Integration – User Documentation
 
-> **Version:** 0.6.x | **Last Updated:** February 2026
+> **Version:** 0.7.0 | **Last Updated:** July 2026
 
 🇩🇪 **[Deutsche Version](index_de.md)**
 
 This documentation describes the setup and usage of the Easywave Integration for Home Assistant (e.g. **Home Assistant Green**) with the RX11 USB transceiver.
+
+> **Note (0.7.0):** Devices are stored in config subentries (CORE-compatible). After upgrading from 0.6.x, recreate automations/device triggers. See [CHANGELOG.md](../CHANGELOG.md).
 
 ---
 
@@ -59,7 +61,7 @@ The Easywave Integration enables control and monitoring of ELDAT radio devices v
 
 | Component | Requirement |
 |-----------|-------------|
-| **Home Assistant** | Version 2024.1.0 or higher |
+| **Home Assistant** | Version 2026.3.0 or higher |
 | **Hardware** | Home Assistant Green, Yellow, or other Linux-based host |
 | **RX11 USB Transceiver** | VID: 0x155A, PID: 0x1014 |
 
@@ -374,8 +376,8 @@ automation:
   - alias: "Transmitter battery warning"
     trigger:
       - platform: state
-        entity_id: binary_sensor.ew_transmitter_abc123_battery_warning
-        to: "on"
+        entity_id: sensor.ew_transmitter_abc123_battery_warning
+        to: "low"
     action:
       - service: notify.mobile_app
         data:

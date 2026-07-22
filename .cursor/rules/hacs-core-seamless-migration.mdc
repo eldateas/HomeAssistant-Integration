@@ -1,0 +1,29 @@
+---
+description: HACS and CORE Easywave must stay schema-compatible for seamless migration
+alwaysApply: true
+---
+
+# Seamless HACS → CORE migration
+
+All Easywave work (HACS custom component and later CORE extensions) must preserve a **seamless switch** from HACS to built-in CORE: remove `custom_components/easywave`, restart HA, keep config entries — **no re-learn, no registry/data loss**.
+
+## Non-negotiables
+
+- Same domain `easywave`; never invent a parallel HACS-only domain or storage path.
+- Persist devices only as **CORE-compatible config subentry buckets** (`CONF_DEVICES`), not JSON device files.
+- Keep **serial-stable** device IDs and entity `unique_id` schemes aligned with CORE (`transmitter_*`, `neo_sensor_*`, `receiver_*`, `ewneo_*`, …).
+- Subentry type strings, entry data keys, and bucket `unique_id` format (`{entry_id}_{subentry_type}`) must match what CORE will read.
+- New HACS features that CORE does not have yet must use storage CORE can adopt **as-is** (or with an explicit `async_migrate_entry`); do not ship throwaway schemas.
+- Do not delete/recreate the user’s config entry as part of upgrades; migrate in place.
+
+## When extending CORE
+
+- Port HACS bucket types/fields/entity unique IDs first; UX/docs second.
+- Do not rename existing storage keys or unique_id suffixes without a migration path that preserves entity registry entries.
+- HACS ships brand images in `brand/`; for Core contribution move them to `home-assistant/brands` and remove the local `brand/` folder (custom integrations do not need the brands repository).
+
+## Switch path (do not break)
+
+1. User removes HACS code only (not the Integration UI entry).
+2. Restart → CORE loads the same `.storage` config entry + subentries.
+3. Entities remount under the same unique IDs.

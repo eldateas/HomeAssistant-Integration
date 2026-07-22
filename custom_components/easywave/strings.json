@@ -1,4 +1,294 @@
 {
+  "config": {
+    "abort": {
+      "frequency_not_permitted": "This device operates on {frequency}, which is not permitted in your configured Home Assistant region ({country}).",
+      "no_devices_found": "No serial ports found. Make sure the RX11 USB Transceiver is plugged in and recognized by the system."
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the RX11 USB Transceiver. Make sure it is plugged in and no other application is using the port.",
+      "device_no_longer_available": "The selected device is no longer available. Please try again."
+    },
+    "step": {
+      "confirm": {
+        "description": "Detected device:\n**{name} ({serial_number})**\n\nPort: {device}",
+        "title": "Set up RX11 USB Transceiver"
+      },
+      "ports": {
+        "data": {
+          "device_path": "[%key:common::config_flow::data::usb_path%]"
+        },
+        "data_description": {
+          "device_path": "The serial port your RX11 USB Transceiver is connected to."
+        },
+        "description": "Select the serial port of the RX11 USB Transceiver.",
+        "title": "Select Easywave device"
+      }
+    }
+  },
+  "config_subentries": {
+    "easywave_neo_actuator": {
+      "abort": {
+        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "device_added": "The device was added successfully.",
+        "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
+        "learning_cancelled": "Learning mode was cancelled.",
+        "no_device_learned": "No device was detected."
+      },
+      "entry_type": "",
+      "initiate_flow": {
+        "user": "Easywave neo receiver"
+      },
+      "progress": {
+        "waiting_for_actuator": "Waiting for neo receiver... Put the device into programming mode NOW!"
+      },
+      "step": {
+        "actuator_confirm": {
+          "data": {
+            "title": "Name"
+          },
+          "description": "The neo actuator was successfully paired ({device_type_name}, {channels} channel(s)).\n\nEnter a name for the new device:",
+          "title": "Learning Successful"
+        },
+        "actuator_intro": {
+          "title": "Learn Receiver",
+          "description": "Put the Easywave neo switch, dimmer or motor into programming mode, then continue.",
+          "menu_options": {
+            "learn_actuator": "Continue"
+          }
+        },
+        "learn_actuator": {
+          "title": "Pairing neo actuator"
+        },
+        "learn_timeout_actuator": {
+          "description": "No neo actuator was paired in time. Try again closer to the transceiver.",
+          "menu_options": {
+            "abort_learn": "Cancel",
+            "actuator_intro": "Back",
+            "learn": "Retry"
+          },
+          "title": "Timeout"
+        }
+      }
+    },
+    "easywave_neo_sensor": {
+      "abort": {
+        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "device_added": "The device was added successfully.",
+        "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
+        "learning_cancelled": "Learning mode was cancelled.",
+        "no_device_learned": "No device was detected."
+      },
+      "entry_type": "",
+      "initiate_flow": {
+        "user": "Easywave neo sensor"
+      },
+      "progress": {
+        "waiting_for_sensor": "Waiting for learn signal... Press the learn button on the Easywave neo sensor NOW!"
+      },
+      "step": {
+        "learn_sensor": {
+          "title": "Press Learn Button!"
+        },
+        "learn_timeout_sensor": {
+          "description": "No radio signal received!\nReduce the distance between sensor and server and try again.",
+          "menu_options": {
+            "learn": "Learn Sensor",
+            "sensor_learn_intro": "Back",
+            "abort_learn": "Cancel"
+          },
+          "title": "Timeout"
+        },
+        "sensor_confirm": {
+          "data": {
+            "title": "Name"
+          },
+          "data_description": {
+            "title": "The name for this Easywave neo sensor."
+          },
+          "description": "The sensor was successfully learned!\n\nDetected sensors:\n{sensor_list}\n\nEnter a name for the new device:",
+          "title": "Learning Successful"
+        },
+        "sensor_learn_intro": {
+          "description": "Home Assistant automatically detects which measurement data the sensor provides.\n\nPlease press the learn button on the back of the sensor in the next step.",
+          "menu_options": {
+            "learn": "Learn Sensor"
+          },
+          "title": "Learn Sensor"
+        }
+      }
+    },
+    "easywave_receiver": {
+      "abort": {
+        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "device_added": "The device was added successfully.",
+        "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
+        "index_serial_unavailable": "Could not read the transmitter serial for the allocated index.",
+        "no_device_learned": "No device was detected.",
+        "no_free_index": "No free RX11 transmitter index is available."
+      },
+      "entry_type": "",
+      "initiate_flow": {
+        "user": "Easywave receiver"
+      },
+      "step": {
+        "receiver_confirm": {
+          "data": {
+            "title": "Name"
+          },
+          "description": "Put the physical receiver into programming mode, then enter a name for the new device:",
+          "title": "Learning Successful"
+        },
+        "receiver_kind": {
+          "title": "Operating Mode",
+          "description": "Select how this Easywave receiver should be controlled from Home Assistant.",
+          "menu_options": {
+            "receiver_kind_impulse": "PULSE (1-Button)",
+            "receiver_kind_switch": "ON/OFF (2-Button)",
+            "receiver_kind_cover": "UP/DOWN (2-Button)",
+            "receiver_kind_motor": "UP/STOP/DOWN (3-Button)",
+            "receiver_kind_heating": "ON/OFF (Heating)",
+            "receiver_kind_universal": "UNIVERSAL (4-Button)"
+          },
+          "menu_option_descriptions": {
+            "receiver_kind_impulse": "Stateless toggle via a single button press (PULSE).",
+            "receiver_kind_switch": "Optimistic ON/OFF switch (button A = On, B = Off).",
+            "receiver_kind_cover": "Optimistic cover without stop (A = Open, B = Close).",
+            "receiver_kind_motor": "Optimistic cover with stop (A = Open, B = Close, C = Stop).",
+            "receiver_kind_heating": "Heating ON/OFF switch with repeating telegrams.",
+            "receiver_kind_universal": "Four independent button codes (A–D)."
+          }
+        }
+      }
+    },
+    "easywave_transmitter": {
+      "abort": {
+        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "device_added": "The device was added successfully.",
+        "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
+        "learning_cancelled": "Learning mode was cancelled.",
+        "no_device_learned": "No device was detected."
+      },
+      "entry_type": "",
+      "initiate_flow": {
+        "user": "Easywave transmitter"
+      },
+      "progress": {
+        "waiting_for_transmitter": "Waiting for transmitter signal... Press a button on the Easywave transmitter NOW!"
+      },
+      "step": {
+        "button_count_select": {
+          "title": "Button Count",
+          "description": "Please specify the number of available buttons.",
+          "menu_options": {
+            "buttons_1": "1 Button",
+            "buttons_2": "2 Buttons",
+            "buttons_3": "3 Buttons",
+            "buttons_4": "4 Buttons",
+            "transmitter_switch_mode": "Back"
+          },
+          "menu_option_descriptions": {
+            "buttons_1": "The transmitter/channel has only 1 button with any button code.",
+            "buttons_2": "The transmitter/channel has 2 buttons with button codes A and B.",
+            "buttons_3": "The transmitter/channel has 3 buttons with button codes A, B and C.",
+            "buttons_4": "The transmitter/channel has 4 buttons with button codes A, B, C and D."
+          }
+        },
+        "learn_timeout_transmitter": {
+          "description": "No radio signal received!\nReduce the distance between transmitter and server and try again.",
+          "menu_options": {
+            "learn": "Learn Transmitter",
+            "transmitter_operating_type": "Back",
+            "abort_learn": "Cancel"
+          },
+          "title": "Timeout"
+        },
+        "learn_transmitter": {
+          "title": "Press transmitter button!"
+        },
+        "transmitter_confirm": {
+          "data": {
+            "title": "Name"
+          },
+          "description": "The transmitter was successfully learned!\n\nEnter a name for the new device:",
+          "title": "Learning Successful"
+        },
+        "transmitter_grouping": {
+          "title": "Control Mode",
+          "description": "Should the buttons be created as individual entities or grouped as states in one entity?",
+          "menu_options": {
+            "transmitter_grouping_single": "Switch individually",
+            "transmitter_grouping_group": "Switch as group",
+            "transmitter_operating_type": "Back"
+          },
+          "menu_option_descriptions": {
+            "transmitter_grouping_single": "A separate object is created for each button of the selected channel. Each object represents one of the up to 4 available button codes (A,B,C,D).",
+            "transmitter_grouping_group": "One object is created for all buttons of the selected channel. Each of the up to 4 available button codes (A,B,C,D) represents a state of this object."
+          }
+        },
+        "transmitter_operating_type": {
+          "title": "Operating Mode",
+          "description": "Which operating mode would you like to use?",
+          "menu_options": {
+            "transmitter_op_1": "1-Button Operation",
+            "transmitter_op_2": "2-Button Operation",
+            "transmitter_op_3": "3-Button Operation"
+          },
+          "menu_option_descriptions": {
+            "transmitter_op_1": "Each button on a transmitter can trigger a function. Each button of a channel is assigned a separate object or state.",
+            "transmitter_op_2": "Two adjacent buttons of a channel are assigned a function (ON/OFF or UP/DOWN). A separate object is created for each function.",
+            "transmitter_op_3": "All 3 or 4 buttons of a channel are automatically assigned to a single object in '3-button operation' mode. This object has 3 states: UP/STOP/DOWN."
+          }
+        },
+        "transmitter_switch_mode": {
+          "title": "Behavior",
+          "description": "Should the switch state be reset after activation or remain permanent?",
+          "menu_options": {
+            "transmitter_switch_impulse": "Impulse",
+            "transmitter_switch_permanent": "Permanent",
+            "transmitter_grouping": "Back"
+          },
+          "menu_option_descriptions": {
+            "transmitter_switch_impulse": "The switch state of an object is reset 1 second after releasing the respective transmitter button.",
+            "transmitter_switch_permanent": "The switch state of individual objects toggles with each press of the respective transmitter button."
+          }
+        },
+        "transmitter_usage": {
+          "title": "States",
+          "description": "How should this 2-button transmitter be used?",
+          "menu_options": {
+            "transmitter_usage_switch": "ON/OFF",
+            "transmitter_usage_cover": "UP/DOWN",
+            "transmitter_operating_type": "Back"
+          },
+          "menu_option_descriptions": {
+            "transmitter_usage_switch": "Create an ON/OFF state sensor (A = On, B = Off).",
+            "transmitter_usage_cover": "Create an Open/Closed binary sensor (A = Open, B = Closed)."
+          }
+        }
+      }
+    }
+  },
+  "device_automation": {
+    "trigger_subtype": {
+      "a": "Button A",
+      "b": "Button B",
+      "c": "Button C",
+      "connected": "Connected",
+      "d": "Button D",
+      "disconnected": "Disconnected",
+      "low": "Low",
+      "ok": "OK",
+      "released": "Not pressed"
+    },
+    "trigger_type": {
+      "battery_low": "Battery low",
+      "battery_normal": "Battery OK",
+      "button_press": "Button pressed ({subtype})",
+      "button_release": "Button released",
+      "gateway_connected": "Gateway connected",
+      "gateway_disconnected": "Gateway disconnected"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "transmitter_state_cover": {
@@ -62,6 +352,13 @@
       }
     },
     "sensor": {
+      "battery_warning": {
+        "name": "Battery",
+        "state": {
+          "low": "Low",
+          "ok": "OK"
+        }
+      },
       "gateway_status": {
         "name": "Connection Status",
         "state": {
@@ -81,21 +378,6 @@
           "up": "Up",
           "down": "Down",
           "stop": "Stop",
-          "a": "Button A",
-          "b": "Button B",
-          "c": "Button C",
-          "d": "Button D"
-        }
-      },
-      "last_button": {
-        "name": "State",
-        "state": {
-          "on": "On",
-          "off": "Off",
-          "up": "Up",
-          "down": "Down",
-          "stop": "Stop",
-          "released": "Not pressed",
           "a": "Button A",
           "b": "Button B",
           "c": "Button C",
@@ -166,12 +448,6 @@
           "released": "Not pressed"
         }
       },
-      "temperature": {
-        "name": "Temperature"
-      },
-      "humidity": {
-        "name": "Humidity"
-      },
       "wind_speed": {
         "name": "Wind Speed"
       },
@@ -180,6 +456,22 @@
       },
       "battery": {
         "name": "Battery"
+      },
+      "transmitter_last_button": {
+        "name": "State",
+        "state": {
+          "a": "Button A",
+          "b": "Button B",
+          "c": "Button C",
+          "d": "Button D",
+          "released": "Not pressed"
+        }
+      },
+      "neo_sensor_temperature": {
+        "name": "Temperature"
+      },
+      "neo_sensor_humidity": {
+        "name": "Humidity"
       }
     },
     "button": {
@@ -301,1011 +593,51 @@
       }
     }
   },
-  "config": {
-    "step": {
-      "_comment_initial_setup": "===== INITIAL SETUP FLOW (Transceiver Setup) =====",
-      "user": {
-        "title": "Set up RX11 USB Transceiver",
-        "description": "{found_devices} Easywave devices found: {device_list}.\n\n{status}\n\nSelect a device from the list or use other options.",
-        "data": {
-          "device_path": "USB Device",
-          "device_name": "Integration Name"
-        },
-        "data_description": {
-          "device_path": "Select an available device or enter manually",
-          "device_name": "Display name for the integration"
-        }
-      },
-      "rx11_setup": {
-        "title": "Set up RX11 USB Transceiver",
-        "description": "Detected device:\n**{device_name}**\n\nPort: {device_path}"
-      },
-      "device": {
-        "title": "Add new Easywave device",
-        "description": "Add a new Easywave device via the RX11 transceiver."
-      },
-      "_comment_device_selection": "===== DEVICE TYPE SELECTION FLOW =====",
-      "device_type_select": {
-        "title": "Device Selection",
-        "description": "Which device would you like to add?",
-        "menu_options": {
-          "device_transmitter_config": "⚪ Easywave Transmitter",
-          "device_receiver": "⚪ Easywave Receiver",
-          "device_sensor": "⚪ Easywave neo Sensor",
-          "device_ewneo_receiver": "⚪ Easywave neo Receiver"
-        }
-      },
-      "device_cancel": {
-        "title": "Cancel"
-      },
-      "_comment_transmitter_flow": "===== EW-TRANSMITTER LEARNING FLOW =====",
-      "device_transmitter": {
-        "title": "Learn Easywave Transmitter",
-        "description": "Press any button on the Easywave transmitter. Waiting for telegram...",
-        "data": {
-          "action": "Action"
-        }
-      },
-      "device_transmitter_config": {
-        "title": "Operating Mode",
-        "description": "Which operating mode would you like to use?",
-        "menu_options": {
-          "device_transmitter_1button": "⚪ 1-Button Operation",
-          "device_transmitter_2button": "⚪ 2-Button Operation",
-          "device_transmitter_3button": "⚪ 3-Button Operation",
-          "device_type_select": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_transmitter_1button": "Each button on a transmitter can trigger a function. Each button of a channel is assigned a separate object or state.",
-          "device_transmitter_2button": "Two adjacent buttons of a channel are assigned a function (ON/OFF or UP/DOWN). A separate object is created for each function.",
-          "device_transmitter_3button": "All 3 or 4 buttons of a channel are automatically assigned to a single object in '3-button operation' mode. This object has 3 states: UP/STOP/DOWN."
-        }
-      },
-      "device_transmitter_grouping": {
-        "title": "Control Mode",
-        "description": "Should the buttons be created as individual entities or grouped as states in one entity?",
-        "menu_options": {
-          "device_transmitter_grouping_single": "⚪ Switch individually",
-          "device_transmitter_grouping_group": "⚪ Switch as group",
-          "device_transmitter_config": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_transmitter_grouping_single": "A separate object is created for each button of the selected channel. Each object represents one of the up to 4 available button codes (A,B,C,D).",
-          "device_transmitter_grouping_group": "One object is created for all buttons of the selected channel. Each of the up to 4 available button codes (A,B,C,D) represents a state of this object."
-        }
-      },
-      "device_transmitter_switch_mode": {
-        "title": "Behavior",
-        "description": "Should the switch state be reset after activation or remain permanent?",
-        "menu_options": {
-          "device_transmitter_switch_impulse": "⚪ Impulse",
-          "device_transmitter_switch_permanent": "⚪ Permanent",
-          "device_transmitter_grouping": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_transmitter_switch_impulse": "The switch state of an object is reset 1 second after releasing the respective transmitter button.",
-          "device_transmitter_switch_permanent": "The switch state of individual objects toggles with each press of the respective transmitter button."
-        }
-      },
-      "device_transmitter_button_count": {
-        "title": "Button Count",
-        "description": "Please specify the number of available buttons.",
-        "menu_options": {
-          "device_transmitter_buttons_1": "⚪ 1 Button",
-          "device_transmitter_buttons_2": "⚪ 2 Buttons",
-          "device_transmitter_buttons_3": "⚪ 3 Buttons",
-          "device_transmitter_buttons_4": "⚪ 4 Buttons",
-          "device_transmitter_switch_mode": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_transmitter_buttons_1": "The transmitter/channel has only 1 button with any button code.",
-          "device_transmitter_buttons_2": "The transmitter/channel has 2 buttons with button codes A and B.",
-          "device_transmitter_buttons_3": "The transmitter/channel has 3 buttons with button codes A, B and C.",
-          "device_transmitter_buttons_4": "The transmitter/channel has 4 buttons with button codes A, B, C and D."
-        }
-      },
-      "device_transmitter_2button_usage": {
-        "title": "States",
-        "description": "Which states should the transmitter have in Home Assistant?",
-        "menu_options": {
-          "device_transmitter_2button_switch": "⚪ ON/OFF",
-          "device_transmitter_2button_cover": "⚪ UP/DOWN",
-          "device_transmitter_config": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_transmitter_2button_switch": "The object states are ON/OFF.",
-          "device_transmitter_2button_cover": "The object states are UP/DOWN."
-        }
-      },
-      "device_transmitter_2button_button_count": {
-        "title": "Button Count",
-        "description": "Please specify the number of available buttons.",
-        "menu_options": {
-          "device_transmitter_2button_2": "⚪ 2 Buttons",
-          "device_transmitter_2button_4": "⚪ 4 Buttons",
-          "device_transmitter_2button_usage": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_transmitter_2button_2": "The transmitter/channel has 2 buttons with button codes A and B.",
-          "device_transmitter_2button_4": "The transmitter/channel has 4 buttons with button codes A, B, C and D."
-        }
-      },
-      "device_transmitter_description": {
-        "title": "Learn Transmitter",
-        "description": "The transmitter will be learned with the following settings:\n\n• **Operating Mode:** {operating_mode}{grouping_mode_line}{behavior_line}\n• **Button Count:** {button_count_text}\n\nPlease press a button on the selected transmitter in the next step.",
-        "menu_options": {
-          "device_transmitter_learn_start": "▶️ Learn Transmitter",
-          "device_transmitter_button_count": "⬅️ Back",
-          "device_transmitter_2button_button_count": "⬅️ Back",
-          "device_transmitter_config": "⬅️ Back"
-        }
-      },
-      "device_transmitter_learn_progress": {
-        "title": "Press transmitter button!"
-      },
-      "device_transmitter_learn_timeout": {
-        "title": "Timeout",
-        "description": "No radio signal received!\nReduce the distance between transmitter and server and try again.",
-        "menu_options": {
-          "device_transmitter_learn_start": "🔄 Learn Transmitter",
-          "device_transmitter_description": "⬅️ Back"
-        }
-      },
-      "device_transmitter_confirm_telegram": {
-        "title": "Telegram Received",
-        "description": "An Easywave telegram was received. Did you just press a button on the desired transmitter?",
-        "menu_options": {
-          "device_transmitter_verify": "✅ YES, Create Device",
-          "device_transmitter_learn_start": "🔄 NO, Learn Different Transmitter"
-        }
-      },
-      "device_transmitter_already_exists": {
-        "title": "Device Already Exists",
-        "description": "**This Easywave transmitter is already learned!**\n\nThe transmitter code is already used as **{device_name}** in Home Assistant.\nPlease repeat the process and use a transmitter that has not been learned yet.",
-        "menu_options": {
-          "device_transmitter_learn_start": "🔄 Learn Another Transmitter",
-          "device_transmitter_description": "⬅️ Back"
-        }
-      },
-      "device_transmitter_verify": {
-        "title": "Learning Successful",
-        "description": "The transmitter was successfully learned!\n\nEnter a name for the new device:",
-        "data": {
-          "device_name": "Device Name",
-          "area_id": "Area (optional)"
-        }
-      },
-      "_comment_sensor_flow": "===== EWNEO-SENSOR LEARNING FLOW =====",
-      "device_sensor": {
-        "title": "Learn Easywave neo Sensor",
-        "description": "Trigger the Easywave neo sensor or wait for an automatic measurement. Waiting for telegram...",
-        "data": {
-          "action": "Action"
-        }
-      },
-      "device_sensor_description": {
-        "title": "Learn Sensor",
-        "description": "Home Assistant automatically detects which measurement data the sensor provides.\n\nPlease press the learn button on the back of the sensor in the next step.",
-        "menu_options": {
-          "device_sensor_learn_start": "▶️ Learn Sensor",
-          "device_type_select": "⬅️ Back"
-        }
-      },
-      "device_sensor_learn_progress": {
-        "title": "Press Learn Button!",
-        "progress_action": {
-          "waiting_for_sensor_telegram": "🔄 Waiting for learn signal... Press the learn button on the Easywave neo sensor NOW!"
-        }
-      },
-      "device_sensor_learn_timeout": {
-        "title": "Timeout",
-        "description": "No radio signal received!\nReduce the distance between sensor and server and try again.",
-        "menu_options": {
-          "device_sensor_learn_start": "🔄 Learn Sensor"
-        }
-      },
-      "device_sensor_verify": {
-        "title": "Learning Successful",
-        "description": "The sensor was successfully learned!\n\nDetected sensors:\n{sensor_list}\n\nEnter a name for the new device:",
-        "data": {
-          "device_name": "Device Name",
-          "area_id": "Area (optional)"
-        }
-      },
-      "device_sensor_already_exists": {
-        "title": "Device Already Exists",
-        "description": "**This Easywave neo sensor is already learned!**\n\nThe sensor is already used as **{device_name}** in Home Assistant.\nPlease repeat the process and use a sensor that has not been learned yet.",
-        "menu_options": {
-          "device_sensor_learn_start": "🔄 Learn Another Sensor",
-          "device_sensor_description": "⬅️ Back"
-        }
-      },
-      "_comment_ewneo_receiver_flow": "===== EWNEO-RECEIVER LEARNING FLOW (Bidirectional) =====",
-      "device_ewneo_receiver_learn_cancel": {
-        "title": "Back"
-      },
-      "device_ewneo_receiver_back": {
-        "title": "Back"
-      },
-      "device_ewneo_receiver_learn_timeout": {
-        "title": "Timeout",
-        "description": "⏰ **No response received**\n\nThe system did not receive a valid response. You can try again.",
-        "menu_options": {
-          "device_ewneo_receiver_programming_mode": "🔄 Try Again",
-          "device_ewneo_receiver_back": "⬅️ Back"
-        }
-      },
-      "device_ewneo_receiver_already_exists": {
-        "title": "Device Already Exists",
-        "description": "**This Easywave neo receiver is already learned!**\n\nThe receiver is already used as **{device_name}** in Home Assistant.\nPlease repeat the process and use a receiver that has not been learned yet.",
-        "menu_options": {
-          "device_ewneo_receiver_programming_mode": "🔄 Learn Another Receiver",
-          "device_ewneo_receiver_back": "⬅️ Back"
-        }
-      },
-      "device_ewneo_receiver_programming_mode": {
-        "title": "Learn Receiver",
-        "description": "Please put your receiver into programming mode for any operating mode now.\n\nClick 'Continue' once the receiver is in programming mode.",
-        "menu_options": {
-          "device_ewneo_receiver_learn_start": "➡️ Continue",
-          "device_ewneo_receiver_back": "⬅️ Back"
-        }
-      },
-      "device_ewneo_receiver_verify": {
-        "title": "Learning Successful",
-        "description": "✅ **The receiver was successfully learned!**\n\nEnter a name for the new device:",
-        "data": {
-          "device_name": "Device Name",
-          "area_id": "Area (optional)"
-        }
-      },
-      "device_ewneo_receiver_complete": {
-        "title": "Easywave neo Receiver Successfully Created"
-      },
-      "device_ewneo_receiver_learn_start": {
-        "title": "Start Learning Easywave neo Receiver"
-      },
-      "device_ewneo_receiver_learn_progress": {
-        "title": "Easywave neo Receiver Learning Process"
-      },
-      "device_ewneo_receiver_confirm_create": {
-        "title": "Create Easywave neo Device"
-      },
-      "device_ewneo_receiver_confirm_back": {
-        "title": "Back"
-      },
-      "device_ewneo_receiver_confirm": {
-        "title": "Confirm Easywave neo Receiver",
-        "menu_options": {
-          "device_ewneo_receiver_confirm_create": "\u2705 Create",
-          "device_ewneo_receiver_confirm_rename": "\u270f\ufe0f Rename",
-          "device_ewneo_receiver_confirm_back": "\u2b05\ufe0f Back"
-        }
-      },
-      "device_ewneo_receiver_confirm_legacy": {
-        "title": "Confirm Easywave neo Device (Legacy)"
-      },
-      "_comment_ew_receiver_flow": "===== EW-RECEIVER CONFIGURATION FLOW (Unidirectional) =====",
-      "device_receiver_type": {
-        "title": "Operating Mode",
-        "description": "Which operating mode would you like to use?",
-        "menu_options": {
-          "device_receiver_mode_impulse": "⚪ PULSE (1-Button)",
-          "device_receiver_mode_on_off": "⚪ ON/OFF (2-Button)",
-          "device_receiver_mode_up_down": "⚪ UP/DOWN (2-Button)",
-          "device_receiver_mode_up_stop_down": "⚪ UP/STOP/DOWN (3-Button)",
-          "device_receiver_mode_heating": "⚪ ON/OFF (Heating)",
-          "device_receiver_mode_universal": "⚪ UNIVERSAL (4-Button)",
-          "device_type_select": "⬅️ Back"
-        },
-        "menu_option_descriptions": {
-          "device_receiver_mode_impulse": "A short switching impulse of 1s is triggered.",
-          "device_receiver_mode_on_off": "The relay output of the receiver is switched specifically ON or OFF.",
-          "device_receiver_mode_up_down": "The relay output of the receiver is switched specifically UP or DOWN.",
-          "device_receiver_mode_up_stop_down": "Specific commands for moving or stopping tubular motors are sent.",
-          "device_receiver_mode_heating": "The relay output of the receiver is switched specifically ON or OFF. The last state is resent every 4 hours.",
-          "device_receiver_mode_universal": "Switching impulses can be triggered for all 4 usable transmit codes."
-        }
-      },
-      "device_receiver_description": {
-        "title": "Program Receiver",
-        "description": "Please put your receiver into programming mode for **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in the correct programming mode and the LED is flashing in the correct rhythm.",
-        "menu_options": {
-          "device_receiver_learn_start": "▶️ Continue",
-          "device_receiver_type": "⬅️ Back"
-        }
-      },
-      "device_receiver_description_heating": {
-        "title": "Program Receiver",
-        "description": "Please put your heating control receiver into programming mode **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in the correct programming mode and the LED is flashing in the correct rhythm.",
-        "menu_options": {
-          "device_receiver_learn_start": "▶️ Continue",
-          "device_receiver_type": "⬅️ Back"
-        }
-      },
-      "device_receiver_description_universal": {
-        "title": "Program Receiver",
-        "description": "Please put your receiver into programming mode now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick 'Continue' once the receiver is in programming mode and the LED is flashing.",
-        "menu_options": {
-          "device_receiver_learn_start": "▶️ Continue",
-          "device_receiver_type": "⬅️ Back"
-        }
-      },
-      "device_receiver_learn_start": {
-        "title": "Start Learning Receiver"
-      },
-      "device_receiver_confirm_learning": {
-        "title": "Confirm Learning",
-        "description": "Did the LED on the receiver light up continuously for 4s or was the learning process acknowledged by the receiver? (see operating manual)",
-        "menu_options": {
-          "device_receiver_verify": "✅ Yes",
-          "device_receiver_description": "❌ No",
-          "device_receiver_description_heating": "❌ No",
-          "device_receiver_description_universal": "❌ No"
-        }
-      },
-      "device_receiver_verify": {
-        "title": "Learning Successful",
-        "description": "The receiver was successfully learned in operating mode **{receiver_type}**!\n\nMake sure the programming mode on the receiver has ended, the LED should no longer be flashing.\n\nEnter a name for the new device:",
-        "data": {
-          "device_name": "Device Name",
-          "area_id": "Area (optional):"
-        }
-      },
-      "device_receiver_create": {
-        "title": "Create Receiver"
-      },
-      "device_receiver_confirm": {
-        "title": "Easywave Receiver - Confirmation",
-        "description": "📥 **Easywave Receiver Configuration - Step 3/3**\n\n**📋 Configuration:**\n• Device: {device_name}\n• Serial Number: {serial}\n• RX11 Index: {rx11_index}\n• Type: {receiver_kind}\n• Mode: {operating_mode}\n\n**🎛️ Buttons to be created:**\n{button_summary}\n\n**📡 Learning Process:**\n\n**1.** {learn_instructions}\n**2.** Click 'Create & Send Code A'\n**3.** System sends Code A to the receiver\n**4.** Device is created in Home Assistant\n\n💡 **Note:** After confirmation, the receiver will be automatically configured and button entities will be created.",
-        "menu_options": {
-          "device_receiver_create": "✅ Create Receiver",
-          "device_receiver_type": "⬅️ Back"
-        },
-        "data": {
-          "action": "Action"
-        }
-      },
-      "device_receiver": {
-        "title": "Learn Easywave Receiver",
-        "description": "Press the learn button on the Easywave Receiver. Waiting for telegram...",
-        "data": {
-          "action": "Action"
-        }
-      },
-      "_comment_device_confirmation": "===== DEVICE CONFIRMATION & FINALIZATION =====",
-      "device_confirm": {
-        "title": "Confirm Device",
-        "description": "{description}",
-        "menu_options": {
-          "device_confirm_create": "\u2705 Create",
-          "device_confirm_rename": "\u270f\ufe0f Rename",
-          "device_confirm_back": "\u2b05\ufe0f Back"
-        },
-        "data": {
-          "device_name": "Device Name",
-          "action": "Action"
-        }
-      },
-      "device_confirm_create": {
-        "title": "Create Device"
-      },
-      "device_confirm_back": {
-        "title": "Back"
-      },
-      "device_confirm_ewneo_sensor": {
-        "title": "Confirm Easywave neo Sensor",
-        "description": "\u2705 **Easywave neo Sensor detected!**\n\n**\ud83d\udd0d Device info:**\n\u2022 Serial: `{serial_short}`\n\u2022 Name: {suggested_name}\n\n**\ud83d\udcca Sensors:**\n{sensor_list}",
-        "menu_options": {
-          "device_confirm_create": "\u2705 Create",
-          "device_confirm_rename": "\u270f\ufe0f Rename",
-          "device_confirm_back": "\u2b05\ufe0f Back"
-        }
-      },
-      "device_save": {
-        "title": "Save Device"
-      },
-      "device_save_success": {
-        "title": "Creation Successful",
-        "description": "The device **{device_name}** is now available and entities have been created."
-      },
-      "ew_receiver_config": {
-        "title": "Configure Easywave Receiver",
-        "description": "Configure the Easywave Receiver '{device_name}' (RX11 Index: {rx11_index}):\n\n**Receiver Type:** Determines available functions\n**Operating Mode:** Number and type of control buttons",
-        "data": {
-          "receiver_kind": "Receiver Type",
-          "operating_mode": "Operating Mode"
-        }
-      },
-      "ew_receiver_learn": {
-        "title": "Activate Easywave Receiver Learning Mode",
-        "description": "**STEP 1:** Put receiver into learning mode\n\n{mode_instructions}\n\n**Procedure:**\n1. Press the learn button on the Easywave Receiver\n2. LED should flash (learning mode active)\n3. Confirm with 'OK' when learning mode is active\n\n**Configuration:**\n- Device: {device_name}\n- RX11 Index: {rx11_index}\n- Type: {receiver_kind}\n- Mode: {operating_mode}",
-        "data": {
-          "action": "Action"
-        }
-      },
-      "ew_receiver_final_confirm": {
-        "title": "Create Easywave Receiver",
-        "description": "**FINAL CONFIRMATION:**\n\nThe Easywave Receiver is ready for creation:\n\n**Device Data:**\n- Name: {device_name}\n- RX11 Index: {rx11_index}\n- Type: {receiver_kind}\n- Operating Mode: {operating_mode}\n- Number of Buttons: {button_count}\n\n**Available Functions:**\n{button_summary}\n\n⚠️ **Important:** The communication test will be performed during creation.",
-        "data": {
-          "action": "Action"
-        }
-      },
-      "_comment_manual_advanced": "===== MANUAL & ADVANCED OPTIONS =====",
-      "show_all_devices": {
-        "title": "Show All USB Devices",
-        "description": "Found: {total_devices} USB devices ({easywave_devices} Easywave devices).\n\n{warning}",
-        "data": {
-          "device_path": "Select USB Device",
-          "device_name": "Integration Name"
-        }
-      },
-      "manual": {
-        "title": "Enter EASYWAVE USB Device Manually",
-        "description": "Enter the path to your EASYWAVE USB device:\n\n{example_paths}",
-        "data": {
-          "device_path": "Device Path",
-          "device_name": "Integration Name"
-        },
-        "data_description": {
-          "device_path": "Full path to the USB device",
-          "device_name": "Display name for the integration"
-        }
-      },
-      "usb_confirm": {
-        "title": "Confirm EASYWAVE USB Device",
-        "description": "EASYWAVE USB device found at {device_path}. Would you like to add it?",
-        "data": {
-          "device_name": "Integration Name"
-        }
-      }
+  "issues": {
+    "devices_migrated": {
+      "description": "{count} Easywave device(s) were migrated from the previous JSON storage into config subentries.\n\nEntity unique IDs changed to the CORE-compatible serial-based scheme. Please recreate automations and device triggers.",
+      "title": "Easywave devices migrated — recreate automations"
     },
-    "error": {
-      "cannot_connect": "Failed to connect to device. Check the path and permissions.",
-      "invalid_device": "Invalid or unsupported device",
-      "invalid_path": "Invalid device path entered",
-      "learning_timeout": "No device detected within timeout.",
-      "learning_aborted": "Learning aborted.",
-      "learning_failed": "Device learning failed.",
-      "no_coordinator": "No coordinator available.",
-      "no_rx11_found": "No RX11 USB Transceiver found. Please connect the RX11 to a USB port and click 'Search Again'.",
-      "no_devices_found": "No EASYWAVE USB devices found. Connect your device and refresh the list.",
-      "no_usb_devices_found": "No USB devices found.",
-      "no_device_selected": "No device selected.",
-      "device_type_mismatch": "Detected device type does not match selection.",
-      "measurement_without_learning": "Measurement telegram received, but sensor must be learned first. Press the learn button on the sensor and try again.",
-      "invalid_sensor_telegram": "Invalid sensor telegram received. Please press the learn button on the sensor.",
-      "communication_failed": "Communication test with Easywave Receiver failed. Check if the receiver is in learning mode.",
-      "communication_error": "Error during communication test.",
-      "no_available_ewneo_index": "No available Easywave neo index found. All 128 Easywave neo indices (0-127) are occupied.",
-      "ewneo_learning_failed": "Easywave neo receiver learning failed. Please check the connection and try again.",
-      "ewneo_join_failed": "Connection to Easywave neo receiver failed. Make sure the device is in learning mode.",
-      "no_preparation_data": "Preparation data for Easywave neo receiver missing. Please restart the process.",
-      "unknown": "Unknown error occurred"
-    },
-    "abort": {
-      "not_easywave_device": "Not an Easywave device",
-      "already_configured": "Device is already configured",
-      "device_already_exists": "This transmitter is already learned and cannot be overwritten.",
-      "invalid_discovery_info": "Invalid discovery information",
-      "no_devices": "No RX11 USB Transceivers found.\n\nTo use devices with the Easywave integration, connect an RX11 USB Transceiver and try again.",
-      "no_rx11_configured": "No RX11 Transceiver configured. Please set up an RX11 first.",
-      "rx11_not_available": "RX11 Transceiver not available",
-      "yaml_not_supported": "YAML configuration is not supported. Please use the user interface.",
-      "user_cancelled": "",
-      "device_added": "The device **{device_name}** is now available and entities have been created.",
-      "learning_timeout": "Timeout while learning device. Please try again.",
-      "no_available_ewneo_index": "No available Easywave neo index found. All 128 indices (0-127) are already used.",
-      "ewneo_learning_failed": "Easywave neo receiver learning failed. Please check the connection and try again.",
-      "ewneo_join_failed": "Connection to Easywave neo receiver failed. Make sure the device is in learning mode.",
-      "no_preparation_data": "Preparation data for Easywave neo receiver missing. Please restart the process.",
-      "no_learned_device": "No learned device available",
-      "no_coordinator": "Coordinator not available",
-      "no_rx11_connection": "No RX11 connection available",
-      "rx11_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection",
-      "no_gateway_serial": "Could not load gateway serial number",
-      "transceiver_not_available": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection",
-      "no_available_receivers": "No available receivers found",
-      "no_receiver_serial": "Could not load receiver serial number",
-      "receiver_load_failed": "Receiver could not be loaded",
-      "device_creation_error": "Error creating device",
-      "unknown": "Unknown error occurred"
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Easywave Options",
-        "description": "Configure the Easywave Integration.\n\nDevices found: {device_count}\nLearning mode: {learning_status}",
-        "data": {
-          "scan_interval": "Scan Interval (seconds)",
-          "auto_discovery": "Automatic Device Discovery",
-          "action": "Action",
-          "learning_duration": "Learning Mode Duration (seconds)"
-        },
-        "data_description": {
-          "scan_interval": "How often to search for new devices",
-          "auto_discovery": "Automatically add devices via telegram reception"
-        }
-      }
+    "frequency_not_permitted": {
+      "description": "This Easywave hardware operates on **{frequency}**, which is **not permitted** in your configured Home Assistant region (**{country}**).\n\nThe integration has been disabled for regulatory compliance.\n\nIf you believe this is incorrect, verify your country setting under **Settings → System → General → Country**. The 868 MHz band is permitted in EU/EEA countries, the UK, Switzerland, Norway, and Liechtenstein.",
+      "title": "Easywave: {frequency} not permitted in {country}"
     }
   },
   "selector": {
-    "device_path": {
-      "manual_entry": "🔧 Enter Path Manually",
-      "refresh_list": "🔄 Refresh Device List",
-      "show_all_devices": "📋 Show All USB Devices",
-      "back_to_main": "⬅️ Back to Main Selection"
-    },
-    "device_type": {
-      "ew_transmitter": "🎛️ Easywave Transmitter (Remote Control)",
-      "ew_sensor": "🌡️ Easywave neo Sensor (Temperature/Humidity/Weather)",
-      "ew_receiver": "📥 Easywave Receiver (configure without learning)",
-      "ewneo_receiver": "📥 Easywave neo Switch/Motor (Neo Actuator)"
-    },
-    "device_model": {
-      "ewneo_switch": "Easywave neo Switch",
-      "ewneo_dimmer": "Easywave neo Dimmer",
-      "ewneo_motor": "Easywave neo Motor",
-      "ewneo_dual_switch": "Easywave neo 2-Channel Switch",
-      "ewneo_quad_switch": "Easywave neo 4-Channel Switch",
-      "ewneo_dual_motor": "Easywave neo 2-Channel Motor",
-      "ewneo_quad_motor": "Easywave neo 4-Channel Motor",
-      "ew_transmitter": "Easywave Transmitter",
-      "ew_receiver": "Easywave Receiver",
-      "ew_sensor": "Easywave neo Sensor"
-    },
-    "action": {
-      "start_learning": "▶️ Start Learning",
-      "confirm": "✅ Confirm",
-      "confirm_send_code_a": "✅ Confirm and Send Code A",
-      "create_device": "✅ Create Device",
-      "cancel": "❌ Cancel",
-      "proceed": "✅ Ready - Device is in Learning Mode",
-      "wait": "⏳ Continue Waiting",
-      "ok": "✅ OK",
-      "retry": "🔄 Retry",
-      "back": "⬅️ Back",
-      "save": "💾 Save",
-      "enable_learning": "⚪ Enable Learning Mode",
-      "disable_learning": "🛑 Disable Learning Mode",
-      "manage_devices": "🔧 Manage Devices",
-      "remove_device": "🗑️ Remove Device"
-    },
-    "entity_type": {
-      "switch": "🔌 Switch (On/Off)",
-      "light": "💡 Light (with advanced features)",
-      "cover": "🏠 Shutter/Blind"
-    }
-  },
-  "device_automation": {
-    "trigger_type": {
-      "button_press": "changed to state \"{subtype}\"",
-      "button_release": "changed to state \"{subtype}\"",
-      "channel_on": "{subtype} pressed",
-      "channel_off": "{subtype} not pressed",
-      "gateway_connected": "Gateway connected",
-      "gateway_disconnected": "Gateway disconnected"
-    },
-    "trigger_subtype": {
-      "A": "Button A",
-      "B": "Button B",
-      "C": "Button C",
-      "D": "Button D",
-      "a": "Button A",
-      "b": "Button B",
-      "c": "Button C",
-      "d": "Button D",
-      "on": "On",
-      "off": "Off",
-      "up": "Up",
-      "down": "Down",
-      "stop": "Stop",
-      "released": "Not pressed",
-      "connected": "Connected",
-      "disconnected": "Disconnected"
-    }
-  },
-  "services": {
-    "add_device": {
-      "name": "Add Device",
-      "description": "Manually adds a device to the Easywave integration",
-      "fields": {
-        "serial_number": {
-          "name": "Serial Number",
-          "description": "16-byte serial number of the device (hex string)"
-        },
-        "device_type": {
-          "name": "Device Type",
-          "description": "Type of the device"
-        },
-        "device_name": {
-          "name": "Device Name",
-          "description": "Display name for the device"
-        }
-      }
-    },
-    "remove_device": {
-      "name": "Remove Device",
-      "description": "Removes a manually added device from the integration",
-      "fields": {
-        "serial_number": {
-          "name": "Serial Number",
-          "description": "Serial number of the device to remove"
-        },
-        "force": {
-          "name": "Force Removal",
-          "description": "Force removal even if the device was automatically discovered"
-        }
-      }
-    },
-    "refresh_entity_specs": {
-      "name": "Refresh Entity Specifications",
-      "description": "Recreates the entity specifications for a device (updates icons, features, etc.). Reload the integration after running.",
-      "fields": {
-        "serial_number": {
-          "name": "Serial Number",
-          "description": "Serial number of the device to update"
-        }
-      }
-    },
-    "ew_receiver_toggle": {
-      "name": "Toggle (On/Off)",
-      "description": "Executes toggle function of an Easywave Receiver (single-button operation with LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for toggle function"
-        }
-      }
-    },
-    "ew_receiver_ein": {
-      "name": "On",
-      "description": "Turns Easywave Receiver on (two-button operation with LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for on function"
-        }
-      }
-    },
-    "ew_receiver_aus": {
-      "name": "Off",
-      "description": "Turns Easywave Receiver off (two-button operation with LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for off function"
-        }
-      }
-    },
-    "ew_receiver_motor_auf": {
-      "name": "Motor Up",
-      "description": "Moves motor/shutter up (LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for up function"
-        }
-      }
-    },
-    "ew_receiver_motor_zu": {
-      "name": "Motor Down",
-      "description": "Moves motor/shutter down (LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for down function"
-        }
-      }
-    },
-    "ew_receiver_motor_stopp": {
-      "name": "Motor Stop",
-      "description": "Stops motor/shutter (LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for stop function"
-        }
-      }
-    },
-    "ew_receiver_dimmer_heller": {
-      "name": "Dimmer Brighter",
-      "description": "Makes dimmer brighter (LongPress for continuous dimming)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for brighter function"
-        }
-      }
-    },
-    "ew_receiver_dimmer_dunkler": {
-      "name": "Dimmer Darker",
-      "description": "Makes dimmer darker (LongPress for continuous dimming)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for darker function"
-        }
-      }
-    },
-    "ew_receiver_hvac_heizen_kuehlen": {
-      "name": "HVAC Heat/Cool",
-      "description": "Activates heating/cooling mode (without LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for heat/cool function"
-        }
-      }
-    },
-    "ew_receiver_hvac_aus": {
-      "name": "HVAC Off",
-      "description": "Turns heating/cooling off (without LongPress)",
-      "fields": {
-        "entity_id": {
-          "name": "Button Entity",
-          "description": "The Easywave Receiver button entity for HVAC off function"
-        }
-      }
-    },
-    "device_remove": {
-      "name": "Remove Device",
-      "description": "Completely removes an Easywave device from Home Assistant",
-      "fields": {
-        "device_id": {
-          "name": "Device ID",
-          "description": "The Home Assistant Device ID of the device to remove"
-        },
-        "force": {
-          "name": "Force Removal",
-          "description": "Remove device even if it was not manually added"
-        },
-        "blacklist": {
-          "name": "Add to Blacklist",
-          "description": "Add device to blacklist after removal"
-        }
-      }
-    },
-    "device_recreate": {
-      "name": "Recreate Device",
-      "description": "Removes and recreates the device (for troubleshooting)",
-      "fields": {
-        "device_id": {
-          "name": "Device ID",
-          "description": "The Home Assistant Device ID of the device to recreate"
-        }
-      }
-    }
-  },
-  "common": {
-    "state": {
-      "on": "On",
-      "off": "Off",
-      "up": "Up",
-      "down": "Down",
-      "stop": "Stop",
-      "stopped": "Stopped",
-      "open": "Open",
-      "closed": "Closed"
-    },
-    "status": {
-      "connected": "Connected",
-      "disconnected": "Disconnected",
-      "connecting": "Connecting...",
-      "error": "Error",
-      "hardware_error": "Hardware Error (USB disconnected?)",
-      "not_configured": "Not configured"
-    },
-    "button": {
-      "a": "Button A",
-      "b": "Button B",
-      "c": "Button C",
-      "d": "Button D"
-    },
-    "state_label": {
-      "a": "A",
-      "b": "B",
-      "c": "C",
-      "d": "D"
-    },
-    "entity": {
-      "state": "State",
-      "state_ab": "State A/B",
-      "state_cd": "State C/D",
-      "battery": "Battery",
-      "battery_warning": "Battery Warning",
-      "battery_level": "Battery Level",
-      "channel": "Channel {channel}",
-      "temperature": "Temperature",
-      "humidity": "Humidity",
-      "wind_speed": "Wind Speed",
-      "brightness": "Brightness"
-    },
-    "error": {
-      "communication_error": "Communication error with receiver {serial}. The device is not responding correctly. Possible causes: Device is off, too far away, or there is radio interference. Try again or check device placement.",
-      "unknown_error": "Unknown error sending command (Code: {error_type}, Details: {error_code}). Please try again or restart Home Assistant.",
-      "rx11_not_connected": "RX11 not connected - command cannot be sent",
-      "command_failed": "Command to '{device}' failed - device not responding",
-      "device_not_responding": "{device}: RX11 not responding",
-      "turn_on_failed": "Error turning on: {error}",
-      "turn_off_failed": "Error turning off: {error}",
-      "gateway_filter_restore_failed": "Gateway filter could not be restored. Please restart Home Assistant or re-add the device.",
-      "gateway_not_in_filter": "Gateway {serial} not in RX11 filter. Please restart Home Assistant or re-add the device.",
-      "gateway_filter_unavailable": "Gateway {serial} not in RX11 filter. Filter function not available - please restart Home Assistant.",
-      "invalid_serial": "Invalid serial number {serial}. Please delete and re-add the device.",
-      "command_no_response": "Command failed - no response from device",
-      "cannot_delete_rx11_with_devices": "The RX11 USB Transceiver cannot be deleted while devices are still configured.\n\nPlease delete all devices first via the three-dot menu, or remove the entire integration via the three-dot menu of the integration entry",
-      "cannot_delete_rx11": "The RX11 USB Transceiver cannot be deleted via the device menu.\n\nTo remove the RX11, please delete the entire Easywave integration via the three-dot menu of the integration entry."
-    },
-    "notification": {
-      "rx11_disconnected_title": "⚠️ RX11 Connection Lost",
-      "rx11_disconnected_message": "The RX11 USB Transceiver is not connected. Attempting automatic reconnection...",
-      "rx11_reconnected_title": "✅ RX11 Connection Restored",
-      "rx11_reconnected_message": "The RX11 USB Transceiver is connected again. All devices are available.",
-      "ewneo_unreachable_title": "⚠️ Easywave neo Device Unreachable",
-      "ewneo_unreachable_message": "**{device_name}** is not responding.\n\nThe command could not be executed. Possible causes:\n• Device is turned off\n• Device is too far from gateway\n• Radio interference\n\nThe device remains controllable. This message will be automatically removed upon successful communication."
-    },
-    "device": {
-      "unknown": "Unknown",
-      "new_device": "New Device",
-      "unknown_device": "Unknown Device",
-      "device_prefix": "Device",
-      "receiver": "Receiver",
-      "transmitter": "Transmitter",
-      "sensor": "Sensor"
-    },
-    "ewneo": {
-      "switch": "Easywave neo Switch",
-      "dimmer": "Easywave neo Dimmer",
-      "motor": "Easywave neo Motor",
-      "dual_switch": "Easywave neo 2-Channel Switch",
-      "quad_switch": "Easywave neo 4-Channel Switch",
-      "dual_motor": "Easywave neo 2-Channel Motor",
-      "quad_motor": "Easywave neo 4-Channel Motor",
-      "sensor": "Easywave neo Sensor"
-    },
     "sensor_type": {
-      "temperature": "Temperature",
-      "humidity": "Humidity",
-      "wind": "Wind Speed",
-      "rain": "Rain",
-      "light": "Brightness",
-      "pressure": "Air Pressure"
-    },
-    "device_info": {
-      "easywave_transmitter": "Easywave Transmitter",
-      "easywave_receiver": "Easywave Receiver",
-      "easywave_neo_sensor": "Easywave neo Sensor",
-      "easywave_neo_receiver": "Easywave neo Receiver",
-      "operating_type_1": "1-Button Operation",
-      "operating_type_2": "2-Button Operation",
-      "operating_type_3": "3-Button Operation",
-      "grouping_single": "Individual",
-      "grouping_group": "Group",
-      "switch_impulse": "Impulse",
-      "switch_permanent": "Permanent",
-      "buttons": "{count} Buttons",
-      "buttons_3_or_4": "3 or 4 Buttons",
-      "receiver_impulse": "Impulse",
-      "receiver_switch_2button": "ON/OFF",
-      "receiver_cover_2button": "UP/DOWN",
-      "receiver_motor_3button": "UP/STOP/DOWN",
-      "receiver_heating_cooling": "Heating",
-      "receiver_universal_4button": "Universal",
-      "channel_count": "{count}-Channel"
-    },
-    "state_translated": {
-      "on": "On",
-      "off": "Off",
-      "up": "Up",
-      "down": "Down",
-      "stop": "Stop",
-      "released": "Not pressed",
-      "unknown": "Unknown"
-    },
-    "device_trigger": {
-      "button_press": {
-        "name": "State changed to {subtype}"
-      },
-      "button_release": {
-        "name": "{subtype}"
-      },
-      "channel_on": {
-        "name": "Button {subtype} pressed"
-      },
-      "channel_off": {
-        "name": "Button {subtype} not pressed"
-      },
-      "gateway_connected": {
-        "name": "Gateway connected"
-      },
-      "gateway_disconnected": {
-        "name": "Gateway disconnected"
-      },
-      "subtype": {
-        "on": "On",
-        "off": "Off",
-        "up": "Up",
-        "down": "Down",
-        "stop": "Stop",
-        "released": "Not pressed",
-        "a": "Button A",
-        "b": "Button B",
-        "c": "Button C",
-        "d": "Button D"
+      "options": {
+        "unknown": "Unknown"
       }
+    }
+  },
+  "triggers": {
+    "button_press_a": {
+      "description": "Triggers when button A is pressed.",
+      "name": "Button A pressed"
     },
-    "config_flow": {
-      "operating_mode_1": "1-Button Operation",
-      "operating_mode_2_switch": "2-Button Operation (ON/OFF)",
-      "operating_mode_2_cover": "2-Button Operation (UP/DOWN)",
-      "operating_mode_3": "3-Button Operation (UP/STOP/DOWN)",
-      "grouping_single": "Switch individually",
-      "grouping_group": "Switch as group",
-      "behavior_impulse": "Impulse",
-      "behavior_permanent": "Permanent",
-      "buttons_3_or_4": "3 or 4 buttons",
-      "button_count_singular": "{count} button",
-      "button_count_plural": "{count} buttons",
-      "control_mode": "Control Mode",
-      "behavior": "Behavior",
-      "programming_mode_impulse": "PULSE",
-      "programming_mode_on_off": "ON / OFF",
-      "programming_mode_up_down": "UP / DOWN",
-      "programming_mode_up_stop_down": "UP / STOP / DOWN",
-      "programming_mode_heating": "ON / OFF",
-      "programming_mode_universal": "UNIVERSAL",
-      "receiver_type_impulse": "Impulse (1-Button)",
-      "receiver_type_switch_2button": "ON/OFF (2-Button)",
-      "receiver_type_cover_2button": "OPEN/CLOSE (2-Button)",
-      "receiver_type_motor_3button": "OPEN/STOP/CLOSE (3-Button)",
-      "receiver_type_heating_cooling": "Heating",
-      "receiver_type_universal_4button": "Universal (4-Button)",
-      "mode_desc_impulse": "PULSE (1-Button)",
-      "mode_desc_switch_2button": "ON / OFF (2-Button)",
-      "mode_desc_cover_2button": "UP / DOWN (2-Button)",
-      "mode_desc_motor_3button": "UP / STOP / DOWN (3-Button)",
-      "mode_desc_heating": "ON / OFF (Heating)",
-      "mode_desc_universal": "UNIVERSAL (4-Button)",
-      "summary_impulse": "Toggle button (stateless)",
-      "summary_switch_2button": "Stateless switch (A→On, B→Off)",
-      "summary_cover_2button": "Stateless cover (A→Up, B→Down)",
-      "summary_motor_3button": "Stateless motor (A→Up, B→Down, C→Stop)",
-      "summary_heating": "Heating switch (ON/OFF with 4h repeat)",
-      "summary_universal": "Button A\nButton B\nButton C\nButton D",
-      "learn_impulse": "Put receiver in 1-button learning mode.",
-      "learn_switch_2button": "Put receiver in 2-button learning mode (On + Off).",
-      "learn_cover_2button": "Put receiver in 2-button learning mode (Up + Down).",
-      "learn_motor_3button": "Put receiver in 3-button learning mode (Up + Down + Stop).",
-      "learn_heating": "Put receiver in 2-button learning mode (On + Off).",
-      "learn_universal": "Put receiver in 4-button learning mode.",
-      "learn_generic": "Put receiver in {mode}-button learning mode.",
-      "legacy_mode_1": "1-Button (Toggle)",
-      "legacy_mode_2": "2-Button",
-      "legacy_mode_3": "3-Button",
-      "legacy_mode_generic": "Mode {mode}",
-      "legacy_summary": "Standard configuration",
-      "receiver_kind_switch": "Switch",
-      "receiver_kind_motor": "Motor/Cover",
-      "receiver_kind_heating": "Heating/Cooling",
-      "mode_descriptions_switch": "• \ud83d\udd18 1-Button (Toggle)\n• \ud83d\udd18\ud83d\udd18 2-Button (On + Off)",
-      "mode_descriptions_motor": "• \ud83d\udd18 1-Button (Toggle)\n• \ud83d\udd18\ud83d\udd18 2-Button (Up + Down)\n• \ud83d\udd18\ud83d\udd18\ud83d\udd18 3-Button (Up + Down + Stop)",
-      "mode_descriptions_heating": "• \ud83d\udd18 1-Button (Toggle, 4h auto-repeat)",
-      "mode_descriptions_default": "• \ud83d\udd18 1-Button\n• \ud83d\udd18\ud83d\udd18 2-Button",
-      "receiver_manual_instruction": "Enter the Easywave Receiver serial number manually.",
-      "unknown_device": "Unknown device",
-      "new_device": "New device",
-      "auto_detect": "Auto-detection on reception",
-      "button_status_active_stop": "Active - use 'Stop Command' to end",
-      "button_status_ready_doubleclick": "Ready - double-click for continuous mode",
-      "button_status_ready_click_hold": "Ready - click for continuous mode",
-      "button_status_ready_click": "Ready - click for single pulse",
-      "device_fallback_name": "Device {serial}",
-      "confirm_transmitter_desc": "\u2705 **Easywave Transmitter successfully detected!**\n\n**\ud83d\udd0d Detected device info:**\n\u2022 Serial: `{serial}`\n\u2022 Name: {name}\n\u2022 Button count: {button_count}\n\u2022 Button pressed: {button}\n\n**\u26a1 What will be created:**\n\u2022 1 Easywave Transmitter device\n\u2022 {button_count} button entities",
-      "confirm_ewneo_receiver_desc": "\u2705 **Easywave neo Receiver detected!**\n\n**\ud83d\udd0d Detected device info:**\n\u2022 Serial: `{serial}`\n\u2022 Name: {name}\n\u2022 Type: {device_type_name}",
-      "confirm_generic_desc": "\u2705 **Device successfully detected!**\n\n**\ud83d\udd0d Detected device info:**\n\u2022 Serial: `{serial}`\n\u2022 Name: {name}\n\u2022 Type: {device_type}",
-      "confirm_create_instruction": "Select 'Create' to create the device."
+    "button_press_b": {
+      "description": "Triggers when button B is pressed.",
+      "name": "Button B pressed"
+    },
+    "button_press_c": {
+      "description": "Triggers when button C is pressed.",
+      "name": "Button C pressed"
+    },
+    "button_press_d": {
+      "description": "Triggers when button D is pressed.",
+      "name": "Button D pressed"
+    },
+    "button_release": {
+      "description": "Triggers when the button is released (impulse mode only).",
+      "name": "Button released"
+    },
+    "gateway_connected": {
+      "description": "Triggers when the RX11 USB transceiver is connected.",
+      "name": "Gateway connected"
+    },
+    "gateway_disconnected": {
+      "description": "Triggers when the RX11 USB transceiver is disconnected.",
+      "name": "Gateway disconnected"
     }
   }
 }

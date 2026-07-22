@@ -1,0 +1,203 @@
+{
+  "entity": {
+    "binary_sensor": {
+      "transmitter_state_cover": {
+        "default": "mdi:window-shutter",
+        "state": {
+          "on": "mdi:window-shutter-open",
+          "off": "mdi:window-shutter"
+        }
+      },
+      "transmitter_state_switch": {
+        "default": "mdi:light-switch",
+        "state": {
+          "on": "mdi:light-switch",
+          "off": "mdi:light-switch-off"
+        }
+      },
+      "state_ab": {
+        "default": "mdi:window-shutter",
+        "state": {
+          "on": "mdi:window-shutter-open",
+          "off": "mdi:window-shutter"
+        }
+      },
+      "state_cd": {
+        "default": "mdi:window-shutter",
+        "state": {
+          "on": "mdi:window-shutter-open",
+          "off": "mdi:window-shutter"
+        }
+      },
+      "button_a": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "on": "mdi:gesture-tap-button",
+          "off": "mdi:radiobox-blank"
+        }
+      },
+      "button_b": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "on": "mdi:gesture-tap-button",
+          "off": "mdi:radiobox-blank"
+        }
+      },
+      "button_c": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "on": "mdi:gesture-tap-button",
+          "off": "mdi:radiobox-blank"
+        }
+      },
+      "button_d": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "on": "mdi:gesture-tap-button",
+          "off": "mdi:radiobox-blank"
+        }
+      },
+      "battery_warning": {
+        "default": "mdi:battery",
+        "state": {
+          "on": "mdi:battery-alert",
+          "off": "mdi:battery"
+        }
+      }
+    },
+    "sensor": {
+      "battery_warning": {
+        "default": "mdi:battery-unknown",
+        "state": {
+          "ok": "mdi:battery",
+          "low": "mdi:battery-alert"
+        }
+      },
+      "gateway_status": {
+        "default": "mdi:usb",
+        "state": {
+          "connected": "mdi:usb",
+          "disconnected": "mdi:close-thick",
+          "connecting": "mdi:usb-port",
+          "error": "mdi:alert-circle",
+          "hardware_error": "mdi:alert-circle",
+          "not_configured": "mdi:close-thick"
+        }
+      },
+      "transmitter_state": {
+        "default": "mdi:light-switch",
+        "state": {
+          "on": "mdi:light-switch",
+          "off": "mdi:light-switch-off",
+          "up": "mdi:window-shutter-open",
+          "down": "mdi:window-shutter",
+          "stop": "mdi:stop-circle"
+        }
+      },
+      "state_1": {
+        "default": "mdi:light-switch",
+        "state": {
+          "on": "mdi:light-switch",
+          "off": "mdi:light-switch-off",
+          "up": "mdi:window-shutter-open",
+          "down": "mdi:window-shutter"
+        }
+      },
+      "state_2": {
+        "default": "mdi:light-switch",
+        "state": {
+          "on": "mdi:light-switch",
+          "off": "mdi:light-switch-off",
+          "up": "mdi:window-shutter-open",
+          "down": "mdi:window-shutter"
+        }
+      },
+      "state_ab": {
+        "default": "mdi:light-switch",
+        "state": {
+          "on": "mdi:light-switch",
+          "off": "mdi:light-switch-off",
+          "up": "mdi:window-shutter-open",
+          "down": "mdi:window-shutter"
+        }
+      },
+      "state_cd": {
+        "default": "mdi:light-switch",
+        "state": {
+          "on": "mdi:light-switch",
+          "off": "mdi:light-switch-off",
+          "up": "mdi:window-shutter-open",
+          "down": "mdi:window-shutter"
+        }
+      },
+      "button_a": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "pressed": "mdi:gesture-tap-button",
+          "released": "mdi:radiobox-blank"
+        }
+      },
+      "button_b": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "pressed": "mdi:gesture-tap-button",
+          "released": "mdi:radiobox-blank"
+        }
+      },
+      "button_c": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "pressed": "mdi:gesture-tap-button",
+          "released": "mdi:radiobox-blank"
+        }
+      },
+      "button_d": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "pressed": "mdi:gesture-tap-button",
+          "released": "mdi:radiobox-blank"
+        }
+      },
+      "battery": {
+        "default": "mdi:battery",
+        "state": {
+          "ok": "mdi:battery",
+          "low": "mdi:battery-alert"
+        }
+      },
+      "transmitter_last_button": {
+        "default": "mdi:radiobox-marked",
+        "state": {
+          "a": "mdi:alpha-a-circle",
+          "b": "mdi:alpha-b-circle",
+          "c": "mdi:alpha-c-circle",
+          "d": "mdi:alpha-d-circle",
+          "released": "mdi:radiobox-blank"
+        }
+      }
+    }
+  },
+  "triggers": {
+    "button_press_a": {
+      "trigger": "mdi:alpha-a-circle"
+    },
+    "button_press_b": {
+      "trigger": "mdi:alpha-b-circle"
+    },
+    "button_press_c": {
+      "trigger": "mdi:alpha-c-circle"
+    },
+    "button_press_d": {
+      "trigger": "mdi:alpha-d-circle"
+    },
+    "button_release": {
+      "trigger": "mdi:radiobox-blank"
+    },
+    "gateway_connected": {
+      "trigger": "mdi:lan-connect"
+    },
+    "gateway_disconnected": {
+      "trigger": "mdi:lan-disconnect"
+    }
+  }
+}

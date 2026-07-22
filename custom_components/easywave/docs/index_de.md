@@ -1,6 +1,8 @@
 # Easywave Integration – Anwender-Dokumentation
 
-> **Version:** 0.6.x | **Letzte Aktualisierung:** Februar 2026
+> **Version:** 0.7.0 | **Letzte Aktualisierung:** Juli 2026
+
+> **Hinweis (0.7.0):** Geräte liegen in Config-Subentries (CORE-kompatibel). Nach dem Upgrade von 0.6.x Automationen/Device-Trigger neu anlegen. Siehe [CHANGELOG.md](../CHANGELOG.md).
 
 EN **[English Version](index.md)**
 
@@ -59,7 +61,7 @@ Die Easywave Integration ermöglicht die Steuerung und Überwachung von ELDAT Fu
 
 | Komponente | Anforderung |
 |------------|-------------|
-| **Home Assistant** | Version 2024.1.0 oder höher |
+| **Home Assistant** | Version 2026.3.0 oder höher |
 | **Hardware** | Home Assistant Green, Yellow, oder anderer Linux-basierter Host |
 | **RX11 USB-Transceiver** | VID: 0x155A, PID: 0x1014 |
 
@@ -374,8 +376,8 @@ automation:
   - alias: "Batterie-Warnung Sender"
     trigger:
       - platform: state
-        entity_id: binary_sensor.ew_transmitter_abc123_battery_warning
-        to: "on"
+        entity_id: sensor.ew_transmitter_abc123_battery_warning
+        to: "low"
     action:
       - service: notify.mobile_app
         data:

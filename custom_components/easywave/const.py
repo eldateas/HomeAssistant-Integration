@@ -1,336 +1,392 @@
-"""Konstanten für die EASYWAVE Integration."""
-from __future__ import annotations
+"""Constants for the Easywave integration."""
 
-import datetime
+from datetime import timedelta
+from enum import IntFlag
 from typing import Final
 
-# Domain und Integration Info
 DOMAIN: Final = "easywave"
-INTEGRATION_NAME: Final = "Home Assistant Integration for EASYWAVE devices"
 
-# Documentation URL Base
-DOCS_URL_BASE: Final = "https://github.com/eldateas/HomeAssistant-Integration/tree/prod/custom_components/easywave/docs"
+# Home Assistant requires integrations to verify that RF hardware is permitted
+# in the user's configured country. The RX11 USB Transceiver operates on
+# 868 MHz (EU ISM band), which is only allowed in CEPT member countries.
+FREQUENCY_868MHZ: Final = "868 MHz"
 
-# ═══════════════════════════════════════════════════════════════════════════
-# USB Device Registry — SINGLE SOURCE OF TRUTH
-# ═══════════════════════════════════════════════════════════════════════════
-# Add a new USB stick here and it will automatically be:
-#   • discovered by the config flow
-#   • matched at startup & reconnect
-#   • shown with the correct manufacturer / product name
-#   • listed in manifest.json (must be added there manually once)
+# Single source of truth for supported USB sticks.
+# Adding a new device here is sufficient — config flow and discovery pick it up
+# automatically. Also update the `usb` list in manifest.json.
 #
-# Key:   (VID, PID)  — both as int
-# Value: {"manufacturer": "…", "product": "…"}
-# ═══════════════════════════════════════════════════════════════════════════
-USB_DEVICE_NAMES: Final = {
+# Key:   (VID, PID) as int
+# Value: {"manufacturer": str, "product": str, "frequency": str}
+USB_DEVICE_NAMES: Final[dict[tuple[int, int], dict[str, str]]] = {
     (0x155A, 0x1014): {
         "manufacturer": "ELDAT",
         "product": "RX11 USB Transceiver",
+        "frequency": FREQUENCY_868MHZ,
     },
-    # (0x155A, 0x1015): {
-    #     "manufacturer": "ELDAT",
-    #     "product": "RX21 USB Transceiver",
-    # },
 }
 
-# Derived set of all supported (VID, PID) tuples — used for device scanning.
 SUPPORTED_USB_IDS: Final = frozenset(USB_DEVICE_NAMES.keys())
 
-# Legacy aliases — kept for existing imports but now derived from the table.
-EASYWAVE_VID: Final = 0x155A
-EASYWAVE_PIDS: Final = sorted({pid for _, pid in SUPPORTED_USB_IDS})
+# Periodic polling interval for USB device reconnection attempts
+DEVICE_SCAN_INTERVAL: Final = timedelta(seconds=30)
 
 
-def is_supported_usb_device(vid: int | None, pid: int | None) -> bool:
-    """Return True when the VID/PID pair belongs to a supported stick."""
-    return (vid, pid) in SUPPORTED_USB_IDS
+CONF_DEVICE_PATH: Final = "device_path"
+CONF_USB_VID: Final = "usb_vid"
+CONF_USB_PID: Final = "usb_pid"
+CONF_USB_SERIAL_NUMBER: Final = "usb_serial_number"
+CONF_USB_MANUFACTURER: Final = "usb_manufacturer"
+CONF_USB_PRODUCT: Final = "usb_product"
 
+ALLOWED_COUNTRIES_868MHZ: Final = frozenset(
+    {
+        # EU Member States (CEPT)
+        "AT",
+        "BE",
+        "BG",
+        "HR",
+        "CY",
+        "CZ",
+        "DK",
+        "EE",
+        "FI",
+        "FR",
+        "DE",
+        "GR",
+        "HU",
+        "IE",
+        "IT",
+        "LV",
+        "LT",
+        "LU",
+        "MT",
+        "NL",
+        "PL",
+        "PT",
+        "RO",
+        "SK",
+        "SI",
+        "ES",
+        "SE",
+        # CEPT Members (non-EU)
+        "CH",
+        "NO",
+        "IS",
+        "LI",
+        # UK (post-Brexit)
+        "GB",
+        "UK",
+    }
+)
 
-def usb_device_name(vid: int | None, pid: int | None) -> tuple[str, str]:
-    """Return (manufacturer, product) for a VID/PID pair.
-
-    Falls back to generic strings when the combination is unknown.
-    """
-    entry = USB_DEVICE_NAMES.get((vid, pid))
-    if entry:
-        return entry["manufacturer"], entry["product"]
-    return "ELDAT EaS GmbH", "Unknown Easywave Device"
-
-# Config Entry Keys
-CONF_DEVICE_PATH: Final = "device_path"  # Legacy: optional fallback
-CONF_DEVICE_NAME: Final = "device_name"
-CONF_USB_VID: Final = "usb_vid"  # Primary: USB Vendor ID
-CONF_USB_PID: Final = "usb_pid"  # Primary: USB Product ID
-CONF_USB_SERIAL_NUMBER: Final = "usb_serial_number"  # Primary: USB Serial Number
-CONF_USB_MANUFACTURER: Final = "usb_manufacturer"  # Display: Manufacturer name
-CONF_USB_PRODUCT: Final = "usb_product"  # Display: Product name
-CONF_FW_VERSION: Final = "fw_version"  # Display: Firmware version
-CONF_HW_VERSION: Final = "hw_version"  # Display: Hardware version
-# CONF_AUTO_DISCOVERY removed - auto-discovery feature disabled
-CONF_SCAN_INTERVAL: Final = "scan_interval"
-CONF_TRANSCEIVER_TYPE: Final = "transceiver_type"
-
-# Default Values
-DEFAULT_SCAN_INTERVAL: Final = 5
-DEFAULT_DEVICE_NAME: Final = "RX11 USB Transceiver"
-
-# USB und Device Settings
-USB_DEVICE_PATH: Final = "device_path"
-DEVICE_SCAN_INTERVAL: Final = datetime.timedelta(seconds=5)
-SERIAL_NUMBER_LENGTH: Final = 16
-
-# Device Types (basierend auf RxModule.h)
-DEVICE_TYPES: Final = {
-    # EWB (EasyWave Bidi) Types
-    0x01: "ewneo_bidi_transmitter",      # EWB_DT_BIDI_TR
-    0x03: "ewneo_switch",                # EWB_DT_SWITCH
-    0x04: "ewneo_dimmer",                # EWB_DT_DIMMER
-    0x05: "ewneo_motor",                 # EWB_DT_MOTOR
-    0x06: "ewneo_dual_switch",           # EWB_DT_DUAL_SWITCH
-    0x07: "ewneo_quad_switch",           # EWB_DT_QUAD_SWITCH
-    0x08: "ewneo_dual_motor",            # EWB_DT_DUAL_MOTOR
-    0x09: "ewneo_quad_motor",            # EWB_DT_QUAD_MOTOR
-    0x0A: "ewb_part_switch",           # EWB_DT_PART_SWITCH
-    0x0B: "ewb_part_motor",            # EWB_DT_PART_MOTOR
-    # EW (EasyWave) Types
-    0x10: "ew_receiver",               # EW_RECEIVER
-    0x11: "ew_transmitter",            # EW_TRANSMITTER
-    0x12: "ew_transmitter_part",       # EW_TRANSMITTER_PART
-    0x13: "ew_sensor",                 # EW_SENSOR
-    0x14: "ew_sensor_part",            # EW_SENSOR_PART
-    # SEC (Secwave) Types
-    0x21: "sec_receiver",              # SEC_RECEIVER
-    0x22: "sec_transmitter",           # SEC_TRANSMITTER
-    # Virtual/Unknown
-    0x00: "unknown",                   # EMPTY_TYPE
+FREQUENCY_ALLOWED_COUNTRIES: Final = {
+    FREQUENCY_868MHZ: ALLOWED_COUNTRIES_868MHZ,
 }
 
-# Central mapping for device_type_code to device_type string (for EWneo devices)
-DEVICE_TYPE_CODE_MAP: Final = {
-    0x03: "ewneo_switch",
-    0x04: "ewneo_dimmer",
-    0x05: "ewneo_motor",
-    0x06: "ewneo_dual_switch",
-    0x07: "ewneo_quad_switch",
-    0x08: "ewneo_dual_motor",
-    0x09: "ewneo_quad_motor",
+
+def is_country_allowed_for_frequency(frequency: str, country_code: str | None) -> bool:
+    """Check whether a country is permitted to operate on the given frequency."""
+    if country_code is None:
+        return True
+
+    allowed = FREQUENCY_ALLOWED_COUNTRIES.get(frequency)
+    if allowed is None:
+        return True
+
+    return country_code.upper() in allowed
+
+
+def get_frequency_for_pid(pid: int | None) -> str | None:
+    """Get frequency band for a supported USB device PID."""
+    if pid is None:
+        return None
+    for (_vid, device_pid), device_info in USB_DEVICE_NAMES.items():
+        if device_pid == pid:
+            return device_info["frequency"]
+    return None
+
+
+# Event fired for gateway/battery/button state changes (usable in automations).
+EVENT_EASYWAVE: Final = f"{DOMAIN}_event"
+
+# Device trigger event types
+EVENT_TYPE_BUTTON_PRESS: Final = "button_press"
+EVENT_TYPE_BUTTON_RELEASE: Final = "button_release"
+EVENT_TYPE_BATTERY_LOW: Final = "battery_low"
+EVENT_TYPE_BATTERY_NORMAL: Final = "battery_normal"
+EVENT_TYPE_GATEWAY_CONNECTED: Final = "gateway_connected"
+EVENT_TYPE_GATEWAY_DISCONNECTED: Final = "gateway_disconnected"
+
+CONF_ENTRY_TYPE: Final = "entry_type"
+CONF_DEVICE_TITLE: Final = "title"
+
+SUBENTRY_TYPE_EASYWAVE_TRANSMITTER: Final = "easywave_transmitter"
+SUBENTRY_TYPE_EASYWAVE_NEO_SENSOR: Final = "easywave_neo_sensor"
+SUBENTRY_TYPE_EASYWAVE_RECEIVER: Final = "easywave_receiver"
+SUBENTRY_TYPE_EASYWAVE_NEO_ACTUATOR: Final = "easywave_neo_actuator"
+
+DEVICE_SUBENTRY_TYPES: Final = (
+    SUBENTRY_TYPE_EASYWAVE_TRANSMITTER,
+    SUBENTRY_TYPE_EASYWAVE_NEO_SENSOR,
+    SUBENTRY_TYPE_EASYWAVE_RECEIVER,
+    SUBENTRY_TYPE_EASYWAVE_NEO_ACTUATOR,
+)
+
+ENTRY_TYPE_TRANSMITTER: Final = "transmitter"
+ENTRY_TYPE_NEO_SENSOR: Final = "neo_sensor"
+ENTRY_TYPE_RECEIVER: Final = "receiver"
+ENTRY_TYPE_NEO_ACTUATOR: Final = "neo_actuator"
+
+ENTRY_TYPE_TO_SUBENTRY_TYPE: Final = {
+    ENTRY_TYPE_TRANSMITTER: SUBENTRY_TYPE_EASYWAVE_TRANSMITTER,
+    ENTRY_TYPE_NEO_SENSOR: SUBENTRY_TYPE_EASYWAVE_NEO_SENSOR,
+    ENTRY_TYPE_RECEIVER: SUBENTRY_TYPE_EASYWAVE_RECEIVER,
+    ENTRY_TYPE_NEO_ACTUATOR: SUBENTRY_TYPE_EASYWAVE_NEO_ACTUATOR,
 }
 
-# Central mapping for device_type_code to translation key for model names
-# Use translate() from translations.py to get localized model names
-EWNEO_MODEL_TRANSLATION_KEYS: Final = {
-    0x03: "ewneo.switch",
-    0x04: "ewneo.dimmer",
-    0x05: "ewneo.motor",
-    0x06: "ewneo.dual_switch",
-    0x07: "ewneo.quad_switch",
-    0x08: "ewneo.dual_motor",
-    0x09: "ewneo.quad_motor",
+BUCKET_SUBENTRY_TITLES: Final = {
+    SUBENTRY_TYPE_EASYWAVE_TRANSMITTER: "Easywave transmitter",
+    SUBENTRY_TYPE_EASYWAVE_NEO_SENSOR: "Easywave neo sensor",
+    SUBENTRY_TYPE_EASYWAVE_RECEIVER: "Easywave receiver",
+    SUBENTRY_TYPE_EASYWAVE_NEO_ACTUATOR: "Easywave neo receiver",
 }
 
-# NEO Subtypes für Telegram Mapping
-NEO_TELEGRAM_TYPE_MAPPING: Final = {
-    0x30: "neo_switch",
-    0x31: "neo_dimmer", 
-    0x32: "neo_motor",
-    0x33: "neo_sensor_temperature",
-    0x34: "neo_sensor_humidity",
-    0x35: "neo_sensor_motion",
-    0x36: "neo_sensor_door"
+
+def bucket_subentry_unique_id(config_entry_id: str, subentry_type: str) -> str:
+    """Return the fixed unique id for a device-type bucket subentry."""
+    return f"{config_entry_id}_{subentry_type}"
+
+
+CONF_TRANSMITTER_SERIAL: Final = "transmitter_serial"
+
+CONF_SENSOR_SERIAL: Final = "sensor_serial"
+CONF_SENSOR_CAPABILITIES: Final = "sensor_capabilities"
+
+CONF_OPERATING_TYPE: Final = "operating_type"
+CONF_BUTTON_COUNT: Final = "button_count"
+CONF_GROUPING_MODE: Final = "grouping_mode"
+CONF_SWITCH_MODE: Final = "switch_mode"
+CONF_USAGE_TYPE: Final = "usage_type"
+CONF_COVER_MODE: Final = "cover_mode"
+CONF_DETECTED_BUTTON_TYPE: Final = "detected_button_type"
+
+CONF_RECEIVER_SERIAL: Final = "receiver_serial"
+CONF_RX11_INDEX: Final = "rx11_index"
+CONF_RECEIVER_KIND: Final = "receiver_kind"
+CONF_OPERATING_MODE: Final = "operating_mode"
+
+CONF_ACTUATOR_SERIAL: Final = "actuator_serial"
+CONF_EWNEO_INDEX: Final = "ewneo_index"
+CONF_GATEWAY_SERIAL: Final = "gateway_serial"
+CONF_DEVICE_TYPE_CODE: Final = "device_type_code"
+CONF_CHANNELS: Final = "channels"
+CONF_RUNTIME_MEASURED: Final = "runtime_measured"
+
+# Grouping modes for transmitters
+TRANSMITTER_GROUPING_GROUP: Final = "group"
+TRANSMITTER_GROUPING_SINGLE: Final = "single"
+TRANSMITTER_GROUPING_DUAL: Final = "dual"
+TRANSMITTER_GROUPING_COVER: Final = "cover"
+
+# Switch modes for transmitters
+TRANSMITTER_SWITCH_IMPULSE: Final = "impulse"
+TRANSMITTER_SWITCH_PERMANENT: Final = "permanent"
+TRANSMITTER_SWITCH_SWITCH: Final = "switch"
+TRANSMITTER_SWITCH_COVER: Final = "cover"
+
+# Receiver kinds (EW basic receivers driven from HA)
+RECEIVER_KIND_IMPULSE: Final = "impulse"
+RECEIVER_KIND_SWITCH_2BUTTON: Final = "switch_2button"
+RECEIVER_KIND_COVER_2BUTTON: Final = "cover_2button"
+RECEIVER_KIND_MOTOR_3BUTTON: Final = "motor_3button"
+RECEIVER_KIND_HEATING_COOLING: Final = "heating_cooling"
+RECEIVER_KIND_UNIVERSAL_4BUTTON: Final = "universal_4button"
+
+RECEIVER_KINDS: Final = (
+    RECEIVER_KIND_IMPULSE,
+    RECEIVER_KIND_SWITCH_2BUTTON,
+    RECEIVER_KIND_COVER_2BUTTON,
+    RECEIVER_KIND_MOTOR_3BUTTON,
+    RECEIVER_KIND_HEATING_COOLING,
+    RECEIVER_KIND_UNIVERSAL_4BUTTON,
+)
+
+# EWneo device type codes (match easywave_home_control.DeviceType)
+DEVICE_TYPE_CODE_SWITCH: Final = 0x03
+DEVICE_TYPE_CODE_DIMMER: Final = 0x04
+DEVICE_TYPE_CODE_MOTOR: Final = 0x05
+DEVICE_TYPE_CODE_DUAL_SWITCH: Final = 0x06
+DEVICE_TYPE_CODE_QUAD_SWITCH: Final = 0x07
+DEVICE_TYPE_CODE_DUAL_MOTOR: Final = 0x08
+DEVICE_TYPE_CODE_QUAD_MOTOR: Final = 0x09
+
+DEVICE_TYPE_CODE_TO_PREFIX: Final = {
+    DEVICE_TYPE_CODE_SWITCH: "ewneo_switch",
+    DEVICE_TYPE_CODE_DIMMER: "ewneo_dimmer",
+    DEVICE_TYPE_CODE_MOTOR: "ewneo_motor",
+    DEVICE_TYPE_CODE_DUAL_SWITCH: "ewneo_switch",
+    DEVICE_TYPE_CODE_QUAD_SWITCH: "ewneo_switch",
+    DEVICE_TYPE_CODE_DUAL_MOTOR: "ewneo_motor",
+    DEVICE_TYPE_CODE_QUAD_MOTOR: "ewneo_motor",
 }
 
-# Info Types (basierend auf RxModule.h)
-TM_IT_EASW_RELEASE: Final = 0x00     # Easywave transmitter button release
-TM_IT_EASW_PUSH: Final = 0x01        # Easywave transmitter button push and hold
-TM_IT_SENSOR_DATA: Final = 0x02       # Sensor data message
-TM_IT_EWBIDI_STATE: Final = 0x03      # Easywave Bidi receiver state change
-TM_IT_EWBIDI_ABORT: Final = 0x40      # Easywave Bidi aborted learn/removal
-TM_IT_EWBIDI_ADD_TR: Final = 0x41     # Easywave Bidi learned transmitter
-TM_IT_EWBIDI_RMV_TR: Final = 0x42     # Easywave Bidi removed transmitter
-TM_IT_EWBIDI_LN_T: Final = 0xF0       # Easywave Bidi learn ack for transmitter
-TM_IT_EWBIDI_CHG_T: Final = 0xF1      # Easywave Bidi receiver change state
-TM_IT_EWBIDI_QUR_T: Final = 0xF2      # Easywave Bidi receiver query state
-
-# Button Definitions (basierend auf RxModule.h)
-TM_BUTTON_MASK: Final = 3
-TM_BUTTON_A: Final = 0
-TM_BUTTON_B: Final = 1
-TM_BUTTON_C: Final = 2
-TM_BUTTON_D: Final = 3
-
-# Button Functions
-TM_BUTTON_FUNC_MASK: Final = 0xFC
-TM_BUTTON_DEFAULT: Final = 0x00
-TM_BUTTON_LRN_DEL: Final = 0x04
-TM_BUTTON_LRN_ADD: Final = 0x08
-TM_BUTTON_LRN_RESET: Final = 0x0C
-TM_BUTTON_LRN_TIMER: Final = 0x10
-TM_BUTTON_HOLD: Final = 0x14
-TM_BUTTON_RELEASE: Final = 0x18
-TM_BUTTON_LOWBAT: Final = 0x80
-
-# Error Codes (basierend auf RxModule.h)
-ERR_SUCCESS: Final = 0x00
-ERR_CANCELED: Final = 0x01
-ERR_OUT_OF_QUEUE: Final = 0x02
-ERR_INVALID_REQUEST: Final = 0x03
-ERR_SIZE_MISMATCH: Final = 0x04
-ERR_INVALID_PARAMETER: Final = 0x05
-ERR_INCOMPLETE_FW: Final = 0x06
-ERR_RF_TIMEOUT: Final = 0x07
-ERR_INVALID_SERIAL: Final = 0x08
-ERR_SUPERSEDED: Final = 0x09
-ERR_INCOMPAT_FW: Final = 0x0A
-ERR_SERIAL_FILTER: Final = 0x0B
-ERR_FILTER_OUT_OF_MEM: Final = 0x0C
-ERR_INVALID_SEC_REPLY: Final = 0x0D
-ERR_TOO_LATE: Final = 0x0E
-ERR_FAILSTATE: Final = 0xFF
-
-# Services
-SERVICE_ADD_DEVICE: Final = "add_device"
-SERVICE_REMOVE_DEVICE: Final = "remove_device"
-SERVICE_REMOVE_DEVICE_BY_ID: Final = "remove_device_by_id"
-SERVICE_REMOVE_ALL_DEVICES: Final = "remove_all_devices"
-SERVICE_LIST_DEVICES: Final = "list_devices"
-SERVICE_LIST_REMOVABLE_DEVICES: Final = "list_removable_devices"
-# Removed: SERVICE_CLEAR_BLACKLIST - use whitelist-based approach instead
-SERVICE_SCAN_DEVICES: Final = "scan_devices"
-SERVICE_LEARN_DEVICE: Final = "learn_device"
-SERVICE_SEND_COMMAND: Final = "send_command"
-SERVICE_CONNECT_USB: Final = "connect_usb"
-SERVICE_EXPORT_DEVICES: Final = "export_devices"
-SERVICE_IMPORT_DEVICES: Final = "import_devices"
-SERVICE_BACKUP_DEVICES: Final = "backup_devices"
-
-# Configuration File
-DEVICES_CONFIG_FILE: Final = "easywave_devices.json"
-DEVICES_BACKUP_FILE: Final = "easywave_devices_backup.json"
-CONFIG_VERSION: Final = "1.0"
-
-# Entity Categories
-ENTITY_CATEGORY_CONFIG: Final = "config"
-ENTITY_CATEGORY_DIAGNOSTIC: Final = "diagnostic"
-
-# Attributes
-ATTR_DEVICE_TYPE: Final = "device_type"
-ATTR_DEVICE_ID: Final = "device_id"
-ATTR_SERIAL_NUMBER: Final = "serial_number"
-ATTR_DEVICE_NAME: Final = "device_name"
-ATTR_BUTTON: Final = "button"
-ATTR_COMMAND: Final = "command"
-ATTR_TIMEOUT: Final = "timeout"
-ATTR_FORCE: Final = "force"
-# Removed: ATTR_BLACKLIST - use whitelist-based approach instead
-ATTR_INFO_TYPE: Final = "info_type"
-ATTR_CHANNELS: Final = "channels"
-ATTR_BATTERY_LEVEL: Final = "battery_level"
-ATTR_SIGNAL_STRENGTH: Final = "signal_strength"
-ATTR_BACKUP_NAME: Final = "backup_name"
-ATTR_INCLUDE_CONFIG: Final = "include_config"
-ATTR_DEVICE_FILTER: Final = "device_filter"
-
-# Default Timeouts
-DEFAULT_LEARNING_TIMEOUT: Final = 30
-DEFAULT_COMMAND_TIMEOUT: Final = 5
-DEFAULT_RESPONSE_TIMEOUT: Final = 2
-LEARNING_TIMEOUT: Final = 180  # Timeout für EWneo Receiver Learning (3 Minuten)
-
-# Device Names und Labels
-DEVICE_NAME_PREFIXES: Final = {
-    "ew_transmitter": "Easywave Sender",
-    "ew_receiver": "Easywave Receiver",
-    "ew_temperature_sensor": "EWneo-Sensoren", 
-    "ew_humidity_sensor": "EWneo-Sensoren",
-    "ew_sensor": "EWneo-Sensoren",
-    "ewneo_transceiver": "EW NEO Transceiver",
-    "ewneo_switch": "EWneo-Switch",
-    "ewneo_dimmer": "EWneo-Dimmer", 
-    "ewneo_motor": "EWneo-Motor",
-    "ewneo_sensor": "EWneo-Sensoren",
-    "ewneo_bidi_transmitter": "Easywave Sender",
-    "ewneo_switch": "EWneo-Switch",
-    "ewneo_dimmer": "EWneo-Dimmer",
-    "ewneo_motor": "EWneo-Motor",
-    "ewneo_dual_switch": "EWneo-DualSwitch",
-    "ewneo_quad_switch": "EWneo-QuadSwitch",
-    "ewneo_dual_motor": "EWneo-DualMotor",
-    "ewneo_quad_motor": "EWneo-QuadMotor"
+DEVICE_TYPE_CODE_TO_CHANNELS: Final = {
+    DEVICE_TYPE_CODE_SWITCH: 1,
+    DEVICE_TYPE_CODE_DIMMER: 1,
+    DEVICE_TYPE_CODE_MOTOR: 1,
+    DEVICE_TYPE_CODE_DUAL_SWITCH: 2,
+    DEVICE_TYPE_CODE_QUAD_SWITCH: 4,
+    DEVICE_TYPE_CODE_DUAL_MOTOR: 2,
+    DEVICE_TYPE_CODE_QUAD_MOTOR: 4,
 }
 
-# Button Labels (translation keys - actual labels come from translations.py)
-BUTTON_LABELS_KEYS: Final = {
-    TM_BUTTON_A: "button.a",
-    TM_BUTTON_B: "button.b", 
-    TM_BUTTON_C: "button.c",
-    TM_BUTTON_D: "button.d"
+DEVICE_TYPE_CODE_MOTOR_TYPES: Final = frozenset(
+    {
+        DEVICE_TYPE_CODE_MOTOR,
+        DEVICE_TYPE_CODE_DUAL_MOTOR,
+        DEVICE_TYPE_CODE_QUAD_MOTOR,
+    }
+)
+
+# EWB mode for MotorFullState per 0-based channel (library dual/quad layout).
+DEVICE_TYPE_CODE_TO_MOTOR_FULL_MODES: Final = {
+    DEVICE_TYPE_CODE_MOTOR: (0,),
+    DEVICE_TYPE_CODE_DUAL_MOTOR: (2, 10),
+    DEVICE_TYPE_CODE_QUAD_MOTOR: (2, 10, 18, 26),
 }
 
-# Legacy BUTTON_LABELS for backwards compatibility (German defaults)
-# New code should use translations.get_button_label() instead
-BUTTON_LABELS: Final = {
-    TM_BUTTON_A: "Taste A",
-    TM_BUTTON_B: "Taste B", 
-    TM_BUTTON_C: "Taste C",
-    TM_BUTTON_D: "Taste D"
+
+def neo_motor_full_mode(device_type_code: int, channel: int | None = None) -> int:
+    """Return the EWB mode used for full motor state of a channel."""
+    modes = DEVICE_TYPE_CODE_TO_MOTOR_FULL_MODES.get(int(device_type_code), (0,))
+    if channel is None:
+        return int(modes[0])
+    index = max(0, min(int(channel), len(modes) - 1))
+    return int(modes[index])
+
+
+# Friendly type labels shown during learn confirm (HACS 0.6 style).
+EWNEO_DEVICE_TYPE_LABELS_DE: Final = {
+    DEVICE_TYPE_CODE_SWITCH: "Schalter",
+    DEVICE_TYPE_CODE_DIMMER: "Dimmer",
+    DEVICE_TYPE_CODE_MOTOR: "Motor",
+    DEVICE_TYPE_CODE_DUAL_SWITCH: "2-fach Schalter",
+    DEVICE_TYPE_CODE_QUAD_SWITCH: "4-fach Schalter",
+    DEVICE_TYPE_CODE_DUAL_MOTOR: "2-fach Motor",
+    DEVICE_TYPE_CODE_QUAD_MOTOR: "4-fach Motor",
 }
 
-# Device Icons
-DEVICE_ICONS: Final = {
-    "ew_transmitter": "mdi:radio-handheld",
-    "ew_receiver": "mdi:radio",
-    "ew_temperature_sensor": "mdi:thermometer",
-    "ew_humidity_sensor": "mdi:water-percent",
-    "ew_sensor": "mdi:motion-sensor",
-    "ewneo_transceiver": "mdi:radio-tower",
-    "ewneo_switch": "mdi:light-switch",
-    "ewneo_dimmer": "mdi:brightness-6",
-    "ewneo_motor": "mdi:motor",
-    "ewneo_sensor": "mdi:sensor",
-    "ewneo_bidi_transmitter": "mdi:radio-handheld",
-    "ewneo_switch": "mdi:light-switch",
-    "ewneo_dimmer": "mdi:brightness-6",
-    "ewneo_motor": "mdi:motor",
-    "ewneo_dual_switch": "mdi:light-switch",
-    "ewneo_quad_switch": "mdi:light-switch",
-    "ewneo_dual_motor": "mdi:motor",
-    "ewneo_quad_motor": "mdi:motor"
+EWNEO_DEVICE_TYPE_LABELS_EN: Final = {
+    DEVICE_TYPE_CODE_SWITCH: "Switch",
+    DEVICE_TYPE_CODE_DIMMER: "Dimmer",
+    DEVICE_TYPE_CODE_MOTOR: "Motor",
+    DEVICE_TYPE_CODE_DUAL_SWITCH: "2-channel Switch",
+    DEVICE_TYPE_CODE_QUAD_SWITCH: "4-channel Switch",
+    DEVICE_TYPE_CODE_DUAL_MOTOR: "2-channel Motor",
+    DEVICE_TYPE_CODE_QUAD_MOTOR: "4-channel Motor",
 }
 
-# Platform Specific Settings
-SCAN_INTERVAL_SENSORS: Final = datetime.timedelta(seconds=60)
-SCAN_INTERVAL_SWITCHES: Final = datetime.timedelta(seconds=30)
 
-# States
-STATE_UNKNOWN: Final = "unknown"
-STATE_UNAVAILABLE: Final = "unavailable"
-STATE_ON: Final = "on"
-STATE_OFF: Final = "off"
+def ewneo_device_type_label(type_code: int, language: str | None = None) -> str:
+    """Return a localized friendly name for an EWneo device type code."""
+    lang = (language or "en").lower()
+    labels = (
+        EWNEO_DEVICE_TYPE_LABELS_DE
+        if lang.startswith("de")
+        else EWNEO_DEVICE_TYPE_LABELS_EN
+    )
+    return labels.get(int(type_code), f"0x{int(type_code):02X}")
 
-# Units
-UNIT_CELSIUS: Final = "°C"
-UNIT_FAHRENHEIT: Final = "°F"
-UNIT_PERCENT: Final = "%"
-UNIT_DBM: Final = "dBm"
+# HACS legacy device_type strings → type codes (migration)
+HACS_ACTUATOR_TYPE_TO_CODE: Final = {
+    "ewneo_switch": DEVICE_TYPE_CODE_SWITCH,
+    "ewneo_dimmer": DEVICE_TYPE_CODE_DIMMER,
+    "ewneo_motor": DEVICE_TYPE_CODE_MOTOR,
+    "ewneo_dual_switch": DEVICE_TYPE_CODE_DUAL_SWITCH,
+    "ewneo_quad_switch": DEVICE_TYPE_CODE_QUAD_SWITCH,
+    "ewneo_dual_motor": DEVICE_TYPE_CODE_DUAL_MOTOR,
+    "ewneo_quad_motor": DEVICE_TYPE_CODE_QUAD_MOTOR,
+}
 
-# Coordinator Events
-EVENT_DEVICE_ADDED: Final = "easywave_device_added"
-EVENT_DEVICE_REMOVED: Final = "easywave_device_removed"
-EVENT_DEVICE_UPDATED: Final = "easywave_device_updated"
-EVENT_DEVICE_STATE_UPDATE: Final = "easywave_device_state_update"
-EVENT_TELEGRAM_RECEIVED: Final = "easywave_telegram_received"
-EVENT_SENSOR_UPDATE: Final = "easywave_sensor_update"
-EVENT_SENSOR_ADDED: Final = "easywave_sensor_added"
-EVENT_FORCE_CREATE: Final = "easywave_force_create"
+BUTTON_A: Final = 0
+BUTTON_B: Final = 1
+BUTTON_C: Final = 2
+BUTTON_D: Final = 3
 
-# Gateway Connection Events
-EVENT_GATEWAY_CONNECTED: Final = "easywave_gateway_connected"
-EVENT_GATEWAY_DISCONNECTED: Final = "easywave_gateway_disconnected"
-EVENT_GATEWAY_STATUS_CHANGED: Final = "easywave_gateway_status_changed"
+BUTTON_LETTERS: Final = ("a", "b", "c", "d")
 
-# Button Events (basierend auf RX11 EWB_RCV Grundfunktionen)
-# Nur diese drei Events werden gefeuert:
-# 1. easywave_button_press - Taste gedrückt (vom RX11)
-# 2. easywave_button_release - Taste losgelassen (vom RX11)
-# 3. easywave_button_hold - Taste gedrückt halten (emuliert, > 1 Sekunde)
+
+class EasywaveTransmitterFeature(IntFlag):
+    """Feature flags for transmitter last-button sensor trigger filtering."""
+
+    BUTTON_A = 1
+    BUTTON_B = 2
+    BUTTON_C = 4
+    BUTTON_D = 8
+    BUTTON_RELEASE = 16
+
+
+_BUTTON_FEATURE_BY_INDEX: Final = (
+    EasywaveTransmitterFeature.BUTTON_A,
+    EasywaveTransmitterFeature.BUTTON_B,
+    EasywaveTransmitterFeature.BUTTON_C,
+    EasywaveTransmitterFeature.BUTTON_D,
+)
+
+
+def transmitter_trigger_features(button_count: int, switch_mode: str) -> int:
+    """Return supported trigger feature flags for a group-mode transmitter."""
+    features = EasywaveTransmitterFeature(0)
+    for index in range(min(button_count, 4)):
+        features |= _BUTTON_FEATURE_BY_INDEX[index]
+    if switch_mode == TRANSMITTER_SWITCH_IMPULSE:
+        features |= EasywaveTransmitterFeature.BUTTON_RELEASE
+    return features.value
+
+
+class EasywaveGatewayFeature(IntFlag):
+    """Feature flag for the RX11 gateway status sensor trigger filtering."""
+
+    GATEWAY_STATUS = 32
+
+
+LEARNING_TIMEOUT: Final = 30  # seconds
+EWB_LEARNING_TIMEOUT: Final = 180  # seconds (EWneo join)
+
+
+def normalize_serial_hex(serial: str | bytes) -> str:
+    """Normalize a serial number to lowercase hex without separators."""
+    if isinstance(serial, bytes):
+        return serial.hex().lower()
+    cleaned = (
+        str(serial)
+        .strip()
+        .lower()
+        .replace(":", "")
+        .replace("-", "")
+        .replace(" ", "")
+    )
+    if cleaned.startswith("0x"):
+        cleaned = cleaned[2:]
+    return cleaned
+
+
+def device_id_for_transmitter(serial_hex: str) -> str:
+    """Return CORE-compatible transmitter device id."""
+    return f"transmitter_{normalize_serial_hex(serial_hex)}"
+
+
+def device_id_for_neo_sensor(serial_hex: str) -> str:
+    """Return CORE-compatible neo sensor device id."""
+    return f"neo_sensor_{normalize_serial_hex(serial_hex)}"
+
+
+def device_id_for_receiver(serial_hex: str) -> str:
+    """Return CORE-compatible receiver device id."""
+    return f"receiver_{normalize_serial_hex(serial_hex)}"
+
+
+def device_id_for_neo_actuator(serial_hex: str, device_type_code: int) -> str:
+    """Return CORE-compatible neo actuator device id."""
+    prefix = DEVICE_TYPE_CODE_TO_PREFIX.get(device_type_code, "ewneo_actuator")
+    return f"{prefix}_{normalize_serial_hex(serial_hex)}"
