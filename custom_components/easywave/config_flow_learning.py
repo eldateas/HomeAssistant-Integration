@@ -32,6 +32,7 @@ from .devices import (
     async_bucket_subentry_title,
     get_device_data,
     get_devices,
+    iter_subentries_of_type,
 )
 
 class EasywaveDeviceFlowMixin:
@@ -105,7 +106,7 @@ class EasywaveDeviceFlowMixin:
         """Return the bucket subentry for a device type, if it exists."""
         entry = self._get_entry()
         bucket_unique_id = bucket_subentry_unique_id(entry.entry_id, subentry_type)
-        for subentry in entry.get_subentries_of_type(subentry_type):
+        for subentry in iter_subentries_of_type(entry, subentry_type):
             if subentry.unique_id == bucket_unique_id:
                 return subentry
         return None

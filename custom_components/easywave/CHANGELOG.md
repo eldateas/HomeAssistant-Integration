@@ -1,5 +1,10 @@
 # Easywave Integration Changelog
 
+## 0.7.2 — HA 2026.3 subentry compatibility
+
+### Fixed
+- Crash on setup under Home Assistant **2026.3.x**: `ConfigEntry.get_subentries_of_type` does not exist yet (added later). Use a compatible iterator over `entry.subentries` so migration and device buckets work on the advertised minimum version.
+
 ## 0.7.1 — Fix 0.6.10 hub upgrade
 
 ### Fixed

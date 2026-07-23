@@ -56,7 +56,11 @@ from .const import (
     device_id_for_transmitter,
     normalize_serial_hex,
 )
-from .devices import async_bucket_subentry_title, get_devices
+from .devices import (
+    async_bucket_subentry_title,
+    get_devices,
+    iter_subentries_of_type,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -410,7 +414,7 @@ async def async_migrate_json_devices(
         bucket_type = ENTRY_TYPE_TO_SUBENTRY_TYPE[entry_type]
         bucket_unique_id = bucket_subentry_unique_id(entry.entry_id, bucket_type)
         existing = None
-        for subentry in entry.get_subentries_of_type(bucket_type):
+        for subentry in iter_subentries_of_type(entry, bucket_type):
             if subentry.unique_id == bucket_unique_id:
                 existing = subentry
                 break

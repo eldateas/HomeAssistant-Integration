@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigSubentry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import CONF_DEVICES
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import translation
@@ -21,10 +21,27 @@ if TYPE_CHECKING:
     from . import EasywaveConfigEntry
 
 
+def iter_subentries_of_type(
+    entry: ConfigEntry, subentry_type: str
+) -> Iterator[ConfigSubentry]:
+    """Yield subentries of ``subentry_type`` (HA 2026.3+ compatible).
+
+    ``ConfigEntry.get_subentries_of_type`` was added after 2026.3; older cores
+    still expose ``entry.subentries`` and must be filtered manually.
+    """
+    getter = getattr(entry, "get_subentries_of_type", None)
+    if callable(getter):
+        yield from getter(subentry_type)
+        return
+    for subentry in entry.subentries.values():
+        if subentry.subentry_type == subentry_type:
+            yield subentry
+
+
 def iter_device_buckets(entry: EasywaveConfigEntry) -> Iterator[ConfigSubentry]:
     """Yield device bucket subentries for a gateway config entry."""
     for subentry_type in DEVICE_SUBENTRY_TYPES:
-        yield from entry.get_subentries_of_type(subentry_type)
+        yield from iter_subentries_of_type(entry, subentry_type)
 
 
 def _iter_devices_in_bucket(
@@ -97,7 +114,7 @@ async def async_sync_bucket_subentry_titles(
     for subentry_type in DEVICE_SUBENTRY_TYPES:
         title = await async_bucket_subentry_title(hass, subentry_type)
         bucket_unique_id = bucket_subentry_unique_id(entry.entry_id, subentry_type)
-        for subentry in entry.get_subentries_of_type(subentry_type):
+        for subentry in iter_subentries_of_type(entry, subentry_type):
             if subentry.unique_id != bucket_unique_id:
                 continue
             if subentry.title == title:

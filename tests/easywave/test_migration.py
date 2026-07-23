@@ -46,6 +46,13 @@ async def async_bucket_subentry_title(_hass, subentry_type: str) -> str:  # noqa
 
 devices.get_devices = get_devices  # type: ignore[attr-defined]
 devices.async_bucket_subentry_title = async_bucket_subentry_title  # type: ignore[attr-defined]
+
+
+def iter_subentries_of_type(_entry, _subentry_type: str):  # noqa: ANN001
+    return []
+
+
+devices.iter_subentries_of_type = iter_subentries_of_type  # type: ignore[attr-defined]
 sys.modules["custom_components.easywave.devices"] = devices
 migration = _load("migration", COMPONENT / "migration.py")
 

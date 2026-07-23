@@ -139,23 +139,23 @@
           "title": "Learning Successful"
         },
         "receiver_kind": {
-          "title": "Operating Mode",
-          "description": "Select how this Easywave receiver should be controlled from Home Assistant.",
+          "title": "Mode de fonctionnement",
+          "description": "Quel mode de fonctionnement souhaitez-vous utiliser ?",
           "menu_options": {
-            "receiver_kind_impulse": "PULSE (1-Button)",
-            "receiver_kind_switch": "ON/OFF (2-Button)",
-            "receiver_kind_cover": "UP/DOWN (2-Button)",
-            "receiver_kind_motor": "UP/STOP/DOWN (3-Button)",
-            "receiver_kind_heating": "ON/OFF (Heating)",
-            "receiver_kind_universal": "UNIVERSAL (4-Button)"
+            "receiver_kind_impulse": "IMPULSION (1 bouton)",
+            "receiver_kind_switch": "ON/OFF (2 boutons)",
+            "receiver_kind_cover": "HAUT/BAS (2 boutons)",
+            "receiver_kind_motor": "HAUT/STOP/BAS (3 boutons)",
+            "receiver_kind_heating": "ON/OFF (Chauffage)",
+            "receiver_kind_universal": "UNIVERSEL (4 boutons)"
           },
           "menu_option_descriptions": {
-            "receiver_kind_impulse": "Stateless toggle via a single button press (PULSE).",
-            "receiver_kind_switch": "Optimistic ON/OFF switch (button A = On, B = Off).",
-            "receiver_kind_cover": "Optimistic cover without stop (A = Open, B = Close).",
-            "receiver_kind_motor": "Optimistic cover with stop (A = Open, B = Close, C = Stop).",
-            "receiver_kind_heating": "Heating ON/OFF switch with repeating telegrams.",
-            "receiver_kind_universal": "Four independent button codes (A–D)."
+            "receiver_kind_impulse": "Une courte impulsion de commutation de 1s est déclenchée.",
+            "receiver_kind_switch": "La sortie relais du récepteur est commutée spécifiquement ON ou OFF.",
+            "receiver_kind_cover": "La sortie relais du récepteur est commutée spécifiquement HAUT ou BAS.",
+            "receiver_kind_motor": "Des commandes spécifiques pour le déplacement ou l'arrêt des moteurs tubulaires sont envoyées.",
+            "receiver_kind_heating": "La sortie relais du récepteur est commutée spécifiquement ON ou OFF. Le dernier état est renvoyé toutes les 4 heures.",
+            "receiver_kind_universal": "Des impulsions de commutation peuvent être déclenchées pour les 4 codes d'émission utilisables."
           }
         }
       }

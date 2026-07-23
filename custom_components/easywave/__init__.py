@@ -6,7 +6,11 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_DEVICES, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, issue_registry as ir
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 
 from .const import (
     CONF_DEVICE_PATH,
@@ -152,6 +156,50 @@ def _device_identifier(device: dr.DeviceEntry) -> str | None:
     return None
 
 
+async def _async_purge_device_history(
+    hass: HomeAssistant, device_entry: dr.DeviceEntry
+) -> None:
+    """Remove recorder/logbook history for all entities of a device.
+
+    Matches the 0.6.10 delete UX so a later re-learn of the same serial does not
+    revive old activity. Storage schema stays CORE-compatible; this only calls
+    the recorder service.
+    """
+    entity_registry = er.async_get(hass)
+    entity_ids = [
+        entry.entity_id
+        for entry in er.async_entries_for_device(entity_registry, device_entry.id)
+    ]
+    if not entity_ids:
+        return
+
+    if not hass.services.has_service("recorder", "purge_entities"):
+        _LOGGER.debug("Recorder purge_entities unavailable; skipping history purge")
+        return
+
+    try:
+        await hass.services.async_call(
+            "recorder",
+            "purge_entities",
+            {
+                "entity_id": entity_ids,
+                "keep_days": 0,
+            },
+            blocking=True,
+        )
+        _LOGGER.debug(
+            "Purged history for %d entities of device %s",
+            len(entity_ids),
+            device_entry.id,
+        )
+    except Exception as err:  # noqa: BLE001 - best-effort; delete must continue
+        _LOGGER.warning(
+            "Could not purge history for device %s: %s",
+            device_entry.name or device_entry.id,
+            err,
+        )
+
+
 async def async_remove_config_entry_device(
     hass: HomeAssistant,
     config_entry: EasywaveConfigEntry,
@@ -169,6 +217,9 @@ async def async_remove_config_entry_device(
         devices = subentry.data.get(CONF_DEVICES)
         if not isinstance(devices, dict) or easywave_id not in devices:
             continue
+
+        await _async_purge_device_history(hass, device_entry)
+
         updated_devices = dict(devices)
         del updated_devices[easywave_id]
         if updated_devices:

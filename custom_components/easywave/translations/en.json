@@ -140,7 +140,7 @@
         },
         "receiver_kind": {
           "title": "Operating Mode",
-          "description": "Select how this Easywave receiver should be controlled from Home Assistant.",
+          "description": "Which operating mode would you like to use?",
           "menu_options": {
             "receiver_kind_impulse": "PULSE (1-Button)",
             "receiver_kind_switch": "ON/OFF (2-Button)",
@@ -150,12 +150,12 @@
             "receiver_kind_universal": "UNIVERSAL (4-Button)"
           },
           "menu_option_descriptions": {
-            "receiver_kind_impulse": "Stateless toggle via a single button press (PULSE).",
-            "receiver_kind_switch": "Optimistic ON/OFF switch (button A = On, B = Off).",
-            "receiver_kind_cover": "Optimistic cover without stop (A = Open, B = Close).",
-            "receiver_kind_motor": "Optimistic cover with stop (A = Open, B = Close, C = Stop).",
-            "receiver_kind_heating": "Heating ON/OFF switch with repeating telegrams.",
-            "receiver_kind_universal": "Four independent button codes (A–D)."
+            "receiver_kind_impulse": "A short switching impulse of 1s is triggered.",
+            "receiver_kind_switch": "The relay output of the receiver is switched specifically ON or OFF.",
+            "receiver_kind_cover": "The relay output of the receiver is switched specifically UP or DOWN.",
+            "receiver_kind_motor": "Specific commands for moving or stopping tubular motors are sent.",
+            "receiver_kind_heating": "The relay output of the receiver is switched specifically ON or OFF. The last state is resent every 4 hours.",
+            "receiver_kind_universal": "Switching impulses can be triggered for all 4 usable transmit codes."
           }
         }
       }

@@ -140,7 +140,7 @@
         },
         "receiver_kind": {
           "title": "Betriebsart",
-          "description": "Wählen Sie, wie dieser Easywave-Empfänger aus Home Assistant gesteuert werden soll.",
+          "description": "Welche Betriebsart möchten Sie nutzen?",
           "menu_options": {
             "receiver_kind_impulse": "IMPULS (1-Taste)",
             "receiver_kind_switch": "EIN/AUS (2-Tasten)",
@@ -150,12 +150,12 @@
             "receiver_kind_universal": "UNIVERSAL (4-Tasten)"
           },
           "menu_option_descriptions": {
-            "receiver_kind_impulse": "Zustandsloses Umschalten per Tastendruck (IMPULS).",
-            "receiver_kind_switch": "Optimistischer EIN/AUS-Schalter (Taste A = Ein, B = Aus).",
-            "receiver_kind_cover": "Optimistischer Rollladen ohne Stopp (A = Auf, B = Zu).",
-            "receiver_kind_motor": "Optimistischer Rollladen mit Stopp (A = Auf, B = Zu, C = Stopp).",
-            "receiver_kind_heating": "Heizungs-Schalter EIN/AUS mit wiederholenden Telegrammen.",
-            "receiver_kind_universal": "Vier unabhängige Tastencodes (A–D)."
+            "receiver_kind_impulse": "Es wird ein kurzer Schaltimpuls von 1s ausgelöst.",
+            "receiver_kind_switch": "Der Relaisausgang des Empfängers wird gezielt EIN oder AUS geschalten.",
+            "receiver_kind_cover": "Der Relaisausgang des Empfängers wird gezielt nach AUF oder ZU geschaltet.",
+            "receiver_kind_motor": "Es werden gezielte Befehle für das Verfahren oder Stoppen von Rohrmotoren versendet.",
+            "receiver_kind_heating": "Der Relaisausgang des Empfängers wird gezielt EIN oder AUS geschalten. Der letzte Zustand wird alle 4h erneut gesendet.",
+            "receiver_kind_universal": "Es können Schaltimpulse für alle 4 verwendbaren Sendecodes ausgelöst werden."
           }
         }
       }
