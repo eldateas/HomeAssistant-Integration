@@ -26,6 +26,7 @@ from .const import (
     CONF_EWNEO_INDEX,
     CONF_GATEWAY_SERIAL,
     CONF_GROUPING_MODE,
+    CONF_JSON_MIGRATION_DONE,
     CONF_OPERATING_MODE,
     CONF_OPERATING_TYPE,
     CONF_RECEIVER_KIND,
@@ -363,6 +364,10 @@ async def async_migrate_json_devices(
 
     Returns a count dict of migrated device types. Automations/triggers are
     intentionally not migrated — users recreate them against the new entities.
+
+    After the first run, ``CONF_JSON_MIGRATION_DONE`` is set so archived files
+    under ``config/easywave/migrated/`` cannot recreate devices when the user
+    deletes the integration or all bucket subentries.
     """
     counts = {
         ENTRY_TYPE_TRANSMITTER: 0,
@@ -372,8 +377,21 @@ async def async_migrate_json_devices(
         "skipped": 0,
     }
 
+    def _mark_migration_done() -> None:
+        if entry.data.get(CONF_JSON_MIGRATION_DONE):
+            return
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_JSON_MIGRATION_DONE: True},
+        )
+
+    if entry.data.get(CONF_JSON_MIGRATION_DONE):
+        _LOGGER.debug("JSON migration already completed; skipping")
+        return counts
+
     if get_devices(entry):
         _LOGGER.debug("Subentries already contain devices; skipping JSON migration")
+        _mark_migration_done()
         return counts
 
     combined = await hass.async_add_executor_job(_load_legacy_device_maps, hass)
@@ -382,6 +400,7 @@ async def async_migrate_json_devices(
             "No legacy Easywave JSON devices found under %s (or migrated/)",
             _easywave_dir(hass),
         )
+        _mark_migration_done()
         return counts
 
     buckets: dict[str, dict[str, dict[str, Any]]] = {
@@ -463,4 +482,5 @@ async def async_migrate_json_devices(
             },
         )
 
+    _mark_migration_done()
     return counts

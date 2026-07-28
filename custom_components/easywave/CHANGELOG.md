@@ -1,5 +1,15 @@
 # Easywave Integration Changelog
 
+## 0.7.3 — Clean delete for integration and subentries
+
+### Fixed
+- Deleting the integration or a device-bucket subentry no longer revives devices from archived JSON under `config/easywave/migrated/`.
+- Removed devices are purged from recorder/logbook history, removed from the device registry, and not restored from registry tombstones.
+
+### Changed
+- One-shot JSON migration sets `json_migration_done` on the hub entry after the first run.
+- Removing the integration deletes the `config/easywave` data directory (live + migrated archives).
+
 ## 0.7.2 — Device info, translations, and delete cleanup
 
 ### Fixed
