@@ -1,9 +1,18 @@
 # Easywave Integration Changelog
 
-## 0.7.2 — HA 2026.3 subentry compatibility
+## 0.7.2 — Device info, translations, and delete cleanup
 
 ### Fixed
 - Crash on setup under Home Assistant **2026.3.x**: `ConfigEntry.get_subentries_of_type` does not exist yet (added later). Use a compatible iterator over `entry.subentries` so migration and device buckets work on the advertised minimum version.
+- Receiver operating-mode menu texts no longer use developer jargon (“Optimistic …”); wording matches **0.6.x** again (DE/EN/FR).
+- Receiver learn flow again shows the prepare → send Code A → LED acknowledgement steps for **all** receiver kinds (was skipping straight to naming).
+
+### Changed
+- Device **model** strings in the device info panel match **0.6.10** again (localized type designation, e.g. `Easywave Empfänger, EIN/AUS`). Radio serial numbers are not shown on child devices.
+- Manufacturer label (“von Eldat” / “by ELDAT”) is no longer set on child devices.
+
+### Added
+- When deleting a device via the three-dot menu, **recorder/logbook history** for that device’s entities is purged (`keep_days: 0`), as in 0.6.10. Storage remains CORE-compatible.
 
 ## 0.7.1 — Fix 0.6.10 hub upgrade
 

@@ -120,6 +120,7 @@
     "easywave_receiver": {
       "abort": {
         "already_configured": "Gerät ist bereits konfiguriert",
+        "code_send_failed": "Das Einlern-Telegramm konnte nicht an den Empfänger gesendet werden. Bitte erneut versuchen.",
         "device_added": "Das Gerät wurde erfolgreich hinzugefügt.",
         "device_not_connected": "Der RX11 USB Transceiver ist nicht verbunden.\n\nZum Hinzufügen eines neuen Geräts muss der RX11 erreichbar sein.\nBitte prüfen Sie die USB-Verbindung.",
         "index_serial_unavailable": "Die Sender-Seriennummer für den zugewiesenen Index konnte nicht gelesen werden.",
@@ -133,9 +134,17 @@
       "step": {
         "receiver_confirm": {
           "title": "Einlernen erfolgreich",
-          "description": "Versetzen Sie den physischen Empfänger in den Programmiermodus und geben Sie einen Namen für das neue Gerät ein:",
+          "description": "Der Empfänger wurde erfolgreich in der Betriebsart **{receiver_type}** eingelernt!\n\nStellen Sie sicher, dass der Programmiermodus am Empfänger beendet wurde, die LED darf nicht mehr blinken.\n\nVergeben Sie einen Namen für das neue Gerät:",
           "data": {
             "title": "Name"
+          }
+        },
+        "receiver_confirm_learning": {
+          "title": "Einlernen bestätigen",
+          "description": "Hat die LED am Empfänger für 4s durchgängig geleuchtet bzw. wurde der Einlernvorgang vom Empfänger quittiert? (s. Bedienungsanleitung)",
+          "menu_options": {
+            "receiver_confirm": "Ja",
+            "receiver_retry_prepare": "Nein"
           }
         },
         "receiver_kind": {
@@ -157,6 +166,36 @@
             "receiver_kind_heating": "Der Relaisausgang des Empfängers wird gezielt EIN oder AUS geschalten. Der letzte Zustand wird alle 4h erneut gesendet.",
             "receiver_kind_universal": "Es können Schaltimpulse für alle 4 verwendbaren Sendecodes ausgelöst werden."
           }
+        },
+        "receiver_prepare": {
+          "title": "Empfänger einlernen",
+          "description": "Bringen Sie Ihren Empfänger bitte jetzt in den Programmiermodus für **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf „Weiter“, sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhythmus blinkt.",
+          "menu_options": {
+            "receiver_send_code": "Weiter",
+            "receiver_kind": "Zurück"
+          }
+        },
+        "receiver_prepare_heating": {
+          "title": "Empfänger einlernen",
+          "description": "Bringen Sie Ihren Empfänger für Heizungssteuerung bitte jetzt in den Programmiermodus **{operating_mode}**.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf „Weiter“, sobald sich der Empfänger im richtigen Programmiermodus befindet bzw. die LED im richtigen Rhythmus blinkt.",
+          "menu_options": {
+            "receiver_send_code": "Weiter",
+            "receiver_kind": "Zurück"
+          }
+        },
+        "receiver_prepare_universal": {
+          "title": "Empfänger einlernen",
+          "description": "Bringen Sie Ihren Empfänger bitte jetzt in den Programmiermodus.\nBetätigen Sie hierfür die Programmiertaste am Empfänger.\n\nFür eine Anleitung, wie Sie den richtigen Programmiermodus auswählen, konsultieren Sie bitte die Bedienungsanleitung des Empfängers.\n\nBitte klicken Sie auf „Weiter“, sobald sich der Empfänger im Programmiermodus befindet bzw. die LED blinkt.",
+          "menu_options": {
+            "receiver_send_code": "Weiter",
+            "receiver_kind": "Zurück"
+          }
+        },
+        "receiver_retry_prepare": {
+          "title": "Erneut versuchen"
+        },
+        "receiver_send_code": {
+          "title": "Einlern-Telegramm senden"
         }
       }
     },

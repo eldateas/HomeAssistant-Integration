@@ -120,6 +120,7 @@
     "easywave_receiver": {
       "abort": {
         "already_configured": "Device is already configured",
+        "code_send_failed": "Could not send the learn telegram to the receiver. Please try again.",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
         "index_serial_unavailable": "Could not read the transmitter serial for the allocated index.",
@@ -135,8 +136,16 @@
           "data": {
             "title": "Name"
           },
-          "description": "Put the physical receiver into programming mode, then enter a name for the new device:",
+          "description": "The receiver was successfully learned in operating mode **{receiver_type}**!\n\nMake sure the programming mode on the receiver has ended, the LED should no longer be flashing.\n\nEnter a name for the new device:",
           "title": "Learning Successful"
+        },
+        "receiver_confirm_learning": {
+          "description": "Did the LED on the receiver light up continuously for 4s or was the learning process acknowledged by the receiver? (see operating manual)",
+          "menu_options": {
+            "receiver_confirm": "Yes",
+            "receiver_retry_prepare": "No"
+          },
+          "title": "Confirm Learning"
         },
         "receiver_kind": {
           "title": "Operating Mode",
@@ -157,6 +166,36 @@
             "receiver_kind_heating": "The relay output of the receiver is switched specifically ON or OFF. The last state is resent every 4 hours.",
             "receiver_kind_universal": "Switching impulses can be triggered for all 4 usable transmit codes."
           }
+        },
+        "receiver_prepare": {
+          "description": "Please put your receiver into programming mode for **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick Continue once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+          "menu_options": {
+            "receiver_send_code": "Continue",
+            "receiver_kind": "Back"
+          },
+          "title": "Learn Receiver"
+        },
+        "receiver_prepare_heating": {
+          "description": "Please put your heating control receiver into programming mode **{operating_mode}** now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick Continue once the receiver is in the correct programming mode or the LED is flashing in the correct rhythm.",
+          "menu_options": {
+            "receiver_send_code": "Continue",
+            "receiver_kind": "Back"
+          },
+          "title": "Learn Receiver"
+        },
+        "receiver_prepare_universal": {
+          "description": "Please put your receiver into programming mode now.\nPress the programming button on the receiver.\n\nFor instructions on how to select the correct programming mode, please consult the receiver's operating manual.\n\nClick Continue once the receiver is in programming mode or the LED is flashing.",
+          "menu_options": {
+            "receiver_send_code": "Continue",
+            "receiver_kind": "Back"
+          },
+          "title": "Learn Receiver"
+        },
+        "receiver_retry_prepare": {
+          "title": "Try again"
+        },
+        "receiver_send_code": {
+          "title": "Send learn telegram"
         }
       }
     },

@@ -120,6 +120,7 @@
     "easywave_receiver": {
       "abort": {
         "already_configured": "L'appareil est déjà configuré",
+        "code_send_failed": "Impossible d'envoyer le télégramme d'apprentissage au récepteur. Veuillez réessayer.",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
         "index_serial_unavailable": "Could not read the transmitter serial for the allocated index.",
@@ -135,8 +136,16 @@
           "data": {
             "title": "Name"
           },
-          "description": "Put the physical receiver into programming mode, then enter a name for the new device:",
-          "title": "Learning Successful"
+          "description": "Le récepteur a été appris avec succès en mode de fonctionnement **{receiver_type}** !\n\nAssurez-vous que le mode de programmation du récepteur est terminé, la LED ne doit plus clignoter.\n\nEntrez un nom pour le nouvel appareil :",
+          "title": "Apprentissage réussi"
+        },
+        "receiver_confirm_learning": {
+          "description": "La LED du récepteur s'est-elle allumée en continu pendant 4s ou le processus d'apprentissage a-t-il été confirmé par le récepteur ? (voir le manuel d'utilisation)",
+          "menu_options": {
+            "receiver_confirm": "Oui",
+            "receiver_retry_prepare": "Non"
+          },
+          "title": "Confirmer l'apprentissage"
         },
         "receiver_kind": {
           "title": "Mode de fonctionnement",
@@ -157,6 +166,36 @@
             "receiver_kind_heating": "La sortie relais du récepteur est commutée spécifiquement ON ou OFF. Le dernier état est renvoyé toutes les 4 heures.",
             "receiver_kind_universal": "Des impulsions de commutation peuvent être déclenchées pour les 4 codes d'émission utilisables."
           }
+        },
+        "receiver_prepare": {
+          "description": "Veuillez mettre votre récepteur en mode de programmation pour **{operating_mode}** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour les instructions sur la sélection du bon mode de programmation, veuillez consulter le manuel d'utilisation du récepteur.\n\nCliquez sur Continuer une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
+          "menu_options": {
+            "receiver_send_code": "Continuer",
+            "receiver_kind": "Retour"
+          },
+          "title": "Apprendre le récepteur"
+        },
+        "receiver_prepare_heating": {
+          "description": "Veuillez mettre votre récepteur de contrôle de chauffage en mode de programmation **{operating_mode}** maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour les instructions sur la sélection du bon mode de programmation, veuillez consulter le manuel d'utilisation du récepteur.\n\nCliquez sur Continuer une fois que le récepteur est dans le bon mode de programmation ou que la LED clignote au bon rythme.",
+          "menu_options": {
+            "receiver_send_code": "Continuer",
+            "receiver_kind": "Retour"
+          },
+          "title": "Apprendre le récepteur"
+        },
+        "receiver_prepare_universal": {
+          "description": "Veuillez mettre votre récepteur en mode de programmation maintenant.\nAppuyez sur le bouton de programmation du récepteur.\n\nPour les instructions sur la sélection du bon mode de programmation, veuillez consulter le manuel d'utilisation du récepteur.\n\nCliquez sur Continuer une fois que le récepteur est en mode de programmation ou que la LED clignote.",
+          "menu_options": {
+            "receiver_send_code": "Continuer",
+            "receiver_kind": "Retour"
+          },
+          "title": "Apprendre le récepteur"
+        },
+        "receiver_retry_prepare": {
+          "title": "Réessayer"
+        },
+        "receiver_send_code": {
+          "title": "Envoyer le télégramme d'apprentissage"
         }
       }
     },
