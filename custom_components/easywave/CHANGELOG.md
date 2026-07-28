@@ -1,6 +1,6 @@
 # Easywave Integration Changelog
 
-## 0.7.3 — Clean delete for integration and subentries
+## 0.7.4 — Clean delete for integration and subentries
 
 ### Fixed
 - Deleting the integration or a device-bucket subentry no longer revives devices from archived JSON under `config/easywave/migrated/`.
