@@ -1,5 +1,14 @@
 # Easywave Integration Changelog
 
+## 0.7.5 — Area selection when learning devices
+
+### Added
+- Optional **area** picker on the learn confirm step for transmitters, neo sensors, receivers, and neo actuators.
+- Best-effort preselection when Home Assistant provides an area in the flow context (e.g. add from an area).
+
+### Changed
+- The chosen area is applied once via the **device registry**; it is **not** stored in `CONF_DEVICES` bucket data, so HACS→CORE storage stays schema-compatible.
+
 ## 0.7.4 — Clean delete for integration and subentries
 
 ### Fixed

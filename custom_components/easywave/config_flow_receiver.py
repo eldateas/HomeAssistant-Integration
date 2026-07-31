@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.config_entries import ConfigSubentryFlow, SubentryFlowResult
 
 from .config_flow_learning import EasywaveDeviceFlowMixin
@@ -323,17 +321,13 @@ class EasywaveReceiverSubentryFlowHandler(
                 title=user_input["title"],
                 unique_id=unique_id,
                 data=data,
+                area_id=self._area_id_from_input(user_input),
             )
 
         return self.async_show_form(
             step_id="receiver_confirm",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        "title",
-                        default=self._next_default_name(ENTRY_TYPE_RECEIVER),
-                    ): str,
-                }
+            data_schema=self._confirm_name_area_schema(
+                title_default=self._next_default_name(ENTRY_TYPE_RECEIVER),
             ),
             description_placeholders={
                 "receiver_type": self._label(

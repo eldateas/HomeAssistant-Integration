@@ -46,7 +46,11 @@
           "title": "Einlernen erfolgreich",
           "description": "Der neo Empfänger wurde erfolgreich gepaart ({device_type_name}, {channels} Kanal/Kanäle).\n\nGeben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Bereich"
+          },
+          "data_description": {
+            "area_id": "Optionaler Bereich für dieses Gerät."
           }
         },
         "actuator_intro": {
@@ -102,10 +106,12 @@
           "title": "Einlernen erfolgreich",
           "description": "Der Sensor wurde erfolgreich eingelernt!\n\nErkannte Sensoren:\n{sensor_list}\n\nGeben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Bereich"
           },
           "data_description": {
-            "title": "Der Name für diesen Easywave neo Sensor."
+            "title": "Der Name für diesen Easywave neo Sensor.",
+            "area_id": "Optionaler Bereich für dieses Gerät."
           }
         },
         "sensor_learn_intro": {
@@ -136,7 +142,11 @@
           "title": "Einlernen erfolgreich",
           "description": "Der Empfänger wurde erfolgreich in der Betriebsart **{receiver_type}** eingelernt!\n\nStellen Sie sicher, dass der Programmiermodus am Empfänger beendet wurde, die LED darf nicht mehr blinken.\n\nVergeben Sie einen Namen für das neue Gerät:",
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Bereich"
+          },
+          "data_description": {
+            "area_id": "Optionaler Bereich für dieses Gerät."
           }
         },
         "receiver_confirm_learning": {
@@ -248,7 +258,11 @@
           "title": "Einlernen erfolgreich",
           "description": "Der Sender wurde erfolgreich eingelernt!\n\nGeben Sie einen Namen für das neue Gerät ein:",
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Bereich"
+          },
+          "data_description": {
+            "area_id": "Optionaler Bereich für dieses Gerät."
           }
         },
         "transmitter_grouping": {

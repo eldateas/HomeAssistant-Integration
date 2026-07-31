@@ -39,6 +39,10 @@ class EasywaveDeviceEntry:
     subentry_id: str
 
 
+# hass.data[DOMAIN]["pending_areas"][device_id] → one-shot area from learn confirm
+_PENDING_AREAS = "pending_areas"
+
+
 def _hass_language(hass: Any) -> str | None:
     """Return the Home Assistant UI language when available."""
     if hass is None:
@@ -46,12 +50,41 @@ def _hass_language(hass: Any) -> str | None:
     return getattr(getattr(hass, "config", None), "language", None)
 
 
-def _clear_device_manufacturer(hass: HomeAssistant, device_id: str) -> None:
-    """Remove a previously stored manufacturer so HA does not show 'by …'."""
+def register_pending_area(
+    hass: HomeAssistant, device_id: str, area_id: str
+) -> None:
+    """Queue an area to apply once when the device registry entry is created."""
+    hass.data.setdefault(DOMAIN, {}).setdefault(_PENDING_AREAS, {})[device_id] = (
+        area_id
+    )
+
+
+def _pop_pending_area(hass: HomeAssistant, device_id: str) -> str | None:
+    """Return and clear a pending learn-flow area for ``device_id``."""
+    pending = hass.data.get(DOMAIN, {}).get(_PENDING_AREAS)
+    if not isinstance(pending, dict):
+        return None
+    area_id = pending.pop(device_id, None)
+    return area_id if isinstance(area_id, str) and area_id else None
+
+
+def _finalize_device_registry(hass: HomeAssistant, device_id: str) -> None:
+    """Clear manufacturer and apply a one-shot pending area from the learn flow."""
     device_registry = dr.async_get(hass)
     device = device_registry.async_get_device(identifiers={(DOMAIN, device_id)})
-    if device is not None and device.manufacturer is not None:
-        device_registry.async_update_device(device.id, manufacturer=None)
+    if device is None:
+        return
+
+    updates: dict[str, Any] = {}
+    if device.manufacturer is not None:
+        updates["manufacturer"] = None
+
+    area_id = _pop_pending_area(hass, device_id)
+    if area_id and device.area_id is None:
+        updates["area_id"] = area_id
+
+    if updates:
+        device_registry.async_update_device(device.id, **updates)
 
 
 class EasywaveTransmitterEntity(Entity):
@@ -95,7 +128,7 @@ class EasywaveTransmitterEntity(Entity):
         """Subscribe to coordinator updates and register for telegram dispatch."""
         self._attr_device_info = self._build_device_info(_hass_language(self.hass))
         await super().async_added_to_hass()
-        _clear_device_manufacturer(self.hass, self._device_id)
+        _finalize_device_registry(self.hass, self._device_id)
         self.async_on_remove(
             self._coordinator.async_add_listener(self.async_write_ha_state)
         )
@@ -142,6 +175,7 @@ class EasywaveNeoSensorEntity(Entity):
         self._entry = entry
         self._sensor_serial: str = device.data[CONF_SENSOR_SERIAL]
         self._device_id: str = device.device_id
+        self._device_data = device.data
         self._device_title = device.title
 
         self._attr_unique_id = f"{device.device_id}_{unique_id_suffix}"
@@ -166,7 +200,7 @@ class EasywaveNeoSensorEntity(Entity):
         """Subscribe to coordinator updates and register for telegram dispatch."""
         self._attr_device_info = self._build_device_info(_hass_language(self.hass))
         await super().async_added_to_hass()
-        _clear_device_manufacturer(self.hass, self._device_id)
+        _finalize_device_registry(self.hass, self._device_id)
         self.async_on_remove(
             self._coordinator.async_add_listener(self.async_write_ha_state)
         )
@@ -232,7 +266,7 @@ class EasywaveReceiverEntity(Entity):
         """Subscribe to coordinator updates."""
         self._attr_device_info = self._build_device_info(_hass_language(self.hass))
         await super().async_added_to_hass()
-        _clear_device_manufacturer(self.hass, self._device_id)
+        _finalize_device_registry(self.hass, self._device_id)
         self.async_on_remove(
             self._coordinator.async_add_listener(self.async_write_ha_state)
         )
@@ -314,7 +348,7 @@ class EasywaveNeoActuatorEntity(Entity):
         """Subscribe to coordinator updates and register for EWB dispatch."""
         self._attr_device_info = self._build_device_info(_hass_language(self.hass))
         await super().async_added_to_hass()
-        _clear_device_manufacturer(self.hass, self._device_id)
+        _finalize_device_registry(self.hass, self._device_id)
         self.async_on_remove(
             self._coordinator.async_add_listener(self.async_write_ha_state)
         )

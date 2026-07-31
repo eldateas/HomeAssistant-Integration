@@ -5,15 +5,19 @@ from collections.abc import Mapping
 import time
 from typing import TYPE_CHECKING, Any
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.const import CONF_DEVICES
 from homeassistant.helpers import translation
+from homeassistant.helpers.selector import AreaSelector
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_ACTUATOR_SERIAL,
+    CONF_AREA_ID,
     CONF_DEVICE_TITLE,
     CONF_ENTRY_TYPE,
     CONF_RECEIVER_SERIAL,
@@ -34,6 +38,8 @@ from .devices import (
     get_devices,
     iter_subentries_of_type,
 )
+from .entity import register_pending_area
+
 
 class EasywaveDeviceFlowMixin:
     """Shared helpers and learning-timeout steps for device flows."""
@@ -95,6 +101,42 @@ class EasywaveDeviceFlowMixin:
         self._learn_back_step = ""
         self._accept_telegram = None
 
+    def _suggested_area_id(self) -> str | None:
+        """Return an area id suggested by the flow context, if any.
+
+        Home Assistant may pass ``area_id`` when a device is added from an
+        area; the subentry flow API does not always forward it, so this is
+        best-effort.
+        """
+        context = getattr(self, "context", None)
+        if not isinstance(context, Mapping):
+            return None
+        for key in ("area_id", "suggested_area_id"):
+            value = context.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _confirm_name_area_schema(self, *, title_default: str) -> vol.Schema:
+        """Return the shared name + optional area schema for confirm steps."""
+        fields: dict[Any, Any] = {
+            vol.Required("title", default=title_default): str,
+        }
+        suggested = self._suggested_area_id()
+        if suggested:
+            fields[vol.Optional(CONF_AREA_ID, default=suggested)] = AreaSelector()
+        else:
+            fields[vol.Optional(CONF_AREA_ID)] = AreaSelector()
+        return vol.Schema(fields)
+
+    @staticmethod
+    def _area_id_from_input(user_input: Mapping[str, Any]) -> str | None:
+        """Return a cleaned area id from confirm-step user input."""
+        area_id = user_input.get(CONF_AREA_ID)
+        if isinstance(area_id, str) and area_id.strip():
+            return area_id.strip()
+        return None
+
     def _get_coordinator(self) -> Any | None:
         """Return the gateway coordinator or None."""
         entry = self._get_entry()
@@ -141,14 +183,25 @@ class EasywaveDeviceFlowMixin:
         )
 
     async def _async_save_device(
-        self, *, title: str, unique_id: str, data: dict[str, Any]
+        self,
+        *,
+        title: str,
+        unique_id: str,
+        data: dict[str, Any],
+        area_id: str | None = None,
     ) -> SubentryFlowResult:
-        """Persist a learned device in the matching device-type bucket subentry."""
+        """Persist a learned device in the matching device-type bucket subentry.
+
+        ``area_id`` is applied once via the device registry (not stored in
+        ``CONF_DEVICES``) so HACS→CORE storage stays schema-compatible.
+        """
         entry = self._get_entry()
         entry_type = data[CONF_ENTRY_TYPE]
         bucket_type = ENTRY_TYPE_TO_SUBENTRY_TYPE[entry_type]
         bucket_unique_id = bucket_subentry_unique_id(entry.entry_id, bucket_type)
         device_record = {CONF_DEVICE_TITLE: title, **data}
+        if area_id:
+            register_pending_area(self.hass, unique_id, area_id)
         bucket = self._get_bucket_subentry(bucket_type)
 
         if bucket is None:

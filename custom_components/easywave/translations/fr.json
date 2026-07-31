@@ -44,10 +44,14 @@
       "step": {
         "actuator_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Zone"
           },
           "description": "The neo actuator was successfully paired ({device_type_name}, {channels} channel(s)).\n\nEnter a name for the new device:",
-          "title": "Learning Successful"
+          "title": "Learning Successful",
+          "data_description": {
+            "area_id": "Zone facultative pour cet appareil."
+          }
         },
         "actuator_intro": {
           "title": "Learn Receiver",
@@ -100,10 +104,12 @@
         },
         "sensor_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Zone"
           },
           "data_description": {
-            "title": "The name for this Easywave neo sensor."
+            "title": "The name for this Easywave neo sensor.",
+            "area_id": "Zone facultative pour cet appareil."
           },
           "description": "The sensor was successfully learned!\n\nDetected sensors:\n{sensor_list}\n\nEnter a name for the new device:",
           "title": "Learning Successful"
@@ -134,10 +140,14 @@
       "step": {
         "receiver_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Zone"
           },
           "description": "Le récepteur a été appris avec succès en mode de fonctionnement **{receiver_type}** !\n\nAssurez-vous que le mode de programmation du récepteur est terminé, la LED ne doit plus clignoter.\n\nEntrez un nom pour le nouvel appareil :",
-          "title": "Apprentissage réussi"
+          "title": "Apprentissage réussi",
+          "data_description": {
+            "area_id": "Zone facultative pour cet appareil."
+          }
         },
         "receiver_confirm_learning": {
           "description": "La LED du récepteur s'est-elle allumée en continu pendant 4s ou le processus d'apprentissage a-t-il été confirmé par le récepteur ? (voir le manuel d'utilisation)",
@@ -246,10 +256,14 @@
         },
         "transmitter_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Zone"
           },
           "description": "The transmitter was successfully learned!\n\nEnter a name for the new device:",
-          "title": "Learning Successful"
+          "title": "Learning Successful",
+          "data_description": {
+            "area_id": "Zone facultative pour cet appareil."
+          }
         },
         "transmitter_grouping": {
           "title": "Control Mode",

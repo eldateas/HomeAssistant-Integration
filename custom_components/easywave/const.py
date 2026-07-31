@@ -40,6 +40,8 @@ CONF_USB_PRODUCT: Final = "usb_product"
 # Set after the one-shot JSON→subentry migration so archived files under
 # config/easywave/migrated/ cannot revive devices after the user deletes them.
 CONF_JSON_MIGRATION_DONE: Final = "json_migration_done"
+# Form field key for AreaSelector in learn confirm steps (not stored in CONF_DEVICES).
+CONF_AREA_ID: Final = "area_id"
 
 ALLOWED_COUNTRIES_868MHZ: Final = frozenset(
     {

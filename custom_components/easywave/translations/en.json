@@ -44,10 +44,14 @@
       "step": {
         "actuator_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Area"
           },
           "description": "The neo actuator was successfully paired ({device_type_name}, {channels} channel(s)).\n\nEnter a name for the new device:",
-          "title": "Learning Successful"
+          "title": "Learning Successful",
+          "data_description": {
+            "area_id": "Optional area for this device."
+          }
         },
         "actuator_intro": {
           "title": "Learn Receiver",
@@ -100,10 +104,12 @@
         },
         "sensor_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Area"
           },
           "data_description": {
-            "title": "The name for this Easywave neo sensor."
+            "title": "The name for this Easywave neo sensor.",
+            "area_id": "Optional area for this device."
           },
           "description": "The sensor was successfully learned!\n\nDetected sensors:\n{sensor_list}\n\nEnter a name for the new device:",
           "title": "Learning Successful"
@@ -134,10 +140,14 @@
       "step": {
         "receiver_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Area"
           },
           "description": "The receiver was successfully learned in operating mode **{receiver_type}**!\n\nMake sure the programming mode on the receiver has ended, the LED should no longer be flashing.\n\nEnter a name for the new device:",
-          "title": "Learning Successful"
+          "title": "Learning Successful",
+          "data_description": {
+            "area_id": "Optional area for this device."
+          }
         },
         "receiver_confirm_learning": {
           "description": "Did the LED on the receiver light up continuously for 4s or was the learning process acknowledged by the receiver? (see operating manual)",
@@ -246,10 +256,14 @@
         },
         "transmitter_confirm": {
           "data": {
-            "title": "Name"
+            "title": "Name",
+            "area_id": "Area"
           },
           "description": "The transmitter was successfully learned!\n\nEnter a name for the new device:",
-          "title": "Learning Successful"
+          "title": "Learning Successful",
+          "data_description": {
+            "area_id": "Optional area for this device."
+          }
         },
         "transmitter_grouping": {
           "title": "Control Mode",

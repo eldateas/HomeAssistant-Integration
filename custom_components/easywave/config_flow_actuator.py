@@ -4,8 +4,6 @@ import logging
 import time
 from typing import Any
 
-import voluptuous as vol
-
 from homeassistant.config_entries import ConfigSubentryFlow, SubentryFlowResult
 
 from .config_flow_learning import EasywaveDeviceFlowMixin
@@ -194,6 +192,7 @@ class EasywaveNeoActuatorSubentryFlowHandler(
                 title=title,
                 unique_id=unique_id,
                 data=data,
+                area_id=self._area_id_from_input(user_input),
             )
 
         type_label = self._type_label(type_code)
@@ -204,13 +203,8 @@ class EasywaveNeoActuatorSubentryFlowHandler(
         )
         return self.async_show_form(
             step_id="actuator_confirm",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        "title",
-                        default=f"Easywave neo {type_label} {count + 1}",
-                    ): str,
-                }
+            data_schema=self._confirm_name_area_schema(
+                title_default=f"Easywave neo {type_label} {count + 1}",
             ),
             description_placeholders={
                 "device_type_name": type_label,
