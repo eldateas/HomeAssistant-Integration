@@ -30,6 +30,8 @@ from .const import (
     CONF_RX11_INDEX,
     DEVICE_SCAN_INTERVAL,
     DEVICE_TYPE_CODE_MOTOR_TYPES,
+    DEVICE_TYPE_CODE_MULTI_MOTOR_TYPES,
+    DEVICE_TYPE_CODE_MULTI_SWITCH_TYPES,
     DOMAIN,
     ENTRY_TYPE_NEO_ACTUATOR,
     ENTRY_TYPE_RECEIVER,
@@ -371,8 +373,17 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return True
         type_code = int(getattr(entity, "device_type_code", 0) or 0)
         if type_code in DEVICE_TYPE_CODE_MOTOR_TYPES:
+            # Dual/quad summary mode 0 carries activity for every channel.
+            if (
+                type_code in DEVICE_TYPE_CODE_MULTI_MOTOR_TYPES
+                and int(mode) == 0
+            ):
+                return True
             return int(mode) == neo_motor_full_mode(type_code, int(channel))
-        return int(channel) == int(mode)
+        # Dual/quad switch ON/OFF is always mode 0 and carries every channel.
+        if type_code in DEVICE_TYPE_CODE_MULTI_SWITCH_TYPES:
+            return int(mode) == 0
+        return True
 
     @callback
     def _dispatch_telegram(self, event: EwbRcvEvent) -> None:
@@ -636,6 +647,11 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Motors use per-channel full modes (single: 0, dual: 2/10, quad: 2/10/18/26)
         so ``runtime_measured`` (bit 7) is read from each channel's MotorFullState.
+        Position could also be read from multi-motor summary mode 0, but that
+        path does not carry the runtime-measurement flag needed for SET_POSITION.
+
+        Switches and dimmers use mode 0 (on/off or level). Multi-channel switches
+        also report every channel in a single mode-0 summary.
         """
         if self.is_offline:
             return
@@ -658,7 +674,8 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     neo_motor_full_mode(type_code_int, ch) for ch in range(channels)
                 ]
             else:
-                query_modes = list(range(max(1, channels)))
+                # Switch (incl. dual/quad) and dimmer: state lives in mode 0.
+                query_modes = [0]
             for mode in query_modes:
                 await self.async_query_actuator_state(
                     gateway_serial=str(gateway_serial),

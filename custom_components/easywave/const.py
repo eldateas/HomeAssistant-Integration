@@ -253,6 +253,22 @@ DEVICE_TYPE_CODE_MOTOR_TYPES: Final = frozenset(
     }
 )
 
+# Dual/quad switches share mode 0 (MultiSwitchOnOffState / MultiSwitchChangeCommand).
+DEVICE_TYPE_CODE_MULTI_SWITCH_TYPES: Final = frozenset(
+    {
+        DEVICE_TYPE_CODE_DUAL_SWITCH,
+        DEVICE_TYPE_CODE_QUAD_SWITCH,
+    }
+)
+
+# Dual/quad motors: move commands use summary mode 0 (MultiMotorMoveCommand).
+DEVICE_TYPE_CODE_MULTI_MOTOR_TYPES: Final = frozenset(
+    {
+        DEVICE_TYPE_CODE_DUAL_MOTOR,
+        DEVICE_TYPE_CODE_QUAD_MOTOR,
+    }
+)
+
 # EWB mode for MotorFullState per 0-based channel (library dual/quad layout).
 DEVICE_TYPE_CODE_TO_MOTOR_FULL_MODES: Final = {
     DEVICE_TYPE_CODE_MOTOR: (0,),

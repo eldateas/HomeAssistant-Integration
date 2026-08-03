@@ -8,6 +8,10 @@ from easywave_home_control.codec import (
     SwitchOnOffState,
     SwitchPosition,
 )
+from easywave_home_control.codec.states import (
+    MultiSwitchChangeCommand,
+    MultiSwitchOnOffState,
+)
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.core import HomeAssistant
@@ -126,6 +130,28 @@ class EasywaveNeoSwitch(EasywaveNeoActuatorEntity, SwitchEntity):
         else:
             self._attr_translation_key = f"channel_{channel + 1}"
 
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Register for dispatch, then query mode 0 for current on/off state.
+
+        Coordinator bulk restore runs during setup before switch entities exist,
+        so each entity re-queries here (mode 0 covers single and multi-channel).
+        """
+        await super().async_added_to_hass()
+        self.hass.async_create_task(
+            self._async_query_initial_state(),
+            name=f"easywave_query_{self._attr_unique_id}",
+        )
+
+    async def _async_query_initial_state(self) -> None:
+        """EWB_QUERY_STATE mode 0 (SwitchOnOffState / MultiSwitchOnOffState)."""
+        await self._coordinator.async_query_actuator_state(
+            gateway_serial=self._gateway_serial,
+            actuator_serial=self._actuator_serial,
+            device_type_code=self._device_type_code,
+            mode=0,
+        )
+
     @property
     def icon(self) -> str:
         """Return switch icon."""
@@ -134,23 +160,45 @@ class EasywaveNeoSwitch(EasywaveNeoActuatorEntity, SwitchEntity):
     @override
     def handle_state(self, state: Any, *, mode: int = 0) -> None:
         """Update from parsed switch state."""
-        if self._channel is not None and int(mode) != int(self._channel):
-            return
         super().handle_state(state, mode=mode)
+
         if isinstance(state, SwitchOnOffState):
+            if self._channel is not None:
+                return
             self._attr_is_on = state.position == SwitchPosition.ON
+        elif isinstance(state, MultiSwitchOnOffState):
+            if self._channel is None:
+                return
+            # Library channel is 1-based; entity channel is 0-based.
+            target = int(self._channel) + 1
+            for channel_state in state.channels:
+                if int(channel_state.channel) == target:
+                    self._attr_is_on = channel_state.position == SwitchPosition.ON
+                    break
+            else:
+                return
+        else:
+            return
+
         self.async_write_ha_state()
+
+    def _switch_command(self, action: SwitchDesiredAction) -> Any:
+        """Build a single- or multi-channel switch change command."""
+        if self._channel is None:
+            return SwitchChangeCommand(action=action)
+        # Mode 0 always carries all channels; unset channels remain unchanged.
+        return MultiSwitchChangeCommand(
+            channels=((int(self._channel) + 1, action),)
+        )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the neo switch on."""
-        mode = self._channel or 0
         await self.async_change_state(
-            SwitchChangeCommand(action=SwitchDesiredAction.ON), mode=mode
+            self._switch_command(SwitchDesiredAction.ON), mode=0
         )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the neo switch off."""
-        mode = self._channel or 0
         await self.async_change_state(
-            SwitchChangeCommand(action=SwitchDesiredAction.OFF), mode=mode
+            self._switch_command(SwitchDesiredAction.OFF), mode=0
         )

@@ -1,6 +1,6 @@
 # Easywave Integration Changelog
 
-## 0.7.5 — Area selection when learning devices
+## 0.7.5 — Area selection and neo actuator fixes
 
 ### Added
 - Optional **area** picker on the learn confirm step for transmitters, neo sensors, receivers, and neo actuators.
@@ -8,6 +8,14 @@
 
 ### Changed
 - The chosen area is applied once via the **device registry**; it is **not** stored in `CONF_DEVICES` bucket data, so HACS→CORE storage stays schema-compatible.
+- Requires `easywave-home-control==0.3.1` (dual/quad motor summary exposes `position`).
+
+### Fixed
+- Dual/quad neo **switches**: send `MultiSwitchChangeCommand` on mode 0 (was `SwitchChangeCommand`).
+- Dual/quad neo **motors**: send `MultiMotorMoveCommand` on mode 0; read position from mode-0 summary via library 0.3.1.
+- Neo switch/dimmer **state restore** after restart: query mode 0 once entities exist (coordinator bulk restore ran too early).
+- Motors keep full-mode restore (`0` / `2` / `10` / `18` / `26`) for **runtime measurement** (`SET_POSITION`).
+- Gateway status sensor: use `async_listen` for `homeassistant_started` to avoid “Unable to remove unknown job listener” on unload.
 
 ## 0.7.4 — Clean delete for integration and subentries
 

@@ -51,6 +51,24 @@ class EasywaveNeoDimmer(EasywaveNeoActuatorEntity, LightEntity):
         self._attr_is_on = False
         self._attr_brightness = 0
 
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Register for dispatch, then query mode 0 for current level."""
+        await super().async_added_to_hass()
+        self.hass.async_create_task(
+            self._async_query_initial_state(),
+            name=f"easywave_query_{self._attr_unique_id}",
+        )
+
+    async def _async_query_initial_state(self) -> None:
+        """EWB_QUERY_STATE mode 0 (DimmerLevelState)."""
+        await self._coordinator.async_query_actuator_state(
+            gateway_serial=self._gateway_serial,
+            actuator_serial=self._actuator_serial,
+            device_type_code=self._device_type_code,
+            mode=0,
+        )
+
     @property
     def icon(self) -> str:
         """Return lightbulb icon."""

@@ -7,9 +7,9 @@ from easywave_home_control.codec import (
     MotorCommand,
     MotorFullState,
     MotorMoveCommand,
-)
-from easywave_home_control.codec.states import (
+    MotorSummaryChannelState,
     MultiMotorFullState,
+    MultiMotorMoveCommand,
     MultiMotorSummaryState,
 )
 
@@ -202,16 +202,42 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
             self._attr_translation_key = f"channel_{channel + 1}"
 
     def _command_mode(self) -> int:
-        """Return EWB mode for change/query commands on this channel."""
+        """Return EWB mode for change/query commands on this channel.
+
+        Single motors use full mode 0. Dual/quad move commands use summary
+        mode 0 (``MultiMotorMoveCommand``); full modes (2/10/…) remain for
+        per-channel query/state (``runtime_measured`` / ``MultiMotorFullState``).
+        """
+        if self._channel is not None:
+            return 0
         return neo_motor_full_mode(self._device_type_code, self._channel)
+
+    def _query_mode(self) -> int:
+        """Return EWB mode for full-state query on this channel.
+
+        Dual/quad position can also arrive via summary mode 0, but
+        ``runtime_measured`` (SET_POSITION) is only in the per-channel full
+        modes (2 / 10 / 18 / 26).
+        """
+        return neo_motor_full_mode(self._device_type_code, self._channel)
+
+    def _move_command(self, command: MotorMoveCommand) -> MotorMoveCommand | MultiMotorMoveCommand:
+        """Wrap a move for single- or multi-channel actuators."""
+        if self._channel is None:
+            return command
+        # Library channel is 1-based; entity channel is 0-based.
+        return MultiMotorMoveCommand(
+            channels=((int(self._channel) + 1, command),)
+        )
 
     @override
     async def async_added_to_hass(self) -> None:
         """Register for dispatch, then query this channel's full state.
 
         Coordinator bulk restore runs during setup before entities exist, so each
-        motor channel queries EWB_QUERY_STATE with its full mode (0 / 2 / 10 / …)
-        here to detect ``runtime_measured`` and current position.
+        motor channel re-queries its full mode here. Full modes are required for
+        ``runtime_measured`` (bit 7); position alone would also be available via
+        mode 0 summary.
         """
         await super().async_added_to_hass()
         self.hass.async_create_task(
@@ -220,12 +246,12 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
         )
 
     async def _async_query_initial_state(self) -> None:
-        """EWB_QUERY_STATE for this channel's full mode (Laufzeit bit 7)."""
+        """EWB_QUERY_STATE full mode — Laufzeitmessung (bit 7) + position."""
         await self._coordinator.async_query_actuator_state(
             gateway_serial=self._gateway_serial,
             actuator_serial=self._actuator_serial,
             device_type_code=self._device_type_code,
-            mode=self._command_mode(),
+            mode=self._query_mode(),
         )
 
     def _update_supported_features(self) -> None:
@@ -274,6 +300,22 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
             self._attr_is_opening = False
             self._attr_is_closing = False
 
+    def _apply_summary_position(self, protocol_position: int) -> None:
+        """Apply a protocol position from multi-motor summary mode 0."""
+        self._attr_is_opening = False
+        self._attr_is_closing = False
+        # A reported 0-100 position implies runtime measurement is available.
+        if not self._runtime_ever_measured:
+            self._runtime_measured = True
+            self._runtime_ever_measured = True
+            self._update_supported_features()
+        else:
+            self._runtime_measured = True
+        ha_position = _protocol_to_ha_position(protocol_position)
+        self._attr_current_cover_position = ha_position
+        if ha_position is not None:
+            self._attr_is_closed = ha_position == 0
+
     def _apply_motor_full_state(self, state: MotorFullState) -> None:
         """Apply a parsed MotorFullState (single or unwrapped multi)."""
         if state.runtime_measured:
@@ -296,6 +338,15 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
         else:
             self._attr_current_cover_position = None
 
+    def _apply_multi_summary_channel(
+        self, channel_state: MotorSummaryChannelState
+    ) -> None:
+        """Apply one channel from multi-motor summary mode 0 (library ≥0.3.1)."""
+        if channel_state.position is not None:
+            self._apply_summary_position(int(channel_state.position))
+            return
+        self._apply_activity(channel_state.activity)
+
     @override
     def handle_state(self, state: Any, *, mode: int = 0) -> None:
         """Update from parsed EWB_RCV / query / change-state motor payload."""
@@ -310,12 +361,11 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
             self._apply_motor_full_state(state.state)
         elif isinstance(state, MultiMotorSummaryState):
             if self._channel is None:
-                # Single-entity dual/quad device shouldn't happen; ignore summary.
                 return
             target = int(self._channel) + 1
             for channel_state in state.channels:
                 if int(channel_state.channel) == target:
-                    self._apply_activity(channel_state.activity)
+                    self._apply_multi_summary_channel(channel_state)
                     break
             else:
                 return
@@ -332,7 +382,8 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
             else MotorCommand.OPEN_120S
         )
         await self.async_change_state(
-            MotorMoveCommand(command=command), mode=self._command_mode()
+            self._move_command(MotorMoveCommand(command=command)),
+            mode=self._command_mode(),
         )
 
     async def async_close_cover(self, **kwargs: Any) -> None:
@@ -343,13 +394,15 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
             else MotorCommand.CLOSE_120S
         )
         await self.async_change_state(
-            MotorMoveCommand(command=command), mode=self._command_mode()
+            self._move_command(MotorMoveCommand(command=command)),
+            mode=self._command_mode(),
         )
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the motor."""
         await self.async_change_state(
-            MotorMoveCommand(command=MotorCommand.STOP), mode=self._command_mode()
+            self._move_command(MotorMoveCommand(command=MotorCommand.STOP)),
+            mode=self._command_mode(),
         )
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
@@ -361,6 +414,10 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
         ha_position = int(kwargs[ATTR_POSITION])
         protocol_position = _ha_to_protocol_position(ha_position)
         await self.async_change_state(
-            MotorMoveCommand(command=protocol_position, position=protocol_position),
+            self._move_command(
+                MotorMoveCommand(
+                    command=protocol_position, position=protocol_position
+                )
+            ),
             mode=self._command_mode(),
         )
