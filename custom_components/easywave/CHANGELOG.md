@@ -1,11 +1,12 @@
 # Easywave Integration Changelog
 
-## 0.7.7 — Sensor Table 6 scaling (library 0.3.4)
+## 0.7.7 — Sensor Table 6 scaling (library 0.3.5)
 
 ### Changed
-- Requires `easywave-home-control==0.3.4` — sensor telegrams (`EWB_RCV` type 2) use RX
+- Requires `easywave-home-control==0.3.5` — sensor telegrams (`EWB_RCV` type 2) use RX
   Spec **Table 6** only: type 4 = temperature (`n/20` K → °C), type 5 = humidity
-  (`100·n/4095` %). Same on RX11 and RX21/RX22.
+  (`100·n/4095` %, rounded to **1 decimal place**). Same on RX11 and RX21/RX22.
+- Humidity entity `suggested_display_precision = 1`
 
 ## 0.7.6 — Neo actuator command and restore fixes
 

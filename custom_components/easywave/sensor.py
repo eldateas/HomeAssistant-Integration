@@ -625,6 +625,7 @@ class EasywaveNeoSensorHumiditySensor(EasywaveNeoSensorEntity, RestoreSensor):
 
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_suggested_display_precision = 1
     _attr_translation_key = "neo_sensor_humidity"
 
     def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
