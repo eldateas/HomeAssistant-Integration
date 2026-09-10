@@ -1,11 +1,11 @@
 # Easywave Integration Changelog
 
-## 0.7.7 — EWneo sensor scaling (library 0.3.3)
+## 0.7.7 — EWneo sensor scaling (library 0.3.4)
 
 ### Changed
-- Requires `easywave-home-control==0.3.3` — STH01 temperature/humidity use verified
-  air-interface `/100` centi-units (°C / % RH). Do not apply ADC-style Kelvin or
-  `100·n/4095` formulas to telegram payloads.
+- Requires `easywave-home-control==0.3.4` — STH01 (NEO default) keeps verified
+  air-interface `/100` centi-units. Library also implements RX21 Table 6 scaling for
+  `LEGACY_RX21` (Kelvin `n/20`, humidity `100·n/4095`); HA uses NEO only.
 
 ## 0.7.6 — Neo actuator command and restore fixes
 
