@@ -1,9 +1,9 @@
 # Easywave Integration Changelog
 
-## 0.7.7 — EWneo sensor scaling (library 0.3.2)
+## 0.7.7 — EWneo sensor scaling (library 0.3.3)
 
 ### Changed
-- Requires `easywave-home-control==0.3.2` — STH01 temperature/humidity use verified
+- Requires `easywave-home-control==0.3.3` — STH01 temperature/humidity use verified
   air-interface `/100` centi-units (°C / % RH). Do not apply ADC-style Kelvin or
   `100·n/4095` formulas to telegram payloads.
 
