@@ -3,8 +3,9 @@
 ## 0.7.7 — EWneo sensor scaling (library 0.3.2)
 
 ### Changed
-- Requires `easywave-home-control==0.3.2` — temperature/humidity use ELDAT encoding
-  (`n/20` Kelvin → °C, humidity `100·n/4095`), replacing the incorrect `/100` scaling.
+- Requires `easywave-home-control==0.3.2` — STH01 temperature/humidity use verified
+  air-interface `/100` centi-units (°C / % RH). Do not apply ADC-style Kelvin or
+  `100·n/4095` formulas to telegram payloads.
 
 ## 0.7.6 — Neo actuator command and restore fixes
 
