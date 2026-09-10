@@ -1,5 +1,11 @@
 # Easywave Integration Changelog
 
+## 0.7.7 — EWneo sensor scaling (library 0.3.2)
+
+### Changed
+- Requires `easywave-home-control==0.3.2` — temperature/humidity use ELDAT encoding
+  (`n/20` Kelvin → °C, humidity `100·n/4095`), replacing the incorrect `/100` scaling.
+
 ## 0.7.6 — Neo actuator command and restore fixes
 
 ### Changed
