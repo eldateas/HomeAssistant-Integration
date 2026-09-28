@@ -621,9 +621,18 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return state
 
     async def async_restore_ewb_filters(self) -> None:
-        """Re-add EWB gateway filters for all known neo actuators after connect."""
+        """Re-add EWB gateway filters for all known neo actuators after connect.
+
+        Clears the hardware filter first (HACS 0.6) to avoid
+        ``ERR_FILTER_OUT_OF_MEM`` when many unique gateway serials are restored.
+        """
         if self.is_offline:
             return
+        try:
+            await self.transceiver.ewb_clear_gateway_filter()
+        except (OSError, TimeoutError, ValueError) as err:
+            _LOGGER.debug("Failed to clear EWB filter before restore: %s", err)
+
         seen: set[str] = set()
         for device in get_devices(self.config_entry):
             if device.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_NEO_ACTUATOR:

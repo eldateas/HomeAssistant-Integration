@@ -1,5 +1,6 @@
 """Subentry flow for adding Easywave neo actuators."""
 
+import contextlib
 import logging
 import time
 from typing import Any
@@ -106,9 +107,9 @@ class EasywaveNeoActuatorSubentryFlowHandler(
                 return None
             index, gateway = allocated
 
-            if not await coordinator.transceiver.ewb_add_gateway_filter(gateway):
+            if not await coordinator.transceiver.ewb_prepare_learn_filter(gateway):
                 _LOGGER.error(
-                    "Failed to add EWB gateway filter for index %s", index
+                    "Failed to prepare EWB gateway filter for index %s", index
                 )
                 self._learn_abort_reason = "index_serial_unavailable"
                 return None
@@ -153,6 +154,10 @@ class EasywaveNeoActuatorSubentryFlowHandler(
             _LOGGER.error("EWB neo actuator learning failed: %s", err)
             return None
         finally:
+            # Rebuild filters for known actuators (clears first). The newly
+            # learned gateway is included only after the user confirms save.
+            with contextlib.suppress(OSError, TimeoutError, ValueError):
+                await coordinator.async_restore_ewb_filters()
             coordinator.resume_telegram_listener()
 
     def _type_label(self, type_code: int) -> str:
@@ -191,12 +196,23 @@ class EasywaveNeoActuatorSubentryFlowHandler(
             }
             # Runtime/position capability is detected automatically from EWB state
             # (MotorFullState.runtime_measured / bit 7), not asked in the UI.
-            return await self._async_save_device(
+            result = await self._async_save_device(
                 title=title,
                 unique_id=unique_id,
                 data=data,
                 area_id=self._area_id_from_input(user_input),
             )
+            # Rebuild NFILTER including the new gateway; exclusive IO while
+            # the live telegram listener would otherwise hold EWB_RCV.
+            coordinator = self._get_coordinator()
+            if coordinator is not None:
+                await coordinator.suspend_telegram_listener()
+                try:
+                    with contextlib.suppress(OSError, TimeoutError, ValueError):
+                        await coordinator.async_restore_ewb_filters()
+                finally:
+                    coordinator.resume_telegram_listener()
+            return result
 
         type_label = self._type_label(type_code)
         count = sum(

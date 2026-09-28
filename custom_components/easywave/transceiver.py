@@ -220,7 +220,25 @@ class RX11Transceiver:
             result = await device.ewb_add_nfilter_request(
                 gateway, timeout=self._gateway.request_timeout
             )
-        return result in (ErrorCode.SUCCESS, ErrorCode.ERR_SERIAL_FILTER)
+        if result in (ErrorCode.SUCCESS, ErrorCode.ERR_SERIAL_FILTER):
+            return True
+        if result == ErrorCode.ERR_FILTER_OUT_OF_MEM:
+            _LOGGER.warning(
+                "EWB_ADD_NFILTER failed: filter out of memory (clear before adding)"
+            )
+        else:
+            _LOGGER.warning("EWB_ADD_NFILTER failed: error 0x%02X", int(result))
+        return False
+
+    async def ewb_prepare_learn_filter(self, gateway: bytes) -> bool:
+        """Clear the EWB filter, then add a single gateway serial for pairing.
+
+        Matches HACS 0.6: clear first so ``EWB_ADD_NFILTER`` has a free slot
+        (avoids ``ERR_FILTER_OUT_OF_MEM`` when many neo gateways were restored
+        without clearing, e.g. across reconnects).
+        """
+        await self.ewb_clear_gateway_filter()
+        return await self.ewb_add_gateway_filter(gateway)
 
     async def ewb_clear_gateway_filter(self) -> bool:
         """Clear the EWB receive filter."""

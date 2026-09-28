@@ -1,5 +1,14 @@
 # Easywave Integration Changelog
 
+## 0.7.9 — Clear EWB NFILTER before learn and restore
+
+### Fixed
+- Neo learn / reconnect now clears the EWB receive filter before
+  `EWB_ADD_NFILTER` (HACS 0.6 behaviour), avoiding ``ERR_FILTER_OUT_OF_MEM``
+  when many neo gateway serials were restored without clearing.
+- After saving a newly learned neo actuator, filters are restored with the
+  telegram listener suspended so rebuild does not race with ``EWB_RCV``.
+
 ## 0.7.8 — Independent EW / EWB FD-serial pools (128 each)
 
 ### Fixed
