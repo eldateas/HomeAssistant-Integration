@@ -197,14 +197,16 @@ class EasywaveReceiverSubentryFlowHandler(
             return self.async_abort(reason="device_not_connected")
 
         if self._rx11_index is None or self._receiver_serial is None:
-            index = coordinator.allocate_rx11_index()
-            if index is None:
+            # Exclusive IO: concurrent EWB_RCV / EW_RCV_EX blocks EW_GET_FD_SERIAL.
+            await coordinator.suspend_telegram_listener()
+            try:
+                allocated = await coordinator.async_allocate_ew_gateway()
+            finally:
+                coordinator.resume_telegram_listener()
+            if allocated is None:
                 return self.async_abort(reason="no_free_index")
+            index, serial = allocated
             self._rx11_index = index
-
-            serial = await coordinator.transceiver.get_ew_gateway_serial(index)
-            if serial is None:
-                return self.async_abort(reason="index_serial_unavailable")
             self._receiver_serial = normalize_serial_hex(serial)
 
         return await self._async_show_prepare()

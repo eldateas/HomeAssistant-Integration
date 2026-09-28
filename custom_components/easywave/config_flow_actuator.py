@@ -16,6 +16,7 @@ from .const import (
     CONF_GATEWAY_SERIAL,
     DEVICE_TYPE_CODE_TO_CHANNELS,
     ENTRY_TYPE_NEO_ACTUATOR,
+    EWB_FD_SERIAL_INDEX_COUNT,
     EWB_LEARNING_TIMEOUT,
     device_id_for_neo_actuator,
     ewneo_device_type_label,
@@ -87,27 +88,29 @@ class EasywaveNeoActuatorSubentryFlowHandler(
 
         Follows the easywave-home-control pairing sequence:
         exclusive IO → EWB_GET_FD_SERIAL → EWB_ADD_NFILTER → EWB_JOIN_DEVICE.
-        """
-        index = coordinator.allocate_ewneo_index()
-        if index is None:
-            _LOGGER.error("No free EWB gateway index available for neo actuator learn")
-            return None
 
-        # Listener must be stopped first — concurrent EW_RCV_EX blocks short EWB
-        # requests and made get_gateway_serial / join fail immediately.
+        The telegram listener must be stopped before any short EWB request;
+        concurrent EWB_RCV / EW_RCV_EX blocks ``EWB_GET_FD_SERIAL`` and join.
+        """
+        self._learn_abort_reason = None
         await coordinator.suspend_telegram_listener()
         try:
-            gateway = await coordinator.transceiver.get_ewb_gateway_serial(index)
-            if gateway is None:
+            allocated = await coordinator.async_allocate_ewb_gateway()
+            if allocated is None:
                 _LOGGER.error(
-                    "Failed to load EWB gateway serial for index %s", index
+                    "No free EWB gateway index with readable FD serial "
+                    "(need EWB_GET_FD_SERIAL 0-%s)",
+                    EWB_FD_SERIAL_INDEX_COUNT - 1,
                 )
+                self._learn_abort_reason = "no_free_index"
                 return None
+            index, gateway = allocated
 
             if not await coordinator.transceiver.ewb_add_gateway_filter(gateway):
                 _LOGGER.error(
                     "Failed to add EWB gateway filter for index %s", index
                 )
+                self._learn_abort_reason = "index_serial_unavailable"
                 return None
 
             _LOGGER.info(

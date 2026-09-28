@@ -31,8 +31,10 @@
         "already_configured": "L'appareil est déjà configuré",
         "device_added": "The device was added successfully.",
         "device_not_connected": "The RX11 USB Transceiver is not connected.\n\nTo add a new device, the RX11 must be reachable.\nPlease check the USB connection.",
+        "index_serial_unavailable": "Impossible de lire le numéro de série de la passerelle pour l'index alloué.",
         "learning_cancelled": "Learning mode was cancelled.",
-        "no_device_learned": "No device was detected."
+        "no_device_learned": "No device was detected.",
+        "no_free_index": "Aucun index de passerelle EWneo libre n'est disponible."
       },
       "entry_type": "",
       "initiate_flow": {

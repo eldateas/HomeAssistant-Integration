@@ -31,8 +31,10 @@
         "already_configured": "Gerät ist bereits konfiguriert",
         "device_added": "Das Gerät wurde erfolgreich hinzugefügt.",
         "device_not_connected": "Der RX11 USB Transceiver ist nicht verbunden.\n\nZum Hinzufügen eines neuen Geräts muss der RX11 erreichbar sein.\nBitte prüfen Sie die USB-Verbindung.",
+        "index_serial_unavailable": "Die Gateway-Seriennummer für den zugewiesenen Index konnte nicht gelesen werden.",
         "learning_cancelled": "Einlernmodus wurde abgebrochen.",
-        "no_device_learned": "Es wurde kein Gerät erkannt."
+        "no_device_learned": "Es wurde kein Gerät erkannt.",
+        "no_free_index": "Es ist kein freier EWneo-Gateway-Index verfügbar."
       },
       "entry_type": "",
       "initiate_flow": {

@@ -89,6 +89,7 @@ class EasywaveDeviceFlowMixin:
     _learn_timeout_step: str
     _learn_back_step: str
     _accept_telegram: Any
+    _learn_abort_reason: str | None
 
     def _init_device_flow(self) -> None:
         """Initialize shared device-learning state fields."""
@@ -100,6 +101,7 @@ class EasywaveDeviceFlowMixin:
         self._learn_timeout_step = "learn_timeout_transmitter"
         self._learn_back_step = ""
         self._accept_telegram = None
+        self._learn_abort_reason = None
 
     def _suggested_area_id(self) -> str | None:
         """Return an area id suggested by the flow context, if any.
@@ -302,10 +304,21 @@ class EasywaveDeviceFlowMixin:
             self._learn_task = None
 
         if result is None:
+            if self._learn_abort_reason:
+                # Progress UI requires show_progress_done before abort/next step.
+                return self.async_show_progress_done(next_step_id="learn_abort")
             return self.async_show_progress_done(next_step_id=self._learn_timeout_step)
 
         self._learned_device = result
         return self.async_show_progress_done(next_step_id=confirm_step)
+
+    async def async_step_learn_abort(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Abort after progress UI when allocation/filter failed (not a timeout)."""
+        reason = self._learn_abort_reason or "no_device_learned"
+        self._learn_abort_reason = None
+        return self.async_abort(reason=reason)
 
     async def _do_learning(self, coordinator: Any) -> dict[str, Any] | None:
         """Wait for a device telegram."""

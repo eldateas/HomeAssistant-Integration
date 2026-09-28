@@ -1,5 +1,19 @@
 # Easywave Integration Changelog
 
+## 0.7.8 — Independent EW / EWB FD-serial pools (128 each)
+
+### Fixed
+- Neo actuator learning no longer fails with a generic timeout when many devices
+  are already configured: `EWB_GET_FD_SERIAL` runs only after the telegram
+  listener is suspended, and free indices with unreadable serials are skipped.
+- Easywave receiver learning allocates from `EW_GET_FD_SERIAL` indices **0–127**
+  (was incorrectly allowing 0–255).
+
+### Changed
+- EW receivers and EWneo actuators each have an independent pool of **128**
+  factory-serial indices (`0–127`). Transmitters and neo sensors do not consume
+  these slots. Existing stored indices and entity IDs are unchanged.
+
 ## 0.7.7 — Sensor Table 6 scaling (library 0.3.5)
 
 ### Changed

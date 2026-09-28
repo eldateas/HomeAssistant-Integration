@@ -187,6 +187,11 @@ CONF_DEVICE_TYPE_CODE: Final = "device_type_code"
 CONF_CHANNELS: Final = "channels"
 CONF_RUNTIME_MEASURED: Final = "runtime_measured"
 
+# Factory-device serial pools on RX11 (independent of transmitters / neo sensors).
+# EW_GET_FD_SERIAL and EWB_GET_FD_SERIAL each expose indices 0..127.
+EW_FD_SERIAL_INDEX_COUNT: Final = 128
+EWB_FD_SERIAL_INDEX_COUNT: Final = 128
+
 # Grouping modes for transmitters
 TRANSMITTER_GROUPING_GROUP: Final = "group"
 TRANSMITTER_GROUPING_SINGLE: Final = "single"

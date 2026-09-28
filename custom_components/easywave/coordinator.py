@@ -38,6 +38,8 @@ from .const import (
     EVENT_EASYWAVE,
     EVENT_TYPE_BUTTON_PRESS,
     EVENT_TYPE_BUTTON_RELEASE,
+    EW_FD_SERIAL_INDEX_COUNT,
+    EWB_FD_SERIAL_INDEX_COUNT,
     neo_motor_full_mode,
     normalize_serial_hex,
 )
@@ -504,7 +506,10 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     def used_rx11_indices(self) -> set[int]:
-        """Return RX11 indices already allocated to receivers."""
+        """Return EW FD-serial indices already used by Easywave receivers.
+
+        Transmitters and neo sensors do not consume ``EW_GET_FD_SERIAL`` slots.
+        """
         used: set[int] = set()
         for device in get_devices(self.config_entry):
             if device.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_RECEIVER:
@@ -515,15 +520,37 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return used
 
     def allocate_rx11_index(self) -> int | None:
-        """Allocate the next free RX11 index (0-255)."""
+        """Allocate the next free EW FD-serial index (0-127)."""
         used = self.used_rx11_indices()
-        for index in range(256):
+        for index in range(EW_FD_SERIAL_INDEX_COUNT):
             if index not in used:
                 return index
         return None
 
+    async def async_allocate_ew_gateway(self) -> tuple[int, bytes] | None:
+        """Pick a free EW index (0-127) whose ``EW_GET_FD_SERIAL`` succeeds.
+
+        Skips free slots that return an empty/unavailable serial so learning does
+        not fail with a generic timeout when an earlier slot is unusable.
+        """
+        used = self.used_rx11_indices()
+        for index in range(EW_FD_SERIAL_INDEX_COUNT):
+            if index in used:
+                continue
+            serial = await self.transceiver.get_ew_gateway_serial(index)
+            if serial is not None:
+                return index, serial
+            _LOGGER.debug(
+                "EW_GET_FD_SERIAL index %s returned no serial; trying next free slot",
+                index,
+            )
+        return None
+
     def used_ewneo_indices(self) -> set[int]:
-        """Return EWB indices already allocated to neo actuators."""
+        """Return EWB FD-serial indices already used by neo actuators.
+
+        Independent of EW receiver indices and of transmitter/sensor counts.
+        """
         used: set[int] = set()
         for device in get_devices(self.config_entry):
             if device.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_NEO_ACTUATOR:
@@ -534,11 +561,29 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return used
 
     def allocate_ewneo_index(self) -> int | None:
-        """Allocate the next free EWB gateway index (0-127 on RX11)."""
+        """Allocate the next free EWB FD-serial index (0-127)."""
         used = self.used_ewneo_indices()
-        for index in range(128):
+        for index in range(EWB_FD_SERIAL_INDEX_COUNT):
             if index not in used:
                 return index
+        return None
+
+    async def async_allocate_ewb_gateway(self) -> tuple[int, bytes] | None:
+        """Pick a free EWB index (0-127) whose ``EWB_GET_FD_SERIAL`` succeeds.
+
+        Transmitters, neo sensors, and EW receivers do not consume these slots.
+        """
+        used = self.used_ewneo_indices()
+        for index in range(EWB_FD_SERIAL_INDEX_COUNT):
+            if index in used:
+                continue
+            serial = await self.transceiver.get_ewb_gateway_serial(index)
+            if serial is not None:
+                return index, serial
+            _LOGGER.debug(
+                "EWB_GET_FD_SERIAL index %s returned no serial; trying next free slot",
+                index,
+            )
         return None
 
     async def async_send_ew_button(self, rx11_index: int, button: int) -> bool:
