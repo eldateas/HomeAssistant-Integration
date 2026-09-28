@@ -23,7 +23,6 @@ from .const import (
     ewneo_device_type_label,
     normalize_serial_hex,
 )
-from .devices import get_devices
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -183,13 +182,15 @@ class EasywaveNeoActuatorSubentryFlowHandler(
             return self.async_abort(reason="already_configured")
 
         if user_input is not None and "title" in user_input:
-            title = str(user_input["title"]).strip() or self._next_default_name(
-                ENTRY_TYPE_NEO_ACTUATOR
+            ewneo_index = int(self._learned_device["ewneo_index"])
+            type_label = self._type_label(type_code)
+            title = str(user_input["title"]).strip() or (
+                f"Easywave neo {type_label} {ewneo_index + 1}"
             )
             data = {
                 CONF_ENTRY_TYPE: ENTRY_TYPE_NEO_ACTUATOR,
                 CONF_ACTUATOR_SERIAL: serial_hex,
-                CONF_EWNEO_INDEX: int(self._learned_device["ewneo_index"]),
+                CONF_EWNEO_INDEX: ewneo_index,
                 CONF_GATEWAY_SERIAL: str(self._learned_device["gateway_serial"]),
                 CONF_DEVICE_TYPE_CODE: type_code,
                 CONF_CHANNELS: DEVICE_TYPE_CODE_TO_CHANNELS.get(type_code, 1),
@@ -215,15 +216,11 @@ class EasywaveNeoActuatorSubentryFlowHandler(
             return result
 
         type_label = self._type_label(type_code)
-        count = sum(
-            1
-            for device in get_devices(self._get_entry())
-            if device.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_NEO_ACTUATOR
-        )
+        ewneo_index = int(self._learned_device["ewneo_index"])
         return self.async_show_form(
             step_id="actuator_confirm",
             data_schema=self._confirm_name_area_schema(
-                title_default=f"Easywave neo {type_label} {count + 1}",
+                title_default=f"Easywave neo {type_label} {ewneo_index + 1}",
             ),
             description_placeholders={
                 "device_type_name": type_label,

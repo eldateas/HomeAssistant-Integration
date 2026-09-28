@@ -1,5 +1,12 @@
 # Easywave Integration Changelog
 
+## 0.7.10 — Default names use FD index for receivers
+
+### Changed
+- Suggested names for Easywave and Easywave neo receivers use the FD-serial
+  index (1-based), e.g. ``Easywave Receiver 5`` / ``Easywave neo Switch 3``.
+- Transmitters and neo sensors remain sequentially numbered by device count.
+
 ## 0.7.9 — Clear EWB NFILTER before learn and restore
 
 ### Fixed

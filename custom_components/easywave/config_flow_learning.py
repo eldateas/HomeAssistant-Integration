@@ -250,8 +250,14 @@ class EasywaveDeviceFlowMixin:
             return f"• {unknown}"
         return "\n".join(f"• {name}" for name in items)
 
-    def _next_default_name(self, entry_type: str) -> str:
-        """Return a suggested device name based on the existing device count."""
+    def _next_default_name(
+        self, entry_type: str, *, index: int | None = None
+    ) -> str:
+        """Return a suggested device name.
+
+        EW / EWneo receivers use the FD-serial index (displayed 1-based).
+        Transmitters and neo sensors are numbered by existing device count.
+        """
         count = sum(
             1
             for device in get_devices(self._get_entry())
@@ -265,10 +271,12 @@ class EasywaveDeviceFlowMixin:
             return f"Easywave neo Sensor {count + 1}"
         if entry_type == ENTRY_TYPE_RECEIVER:
             label = "Empfänger" if german else "Receiver"
-            return f"Easywave {label} {count + 1}"
+            number = (int(index) + 1) if index is not None else count + 1
+            return f"Easywave {label} {number}"
         if entry_type == ENTRY_TYPE_NEO_ACTUATOR:
             label = "neo Empfänger" if german else "neo Actuator"
-            return f"Easywave {label} {count + 1}"
+            number = (int(index) + 1) if index is not None else count + 1
+            return f"Easywave {label} {number}"
         return ""  # pragma: no cover
 
     async def _await_learning_task(

@@ -329,7 +329,9 @@ class EasywaveReceiverSubentryFlowHandler(
         return self.async_show_form(
             step_id="receiver_confirm",
             data_schema=self._confirm_name_area_schema(
-                title_default=self._next_default_name(ENTRY_TYPE_RECEIVER),
+                title_default=self._next_default_name(
+                    ENTRY_TYPE_RECEIVER, index=self._rx11_index
+                ),
             ),
             description_placeholders={
                 "receiver_type": self._label(
