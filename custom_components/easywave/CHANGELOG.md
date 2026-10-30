@@ -1,5 +1,12 @@
 # Easywave Integration Changelog
 
+## Unreleased — Restore receiver switch state
+
+### Fixed
+- EW receiver switches (which give no feedback) now restore their last known
+  on/off state after a Home Assistant restart instead of always starting as
+  `off`.
+
 ## 0.7.11 — Transmitter trigger filtering and On/Off / Open/Close state triggers
 
 ### Fixed

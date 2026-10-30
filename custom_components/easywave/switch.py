@@ -14,8 +14,10 @@ from easywave_home_control.codec.states import (
 )
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import EasywaveConfigEntry
 from .const import (
@@ -76,8 +78,12 @@ async def async_setup_entry(
             async_add_entities(entities, config_subentry_id=device.subentry_id)
 
 
-class EasywaveReceiverSwitch(EasywaveReceiverEntity, SwitchEntity):
-    """Optimistic EW receiver switch — empty name (device title only)."""
+class EasywaveReceiverSwitch(EasywaveReceiverEntity, RestoreEntity, SwitchEntity):
+    """Optimistic EW receiver switch — empty name (device title only).
+
+    EW receivers give no feedback, so the last known state is restored on
+    startup; otherwise every switch would read "off" after each restart.
+    """
 
     _attr_name = None
     _attr_assumed_state = True
@@ -91,6 +97,15 @@ class EasywaveReceiverSwitch(EasywaveReceiverEntity, SwitchEntity):
         self._heating = (
             str(device.data.get(CONF_RECEIVER_KIND)) == RECEIVER_KIND_HEATING_COOLING
         )
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Restore the last known on/off state."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None and (
+            last_state.state in (STATE_ON, STATE_OFF)
+        ):
+            self._attr_is_on = last_state.state == STATE_ON
 
     @property
     def icon(self) -> str:
