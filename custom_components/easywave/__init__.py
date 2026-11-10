@@ -60,6 +60,7 @@ class EasywaveRuntimeData:
     """Runtime data for the Easywave integration."""
 
     coordinator: EasywaveCoordinator
+    gateway_device_id: str | None = None
 
 
 type EasywaveConfigEntry = ConfigEntry[EasywaveRuntimeData]
@@ -153,7 +154,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasywaveConfigEntry) -> 
 
     entry.runtime_data = EasywaveRuntimeData(coordinator=coordinator)
 
-    update_gateway_device(hass, entry, transceiver)
+    entry.runtime_data.gateway_device_id = update_gateway_device(
+        hass, entry, transceiver
+    )
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
     async_snapshot_entry_entities(hass, entry)

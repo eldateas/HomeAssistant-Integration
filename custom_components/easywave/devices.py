@@ -24,18 +24,8 @@ if TYPE_CHECKING:
 def iter_subentries_of_type(
     entry: ConfigEntry, subentry_type: str
 ) -> Iterator[ConfigSubentry]:
-    """Yield subentries of ``subentry_type`` (HA 2026.3+ compatible).
-
-    ``ConfigEntry.get_subentries_of_type`` was added after 2026.3; older cores
-    still expose ``entry.subentries`` and must be filtered manually.
-    """
-    getter = getattr(entry, "get_subentries_of_type", None)
-    if callable(getter):
-        yield from getter(subentry_type)
-        return
-    for subentry in entry.subentries.values():
-        if subentry.subentry_type == subentry_type:
-            yield subentry
+    """Yield subentries of ``subentry_type``."""
+    yield from entry.get_subentries_of_type(subentry_type)
 
 
 def iter_device_buckets(entry: EasywaveConfigEntry) -> Iterator[ConfigSubentry]:

@@ -1,6 +1,6 @@
 # Validate integration with hassfest and HACS.
 #
-# Brand images ship in custom_components/easywave/brand/ (HA 2026.3+);
+# Brand images ship in custom_components/easywave/brand/ (HA 2026.11+);
 # home-assistant/brands is not required for this custom integration.
 #
 # Docs:

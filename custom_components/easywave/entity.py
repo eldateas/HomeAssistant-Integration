@@ -115,7 +115,7 @@ class EasywaveTransmitterEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=transmitter_model(self._device_data, language),
-            via_device=(DOMAIN, self._entry.entry_id),
+            via_device_id=self._entry.runtime_data.gateway_device_id,
         )
 
     @property
@@ -187,7 +187,7 @@ class EasywaveNeoSensorEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=neo_sensor_model(language),
-            via_device=(DOMAIN, self._entry.entry_id),
+            via_device_id=self._entry.runtime_data.gateway_device_id,
         )
 
     @property
@@ -253,7 +253,7 @@ class EasywaveReceiverEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=receiver_model(self._device_data, language),
-            via_device=(DOMAIN, self._entry.entry_id),
+            via_device_id=self._entry.runtime_data.gateway_device_id,
         )
 
     @property
@@ -335,7 +335,7 @@ class EasywaveNeoActuatorEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=actuator_model(self._device_data, language),
-            via_device=(DOMAIN, self._entry.entry_id),
+            via_device_id=self._entry.runtime_data.gateway_device_id,
         )
 
     @property
