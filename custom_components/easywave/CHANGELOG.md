@@ -1,8 +1,15 @@
 # Easywave Integration Changelog
 
-## 0.8.0 — Restore last EW receiver command
+## 0.8.0 — Receiver state, neo updates, and RX11 port resolution
 
 ### Fixed
+- Easywave neo sensor measurements are applied again. The 0.4.2
+  `should_ignore` flag was dropping the telegram, so temperature and humidity
+  stayed on the last restored value. Replacing the RX11 port no longer
+  reports a disconnect for the stick that was just opened.
+- The RX11 port is resolved from the Home Assistant USB scan, including an
+  ESPHome proxy. The stored USB serial is preferred. If that stick is gone
+  and only one other compatible RX11 is present, that stick is used.
 - Child devices link to the gateway with `via_device_id` when
   `DeviceRegistry.async_get_or_create` accepts it (Home Assistant 2026.11)
   and with the identifier tuple on 2026.7. Passing only `via_device_id`
@@ -22,10 +29,11 @@
 - A stopped cover keeps its last open/closed value, so toggle still has a
   direction after a restart.
 - Cover open and close update the state only when the button command was sent.
-- Requires `easywave-home-control==0.4.2`. The telegram listener waits
-  until a telegram arrives or it is cancelled; a timed-out listen is released
-  by the library. Sensor measurements flagged `should_ignore` are dropped, and
-  the neo battery sensor follows the Table 6 battery flag.
+- Requires `easywave-home-control==0.4.2` and the `usb` integration. Port
+  discovery uses the Home Assistant USB scan and `serialx`; `pyserial` is no
+  longer a direct requirement. The telegram listener waits until a telegram
+  arrives or it is cancelled, and a timed-out listen is released by the
+  library. The neo battery sensor follows the Table 6 battery flag.
 
 ## 0.7.11 — Transmitter trigger filtering and On/Off / Open/Close state triggers
 

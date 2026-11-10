@@ -37,6 +37,16 @@ CONF_USB_PID: Final = "usb_pid"
 CONF_USB_SERIAL_NUMBER: Final = "usb_serial_number"
 CONF_USB_MANUFACTURER: Final = "usb_manufacturer"
 CONF_USB_PRODUCT: Final = "usb_product"
+UNKNOWN_USB_SERIAL: Final = "unknown"
+
+
+def normalized_usb_serial(serial: str | None) -> str | None:
+    """Return a USB serial number suitable for matching a connected stick."""
+    if not serial or serial == UNKNOWN_USB_SERIAL:
+        return None
+    return serial
+
+
 # Set after the one-shot JSON→subentry migration so archived files under
 # config/easywave/migrated/ cannot revive devices after the user deletes them.
 CONF_JSON_MIGRATION_DONE: Final = "json_migration_done"

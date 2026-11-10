@@ -1,9 +1,9 @@
 """Config flow for the Easywave gateway."""
 
+import contextlib
 import logging
 from typing import Any, override
 
-import serial.tools.list_ports
 import voluptuous as vol
 
 from homeassistant.config_entries import (
@@ -34,13 +34,27 @@ from .const import (
     SUBENTRY_TYPE_EASYWAVE_RECEIVER,
     SUBENTRY_TYPE_EASYWAVE_TRANSMITTER,
     SUPPORTED_USB_IDS,
+    UNKNOWN_USB_SERIAL,
     USB_DEVICE_NAMES,
     get_frequency_for_pid,
     is_country_allowed_for_frequency,
 )
-from .transceiver import RX11Transceiver
+from .transceiver import GatewayPort, RX11Transceiver, async_list_gateway_ports
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _device_from_port(port: GatewayPort) -> dict[str, Any]:
+    """Build gateway device metadata from a discovered serial port."""
+    device_entry = USB_DEVICE_NAMES[(port.vid, port.pid)]
+    return {
+        "device": port.device,
+        "vid": port.vid,
+        "pid": port.pid,
+        "serial_number": port.serial_number or UNKNOWN_USB_SERIAL,
+        "manufacturer": port.manufacturer or device_entry["manufacturer"],
+        "product": device_entry["product"],
+    }
 
 
 class EasywaveConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -86,13 +100,22 @@ class EasywaveConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _async_validate_device_connection(self, device_path: str) -> bool:
         """Verify that an RX11 transceiver is reachable on the given port."""
-        transceiver = RX11Transceiver(self.hass, device_path)
+        transceiver = RX11Transceiver(
+            self.hass, device_path=device_path, allow_replacement=False
+        )
         try:
-            return await transceiver.connect()
+            connected = await transceiver.connect()
+        except OSError, TimeoutError:
+            connected = False
+        except BaseException:
+            with contextlib.suppress(OSError, TimeoutError):
+                await transceiver.dispose()
+            raise
+        try:
+            await transceiver.dispose()
         except OSError, TimeoutError:
             return False
-        finally:
-            await transceiver.dispose()
+        return connected
 
     @override
     async def async_step_user(
@@ -106,18 +129,7 @@ class EasywaveConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Show available RX11 serial ports and let the user pick one."""
         errors: dict[str, str] = {}
-        try:
-            ports = [
-                port
-                for port in await self.hass.async_add_executor_job(
-                    serial.tools.list_ports.comports
-                )
-                if port.vid is not None
-                and port.pid is not None
-                and (port.vid, port.pid) in SUPPORTED_USB_IDS
-            ]
-        except OSError:
-            return self.async_abort(reason="no_devices_found")
+        ports = await async_list_gateway_ports(self.hass)
 
         port_list = {
             p.device: (
@@ -131,20 +143,17 @@ class EasywaveConfigFlow(ConfigFlow, domain=DOMAIN):
         if not port_list:
             return self.async_abort(reason="no_devices_found")
 
+        if user_input is None and len(ports) == 1:
+            self._device = _device_from_port(ports[0])
+            return await self.async_step_confirm()
+
         if user_input is not None:
             selected_path = user_input[CONF_DEVICE_PATH]
-            port = next((p for p in ports if p.device == selected_path), None)
-            if port is None:
+            selected_port = next((p for p in ports if p.device == selected_path), None)
+            if selected_port is None:
                 errors["base"] = "device_no_longer_available"
             else:
-                self._device = {
-                    "device": port.device,
-                    "vid": port.vid,
-                    "pid": port.pid,
-                    "serial_number": port.serial_number or "unknown",
-                    "manufacturer": port.manufacturer or "unknown",
-                    "product": USB_DEVICE_NAMES[(port.vid, port.pid)]["product"],
-                }
+                self._device = _device_from_port(selected_port)
                 return await self.async_step_confirm()
 
         return self.async_show_form(

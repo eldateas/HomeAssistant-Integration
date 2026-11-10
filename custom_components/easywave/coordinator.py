@@ -516,12 +516,6 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 type(event.payload).__name__,
             )
             return
-        if event.payload.should_ignore:
-            _LOGGER.debug(
-                "Ignoring EWneo measurement from %s (should_ignore)",
-                serial_hex,
-            )
-            return
 
         matched = False
         for entity in list(self._sensor_entities):
