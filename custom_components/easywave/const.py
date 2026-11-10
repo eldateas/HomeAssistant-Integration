@@ -388,6 +388,10 @@ class EasywaveGatewayFeature(IntFlag):
 
 LEARNING_TIMEOUT: Final = 30  # seconds
 EWB_LEARNING_TIMEOUT: Final = 180  # seconds (EWneo join)
+# Host cap for EWB_QUERY_STATE. A missing actuator usually answers with the
+# module RF timeout sooner; this stops a silent reply from using the generic
+# 5s request timeout. Reachable devices return as soon as the telegram arrives.
+EWB_QUERY_STATE_TIMEOUT: Final = 2.0
 
 
 def normalize_serial_hex(serial: str | bytes) -> str:

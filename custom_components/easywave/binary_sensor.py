@@ -2,7 +2,7 @@
 
 from typing import Any, override
 
-from easywave_home_control.codec import ButtonPushEvent
+from easywave_home_control.codec import ButtonPushEvent, SensorMeasurementPayload
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -140,4 +140,12 @@ class EasywaveNeoBatteryBinarySensor(EasywaveNeoSensorEntity, BinarySensorEntity
 
     @override
     def handle_telegram(self, event: Any) -> None:
-        """Keep last known battery state."""
+        """Update from the Table 6 battery flag on a measurement telegram."""
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, SensorMeasurementPayload) or not payload.has_battery:
+            return
+        is_low = payload.battery_is_weak
+        if self._attr_is_on == is_low:
+            return
+        self._attr_is_on = is_low
+        self.async_write_ha_state()

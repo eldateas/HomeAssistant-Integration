@@ -1,6 +1,6 @@
 """Switch platform — HACS naming/icons for receivers and neo actuators."""
 
-from typing import Any, override
+from typing import Any, Mapping, override
 
 from easywave_home_control.codec import (
     SwitchChangeCommand,
@@ -14,6 +14,7 @@ from easywave_home_control.codec.states import (
 )
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -38,6 +39,7 @@ from .entity import (
     EasywaveDeviceEntry,
     EasywaveNeoActuatorEntity,
     EasywaveReceiverEntity,
+    EasywaveReceiverRestoreMixin,
 )
 
 _SWITCH_TYPE_CODES = {
@@ -76,7 +78,9 @@ async def async_setup_entry(
             async_add_entities(entities, config_subentry_id=device.subentry_id)
 
 
-class EasywaveReceiverSwitch(EasywaveReceiverEntity, SwitchEntity):
+class EasywaveReceiverSwitch(
+    EasywaveReceiverRestoreMixin, EasywaveReceiverEntity, SwitchEntity
+):
     """Optimistic EW receiver switch — empty name (device title only)."""
 
     _attr_name = None
@@ -87,10 +91,17 @@ class EasywaveReceiverSwitch(EasywaveReceiverEntity, SwitchEntity):
     ) -> None:
         """Initialize."""
         super().__init__(entry, device, "switch")
-        self._attr_is_on = False
         self._heating = (
             str(device.data.get(CONF_RECEIVER_KIND)) == RECEIVER_KIND_HEATING_COOLING
         )
+
+    @override
+    def _restore_receiver_state(
+        self, state: str, attributes: Mapping[str, Any]
+    ) -> None:
+        """Restore on or off."""
+        if state in {STATE_ON, STATE_OFF}:
+            self._attr_is_on = state == STATE_ON
 
     @property
     def icon(self) -> str:
@@ -129,28 +140,6 @@ class EasywaveNeoSwitch(EasywaveNeoActuatorEntity, SwitchEntity):
             self._attr_name = None
         else:
             self._attr_translation_key = f"channel_{channel + 1}"
-
-    @override
-    async def async_added_to_hass(self) -> None:
-        """Register for dispatch, then query mode 0 for current on/off state.
-
-        Coordinator bulk restore runs during setup before switch entities exist,
-        so each entity re-queries here (mode 0 covers single and multi-channel).
-        """
-        await super().async_added_to_hass()
-        self.hass.async_create_task(
-            self._async_query_initial_state(),
-            name=f"easywave_query_{self._attr_unique_id}",
-        )
-
-    async def _async_query_initial_state(self) -> None:
-        """EWB_QUERY_STATE mode 0 (SwitchOnOffState / MultiSwitchOnOffState)."""
-        await self._coordinator.async_query_actuator_state(
-            gateway_serial=self._gateway_serial,
-            actuator_serial=self._actuator_serial,
-            device_type_code=self._device_type_code,
-            mode=0,
-        )
 
     @property
     def icon(self) -> str:

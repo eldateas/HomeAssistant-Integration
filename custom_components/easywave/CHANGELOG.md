@@ -1,5 +1,32 @@
 # Easywave Integration Changelog
 
+## 0.8.0 — Restore last EW receiver command
+
+### Fixed
+- Child devices link to the gateway with `via_device_id` when
+  `DeviceRegistry.async_get_or_create` accepts it (Home Assistant 2026.11)
+  and with the identifier tuple on 2026.7. Passing only `via_device_id`
+  aborted entity setup on 2026.7, so configured devices were never created.
+- Each Easywave neo device queries its own state once per connection, after
+  its entities exist. Switches and dimmers use mode 0 for the whole device.
+  Covers query each channel mode they need, and stop after the first mode
+  that gets no answer. A missing actuator is capped at 2s instead of the
+  generic 5s request timeout, and is not asked again per channel. The
+  telegram listener stays paused for that burst.
+
+### Changed
+- Minimum Home Assistant version is 2026.11.0.
+- Easywave receiver switches, heating receivers, and covers keep their last
+  on/off, open/closed, or stopped state. With no stored state they stay
+  unknown, and toggle still sends a command.
+- A stopped cover keeps its last open/closed value, so toggle still has a
+  direction after a restart.
+- Cover open and close update the state only when the button command was sent.
+- Requires `easywave-home-control==0.4.2`. The telegram listener waits
+  until a telegram arrives or it is cancelled; a timed-out listen is released
+  by the library. Sensor measurements flagged `should_ignore` are dropped, and
+  the neo battery sensor follows the Table 6 battery flag.
+
 ## 0.7.11 — Transmitter trigger filtering and On/Off / Open/Close state triggers
 
 ### Fixed

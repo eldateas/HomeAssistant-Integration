@@ -1,6 +1,6 @@
 # Easywave Integration – User Documentation
 
-> **Version:** 0.7.0 | **Last Updated:** July 2026
+> **Version:** 0.8.0 | **Last Updated:** November 2026
 
 🇩🇪 **[Deutsche Version](index_de.md)**
 
@@ -51,7 +51,7 @@ The Easywave Integration enables control and monitoring of ELDAT radio devices v
 | Device Type | Communication | Description |
 |-------------|---------------|-------------|
 | **Easywave Transmitter** | Send → RX11 | Send button codes when pressed. Dead-man operation possible (press & release detectable) |
-| **Easywave Receiver** | RX11 → Receive | Receive button codes from RX11. **No state is sent back** – the current switch state is unknown to Home Assistant |
+| **Easywave Receiver** | RX11 → Receive | Receive button codes from RX11. **No state is sent back.** Home Assistant shows unknown until the first successful command, then restores that last state after a restart |
 | **EWneo Actuators** | RX11 ↔ Bidirectional | Full two-way communication. Actuators report their current state back (position, on/off, etc.) |
 | **EWneo Sensors** | Send → RX11 | Periodically send measurements (temperature, humidity, etc.). No bidirectional communication |
 

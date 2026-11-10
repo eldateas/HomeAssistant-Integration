@@ -1,6 +1,6 @@
 """Cover platform — HACS naming/icons for receivers and neo motors."""
 
-from typing import Any, override
+from typing import Any, Mapping, override
 
 from easywave_home_control.codec import (
     MotorActivity,
@@ -18,6 +18,7 @@ from homeassistant.components.cover import (
     CoverEntity,
     CoverEntityFeature,
 )
+from homeassistant.const import STATE_CLOSED, STATE_OPEN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -45,7 +46,10 @@ from .entity import (
     EasywaveDeviceEntry,
     EasywaveNeoActuatorEntity,
     EasywaveReceiverEntity,
+    EasywaveReceiverRestoreMixin,
 )
+
+_STATE_STOPPED = "stopped"
 
 _MOTOR_TYPE_CODES = {
     DEVICE_TYPE_CODE_MOTOR,
@@ -112,7 +116,9 @@ async def async_setup_entry(
             async_add_entities(entities, config_subentry_id=device.subentry_id)
 
 
-class EasywaveReceiverCover(EasywaveReceiverEntity, CoverEntity):
+class EasywaveReceiverCover(
+    EasywaveReceiverRestoreMixin, EasywaveReceiverEntity, CoverEntity
+):
     """Optimistic EW receiver cover — empty name (device title only)."""
 
     _attr_name = None
@@ -134,11 +140,24 @@ class EasywaveReceiverCover(EasywaveReceiverEntity, CoverEntity):
         self._stopped = False
 
     @override
+    def _restore_receiver_state(
+        self, state: str, attributes: Mapping[str, Any]
+    ) -> None:
+        """Restore open, closed, or stopped, including the last open/closed bit."""
+        if state in {STATE_OPEN, STATE_CLOSED}:
+            self._stopped = False
+            self._attr_is_closed = state == STATE_CLOSED
+        elif state == _STATE_STOPPED and self._has_stop:
+            self._stopped = True
+            closed = attributes.get("is_closed")
+            self._attr_is_closed = closed if isinstance(closed, bool) else None
+
+    @override
     @property
     def state(self) -> str | None:
         """Return cover state, including stopped for 3-button receivers."""
         if self._has_stop and self._stopped:
-            return "stopped"
+            return _STATE_STOPPED
         return super().state
 
     @property
@@ -154,14 +173,16 @@ class EasywaveReceiverCover(EasywaveReceiverEntity, CoverEntity):
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open cover (button A)."""
-        await self.async_send_button(BUTTON_A)
+        if not await self.async_send_button(BUTTON_A):
+            return
         self._stopped = False
         self._attr_is_closed = False
         self.async_write_ha_state()
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close cover (button B)."""
-        await self.async_send_button(BUTTON_B)
+        if not await self.async_send_button(BUTTON_B):
+            return
         self._stopped = False
         self._attr_is_closed = True
         self.async_write_ha_state()
@@ -172,8 +193,6 @@ class EasywaveReceiverCover(EasywaveReceiverEntity, CoverEntity):
             return
         if await self.async_send_button(BUTTON_C):
             self._stopped = True
-            self._attr_is_opening = False
-            self._attr_is_closing = False
             self.async_write_ha_state()
 
 
@@ -221,6 +240,11 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
         """
         return neo_motor_full_mode(self._device_type_code, self._channel)
 
+    @override
+    def startup_query_modes(self) -> tuple[int, ...]:
+        """Query this channel's full mode when the motor device asks once."""
+        return (self._query_mode(),)
+
     def _move_command(self, command: MotorMoveCommand) -> MotorMoveCommand | MultiMotorMoveCommand:
         """Wrap a move for single- or multi-channel actuators."""
         if self._channel is None:
@@ -228,30 +252,6 @@ class EasywaveNeoCover(EasywaveNeoActuatorEntity, CoverEntity):
         # Library channel is 1-based; entity channel is 0-based.
         return MultiMotorMoveCommand(
             channels=((int(self._channel) + 1, command),)
-        )
-
-    @override
-    async def async_added_to_hass(self) -> None:
-        """Register for dispatch, then query this channel's full state.
-
-        Coordinator bulk restore runs during setup before entities exist, so each
-        motor channel re-queries its full mode here. Full modes are required for
-        ``runtime_measured`` (bit 7); position alone would also be available via
-        mode 0 summary.
-        """
-        await super().async_added_to_hass()
-        self.hass.async_create_task(
-            self._async_query_initial_state(),
-            name=f"easywave_query_{self._attr_unique_id}",
-        )
-
-    async def _async_query_initial_state(self) -> None:
-        """EWB_QUERY_STATE full mode — Laufzeitmessung (bit 7) + position."""
-        await self._coordinator.async_query_actuator_state(
-            gateway_serial=self._gateway_serial,
-            actuator_serial=self._actuator_serial,
-            device_type_code=self._device_type_code,
-            mode=self._query_mode(),
         )
 
     def _update_supported_features(self) -> None:

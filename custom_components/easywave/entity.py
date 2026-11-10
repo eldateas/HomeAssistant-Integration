@@ -1,15 +1,20 @@
 """Base entities for the Easywave integration."""
 
+import asyncio
+import inspect
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Mapping, override
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_ACTUATOR_SERIAL,
+    CONF_CHANNELS,
     CONF_DEVICE_TYPE_CODE,
     CONF_RECEIVER_SERIAL,
     CONF_RX11_INDEX,
@@ -41,6 +46,19 @@ class EasywaveDeviceEntry:
 
 # hass.data[DOMAIN]["pending_areas"][device_id] → one-shot area from learn confirm
 _PENDING_AREAS = "pending_areas"
+
+# 2026.11 DeviceRegistry.async_get_or_create takes via_device_id. 2026.7 only
+# accepts the identifier tuple; passing via_device_id there aborts entity setup.
+_DEVICE_REGISTRY_ACCEPTS_VIA_ID = "via_device_id" in inspect.signature(
+    dr.DeviceRegistry.async_get_or_create
+).parameters
+
+
+def gateway_via_device(entry: EasywaveConfigEntry) -> dict[str, Any]:
+    """Return the DeviceInfo field that links a child device to the RX11."""
+    if _DEVICE_REGISTRY_ACCEPTS_VIA_ID:
+        return {"via_device_id": entry.runtime_data.gateway_device_id}
+    return {"via_device": (DOMAIN, entry.entry_id)}
 
 
 def _hass_language(hass: Any) -> str | None:
@@ -115,7 +133,7 @@ class EasywaveTransmitterEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=transmitter_model(self._device_data, language),
-            via_device_id=self._entry.runtime_data.gateway_device_id,
+            **gateway_via_device(self._entry),
         )
 
     @property
@@ -187,7 +205,7 @@ class EasywaveNeoSensorEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=neo_sensor_model(language),
-            via_device_id=self._entry.runtime_data.gateway_device_id,
+            **gateway_via_device(self._entry),
         )
 
     @property
@@ -253,7 +271,7 @@ class EasywaveReceiverEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=receiver_model(self._device_data, language),
-            via_device_id=self._entry.runtime_data.gateway_device_id,
+            **gateway_via_device(self._entry),
         )
 
     @property
@@ -297,6 +315,27 @@ class EasywaveReceiverEntity(Entity):
         return await self._coordinator.async_send_ew_button(self._rx11_index, button)
 
 
+class EasywaveReceiverRestoreMixin(RestoreEntity):
+    """Copy the last concrete receiver state back onto the entity.
+
+    ``RestoreEntity`` persists that state. Unknown and unavailable are left
+    as they are, so a new receiver stays unknown.
+    """
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Restore the last concrete state before the first state write."""
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+            self._restore_receiver_state(last.state, last.attributes)
+        await super().async_added_to_hass()
+
+    def _restore_receiver_state(
+        self, state: str, attributes: Mapping[str, Any]
+    ) -> None:
+        """Apply a previously published state on the platform entity."""
+
+
 class EasywaveNeoActuatorEntity(Entity):
     """Base entity for an Easywave neo bidirectional actuator."""
 
@@ -335,7 +374,7 @@ class EasywaveNeoActuatorEntity(Entity):
             identifiers={(DOMAIN, self._device_id)},
             name=self._device_title,
             model=actuator_model(self._device_data, language),
-            via_device_id=self._entry.runtime_data.gateway_device_id,
+            **gateway_via_device(self._entry),
         )
 
     @property
@@ -355,6 +394,56 @@ class EasywaveNeoActuatorEntity(Entity):
         coordinator = self._coordinator
         coordinator.register_actuator_entities([self])
         self.async_on_remove(lambda: coordinator.unregister_actuator_entity(self))
+        self.async_on_remove(
+            coordinator.async_add_listener(self._maybe_query_device_state)
+        )
+        self._maybe_query_device_state()
+
+    def startup_query_modes(self) -> tuple[int, ...]:
+        """EWB modes this entity needs when the device asks for its state.
+
+        Mode 0 is the whole device for switches and dimmers. Covers replace
+        this when a channel needs its own mode.
+        """
+        return (0,)
+
+    @callback
+    def _maybe_query_device_state(self) -> None:
+        """Ask once for this device while the gateway link is up."""
+        self._coordinator.submit_device_state_query(
+            self._device_id, self._query_own_state
+        )
+
+    async def _query_own_state(self) -> None:
+        """Query this device after its channel entities are registered."""
+        expected = max(1, int(self._device_data.get(CONF_CHANNELS, 1) or 1))
+        for _ in range(expected + 5):
+            if (
+                len(self._coordinator.actuator_entities_for_device(self._device_id))
+                >= expected
+            ):
+                break
+            await asyncio.sleep(0)
+        modes: list[int] = []
+        seen: set[int] = set()
+        for entity in self._coordinator.actuator_entities_for_device(self._device_id):
+            for mode in entity.startup_query_modes():
+                if mode not in seen:
+                    seen.add(mode)
+                    modes.append(mode)
+        for mode in modes:
+            if self._coordinator.is_offline:
+                return
+            answered = await self._coordinator.async_query_actuator_state(
+                gateway_serial=self._gateway_serial,
+                actuator_serial=self._actuator_serial,
+                device_type_code=self._device_type_code,
+                mode=mode,
+            )
+            if not answered:
+                # The actuator is unreachable. Further channel modes would each
+                # wait out another radio timeout.
+                return
 
     @property
     def actuator_serial(self) -> str:

@@ -21,7 +21,7 @@ from easywave_home_control.protocols.rx11_rx2x.protocol import ErrorCode, InfoTy
 
 from homeassistant.core import HomeAssistant
 
-from .const import SUPPORTED_USB_IDS
+from .const import EWB_QUERY_STATE_TIMEOUT, SUPPORTED_USB_IDS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,13 +121,19 @@ class RX11Transceiver:
         """Reconnect to the RX11 transceiver."""
         return await self._gateway.reconnect()
 
-    async def receive_telegram(self, timeout: float = 30.0) -> EwbRcvEvent | None:
-        """Wait for an EW/EWneo telegram via EW_RCV_EX."""
+    async def receive_telegram(
+        self, timeout: float | None = None
+    ) -> EwbRcvEvent | None:
+        """Wait for an EW/EWneo telegram via EW_RCV_EX.
+
+        ``timeout=None`` waits until a telegram arrives or the listen is
+        cancelled. easywave-home-control 0.4 releases a timed-out listen itself.
+        """
         return await self._gateway.ew.receive_ex(timeout=timeout)
 
     async def receive_ewb_telegram(
         self,
-        timeout: float | None = 60.0,
+        timeout: float | None = None,
         *,
         device_type_for_serial: Callable[[bytes], int | None] | None = None,
     ) -> EwbRcvEvent | None:
@@ -136,34 +142,25 @@ class RX11Transceiver:
         For ``TM_IT_EWBIDI_STATE``, ``device_type_for_serial`` must resolve the
         actuator type so the codec can parse typed state.
 
-        On timeout/non-success the pending hardware request is cancelled — the
-        low-level ``ewb_rcv_request`` does not remove timed-out requests itself,
-        which otherwise leaves a zombie RCV that swallows later telegrams.
+        ``timeout=None`` waits until a telegram arrives or the listen is
+        cancelled. A timed-out or cancelled listen is dropped by
+        easywave-home-control 0.4, which sends ``CANCEL_IO`` once the module
+        has a handle. This wrapper does not cancel again after that.
         """
         device = self._gateway.device
         if device is None:
             return None
         try:
             raw = await device.ewb_rcv_request(timeout=timeout)
-        except TimeoutError:
-            await self.cancel_pending_receives()
-            return None
         except OSError as err:
             _LOGGER.debug("EWB_RCV failed: %s", err)
             await self.cancel_pending_receives()
             return None
 
         if raw is None:
-            await self.cancel_pending_receives()
             return None
         result_code, info_type, serial, info_data = raw
         if result_code != ErrorCode.SUCCESS:
-            # Timed-out / superseded / canceled — flush so the next poll is clean.
-            if result_code not in (
-                ErrorCode.ERR_CANCELED,
-                ErrorCode.ERR_SUPERSEDED,
-            ):
-                await self.cancel_pending_receives()
             return None
         device_type: int | None = None
         if info_type == InfoType.TM_IT_EWBIDI_STATE:
@@ -281,10 +278,16 @@ class RX11Transceiver:
         receiver: bytes,
         device_type: int,
         mode: int = 0,
+        *,
+        timeout: float = EWB_QUERY_STATE_TIMEOUT,
     ) -> EwbState | None:
-        """Query EWB state for a neo actuator."""
+        """Query EWB state for a neo actuator.
+
+        ``timeout`` is only the host cap. The RX11 returns earlier with
+        ``ERR_RF_TIMEOUT`` when the actuator does not answer.
+        """
         result = await self._gateway.ewb.query_state(
-            gateway, receiver, device_type, mode
+            gateway, receiver, device_type, mode, timeout=timeout
         )
         if result is None:
             return None
