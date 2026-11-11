@@ -1,8 +1,10 @@
 """Run hassfest inside the official image with the HACS feature-enum stub.
 
-The stub is registered in ``sys.modules`` and is not mounted under
-``homeassistant/components/easywave``. A directory there makes hassfest warn
-that the custom integration domain collides with Core.
+The image keeps Home Assistant at ``/usr/src/homeassistant`` and does not
+install it as a site package. The official entrypoint changes into that
+directory before importing it. This wrapper does the same, then registers
+the feature-enum stub in ``sys.modules`` so it is not a directory under
+``homeassistant/components``.
 """
 
 from __future__ import annotations
@@ -11,10 +13,31 @@ import importlib.util
 import sys
 from pathlib import Path
 
+_CORE = Path("/usr/src/homeassistant")
+_WORKSPACE = Path("/github/workspace")
+
+
+def _integration_paths() -> list[str]:
+    """Return custom integration directories the way the image entrypoint does."""
+    workspace = _WORKSPACE if _WORKSPACE.is_dir() else Path.cwd()
+    paths: list[str] = []
+    custom = workspace / "custom_components"
+    if custom.is_dir():
+        paths.extend(
+            str(manifest.parent)
+            for manifest in sorted(custom.glob("*/manifest.json"))
+        )
+    paths.extend(str(manifest.parent) for manifest in sorted(workspace.glob("manifest.json")))
+    if not paths:
+        raise SystemExit("Error: No integrations found!")
+    return paths
+
 
 def _register_stub() -> None:
     """Expose this repo's feature enums as ``homeassistant.components.easywave``."""
-    stub = Path("/github/workspace/scripts/hassfest_easywave_stub/__init__.py")
+    if _CORE.is_dir():
+        sys.path.insert(0, str(_CORE))
+    stub = _WORKSPACE / "scripts" / "hassfest_easywave_stub" / "__init__.py"
     if not stub.is_file():
         stub = Path(__file__).resolve().parent / "hassfest_easywave_stub" / "__init__.py"
     import homeassistant.components as components
@@ -31,12 +54,14 @@ def _register_stub() -> None:
 
 
 def main() -> int:
-    """Register the stub, then run the image's hassfest entry point."""
+    """Register the stub, then validate the custom integrations."""
     _register_stub()
-    try:
-        from hassfest.__main__ import main as hassfest_main
-    except ImportError:
-        from script.hassfest.__main__ import main as hassfest_main
+    core = _CORE if _CORE.is_dir() else Path.cwd()
+    sys.argv = ["hassfest", "--action", "validate", "--core-path", str(core)]
+    for path in _integration_paths():
+        sys.argv.extend(("--integration-path", path))
+    from script.hassfest.__main__ import main as hassfest_main
+
     return int(hassfest_main())
 
 

@@ -39,7 +39,7 @@ jobs:
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/github/workspace" \
-            --entrypoint python \
+            --entrypoint python3 \
             ghcr.io/home-assistant/hassfest \
             /github/workspace/scripts/run_hassfest_docker.py
 
