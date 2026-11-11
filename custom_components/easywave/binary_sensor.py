@@ -8,6 +8,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -132,6 +133,7 @@ class _BatteryWarningBinarySensor(RestoreEntity, BinarySensorEntity):
     """
 
     _attr_device_class = BinarySensorDeviceClass.BATTERY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "battery_warning"
 
     _CLEAR_THRESHOLD = 2
