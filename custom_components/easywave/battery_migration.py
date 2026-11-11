@@ -60,10 +60,46 @@ def _remember_seed(hass: Any, unique_id: str, is_low: bool | None) -> None:
     hass.data.setdefault(DOMAIN, {}).setdefault(_SEED_KEY, {})[unique_id] = is_low
 
 
-def _enum_is_low(hass: Any, entity_id: str) -> bool | None:
+def _restore_data(hass: Any) -> Any:
     from homeassistant.helpers import restore_state
 
-    stored = restore_state.async_get(hass).last_states.get(entity_id)
+    return restore_state.async_get(hass)
+
+
+def _stored_state(hass: Any, entity_id: str) -> Any | None:
+    """Return one restored state from either restore-state index."""
+    data = _restore_data(hass)
+    getter = getattr(data, "async_get_stored_state", None)
+    if callable(getter):
+        return getter(entity_id)
+    last_states = getattr(data, "last_states", None)
+    if isinstance(last_states, dict):
+        return last_states.get(entity_id)
+    return None
+
+
+def _put_stored_state(hass: Any, entity_id: str, stored: Any) -> None:
+    """Store a startup state under the index this Home Assistant version uses."""
+    data = _restore_data(hass)
+    last_states = getattr(data, "last_states", None)
+    if isinstance(last_states, dict):
+        last_states[entity_id] = stored
+        return
+    from homeassistant.helpers import entity_registry as er
+
+    by_registry = getattr(data, "last_states_by_entity_registry_id", None)
+    registry_entry = er.async_get(hass).async_get(entity_id)
+    if registry_entry is not None and isinstance(by_registry, dict):
+        stored.entity_registry_id = registry_entry.id
+        by_registry[registry_entry.id] = stored
+        return
+    by_entity_id = getattr(data, "last_states_by_entity_id", None)
+    if isinstance(by_entity_id, dict):
+        by_entity_id[entity_id] = stored
+
+
+def _enum_is_low(hass: Any, entity_id: str) -> bool | None:
+    stored = _stored_state(hass, entity_id)
     if stored is not None:
         return enum_state_is_low(stored.state.state)
     state = hass.states.get(entity_id)
@@ -81,30 +117,36 @@ def _copy_restore_state(
 ) -> None:
     """Point startup restore at the binary sensor before it is added."""
     from homeassistant.core import State
-    from homeassistant.helpers import restore_state
     from homeassistant.helpers.restore_state import StoredState
     from homeassistant.util import dt as dt_util
 
     if source_entity_id == target_entity_id:
         return
-    data = restore_state.async_get(hass)
-    current = data.last_states.get(target_entity_id)
+    current = _stored_state(hass, target_entity_id)
     if current is not None and current.state.state in ("on", "off"):
         return
-    source = data.last_states.get(source_entity_id)
+    source = _stored_state(hass, source_entity_id)
     if source is not None and source.state.state in ("on", "off"):
-        data.last_states[target_entity_id] = StoredState(
-            State(target_entity_id, source.state.state, source.state.attributes),
-            source.extra_data,
-            source.last_seen,
+        _put_stored_state(
+            hass,
+            target_entity_id,
+            StoredState(
+                State(target_entity_id, source.state.state, source.state.attributes),
+                source.extra_data,
+                source.last_seen,
+            ),
         )
         return
     if is_low is None:
         return
-    data.last_states[target_entity_id] = StoredState(
-        State(target_entity_id, "on" if is_low else "off"),
-        None,
-        dt_util.utcnow(),
+    _put_stored_state(
+        hass,
+        target_entity_id,
+        StoredState(
+            State(target_entity_id, "on" if is_low else "off"),
+            None,
+            dt_util.utcnow(),
+        ),
     )
 
 

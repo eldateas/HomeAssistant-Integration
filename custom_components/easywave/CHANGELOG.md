@@ -1,5 +1,12 @@
 # Easywave Integration Changelog
 
+## 0.8.1 — Battery migration on the registry restore index
+
+### Fixed
+- Moving an enum battery sensor onto the binary sensor reads the restored
+  state through the current Home Assistant index. Setup no longer fails when
+  restored states are stored by entity registry id.
+
 ## 0.8.0 — Receiver state, neo updates, and RX11 port resolution
 
 ### Fixed

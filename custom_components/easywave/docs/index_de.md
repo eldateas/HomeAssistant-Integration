@@ -1,6 +1,6 @@
 # Easywave Integration – Anwender-Dokumentation
 
-> **Version:** 0.8.0 | **Letzte Aktualisierung:** November 2026
+> **Version:** 0.8.1 | **Letzte Aktualisierung:** November 2026
 
 > **Hinweis (0.7.0):** Geräte liegen in Config-Subentries (CORE-kompatibel). Nach dem Upgrade von 0.6.x Automationen/Device-Trigger neu anlegen. Siehe [CHANGELOG.md](../CHANGELOG.md).
 

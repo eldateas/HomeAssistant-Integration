@@ -58,6 +58,89 @@ migration = _load("migration", COMPONENT / "migration.py")
 battery_migration = _load("battery_migration", COMPONENT / "battery_migration.py")
 
 
+def test_enum_battery_restore_reads_registry_index() -> None:
+    """Home Assistant 2026.12 stores restored states by registry id."""
+    import types
+
+    stored = types.SimpleNamespace(state=types.SimpleNamespace(state="low"))
+    data = types.SimpleNamespace(
+        async_get_stored_state=lambda entity_id: (
+            stored if entity_id == "sensor.batt" else None
+        )
+    )
+    restore_state = types.ModuleType("homeassistant.helpers.restore_state")
+    restore_state.async_get = lambda _hass: data
+    sys.modules["homeassistant.helpers.restore_state"] = restore_state
+
+    assert battery_migration._enum_is_low(object(), "sensor.batt") is True
+
+
+def test_enum_battery_restore_writes_registry_index() -> None:
+    """A migrated on/off state is stored under the binary sensor registry id."""
+    import types
+
+    class State:
+        def __init__(self, entity_id: str, state: str, attributes: dict | None = None):
+            self.entity_id = entity_id
+            self.state = state
+            self.attributes = attributes or {}
+
+    class StoredState:
+        def __init__(self, state: State, extra_data: object, last_seen: object) -> None:
+            self.state = state
+            self.extra_data = extra_data
+            self.last_seen = last_seen
+            self.entity_registry_id = None
+
+    by_registry: dict[str, StoredState] = {}
+    data = types.SimpleNamespace(
+        async_get_stored_state=lambda entity_id: (
+            types.SimpleNamespace(
+                state=types.SimpleNamespace(state="low", attributes={}),
+                extra_data=None,
+                last_seen="then",
+            )
+            if entity_id == "sensor.batt"
+            else None
+        ),
+        last_states_by_entity_id={},
+        last_states_by_entity_registry_id=by_registry,
+    )
+    restore_state = types.ModuleType("homeassistant.helpers.restore_state")
+    restore_state.async_get = lambda _hass: data
+    restore_state.StoredState = StoredState
+    sys.modules["homeassistant.helpers.restore_state"] = restore_state
+    sys.modules["homeassistant.core"].State = State
+
+    registry = types.SimpleNamespace(
+        async_get=lambda entity_id: (
+            types.SimpleNamespace(id="binary-reg")
+            if entity_id == "binary_sensor.batt"
+            else None
+        )
+    )
+    entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
+    entity_registry.async_get = lambda _hass: registry
+    sys.modules["homeassistant.helpers.entity_registry"] = entity_registry
+
+    dt = types.ModuleType("homeassistant.util.dt")
+    dt.utcnow = lambda: "now"
+    sys.modules["homeassistant.util"] = types.ModuleType("homeassistant.util")
+    sys.modules["homeassistant.util.dt"] = dt
+
+    battery_migration._copy_restore_state(
+        object(),
+        "sensor.batt",
+        "binary_sensor.batt",
+        is_low=True,
+    )
+
+    written = by_registry["binary-reg"]
+    assert written.entity_registry_id == "binary-reg"
+    assert written.state.entity_id == "binary_sensor.batt"
+    assert written.state.state == "on"
+
+
 def test_battery_entity_id_and_state_mapping() -> None:
     """Enum battery sensors keep their object id on the binary sensor."""
     assert (

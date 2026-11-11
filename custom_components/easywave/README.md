@@ -2,7 +2,7 @@
 
 Custom integration for ELDAT Easywave / EWneo via the RX11 USB transceiver.
 
-**Version:** 0.8.0
+**Version:** 0.8.1
 
 ## Architecture
 
