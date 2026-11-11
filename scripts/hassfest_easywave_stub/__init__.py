@@ -2,7 +2,8 @@
 
 Hassfest resolves ``supported_features`` in ``triggers.yaml`` via
 ``importlib.import_module("homeassistant.components.<domain>")``. Easywave is
-not in Core yet (HACS), so CI bind-mounts this package over that path.
+not in Core yet (HACS). CI registers this module in ``sys.modules``
+instead of placing it under ``homeassistant/components``.
 
 Enums are loaded from ``custom_components/easywave/const.py`` without importing
 the integration package (which would execute ``__init__.py``).

@@ -76,8 +76,9 @@ run_hassfest_docker() {
   # (easywave is HACS-only until it lands in Core).
   docker run --rm \
     -v "$ROOT:/github/workspace" \
-    -v "$ROOT/scripts/hassfest_easywave_stub:/usr/src/homeassistant/homeassistant/components/easywave:ro" \
-    ghcr.io/home-assistant/hassfest
+    --entrypoint python \
+    ghcr.io/home-assistant/hassfest \
+    /github/workspace/scripts/run_hassfest_docker.py
 }
 
 run_hassfest_core() {
