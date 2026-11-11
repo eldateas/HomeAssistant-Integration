@@ -468,7 +468,9 @@ class EasywaveCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         for entity in list(self._transmitter_entities):
             if _serial_hex_matches(event.transmitter_serial, entity.transmitter_serial):
-                entity.handle_telegram(event)
+                # 0x80 is only a low-battery flag. The codec still reports button A.
+                if not is_low_battery:
+                    entity.handle_telegram(event)
                 entity.handle_battery_status(is_low_battery)
                 matched_device_id = entity.device_id
         if matched_device_id is None:

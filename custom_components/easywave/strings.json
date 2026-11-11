@@ -413,7 +413,7 @@
         }
       },
       "battery_warning": {
-        "name": "Battery Warning"
+        "name": "Battery"
       }
     },
     "sensor": {

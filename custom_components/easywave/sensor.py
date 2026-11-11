@@ -35,8 +35,6 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_NEO_SENSOR,
     ENTRY_TYPE_TRANSMITTER,
-    EVENT_TYPE_BATTERY_LOW,
-    EVENT_TYPE_BATTERY_NORMAL,
     EVENT_TYPE_CLOSED,
     EVENT_TYPE_GATEWAY_CONNECTED,
     EVENT_TYPE_GATEWAY_DISCONNECTED,
@@ -79,7 +77,7 @@ async def async_setup_entry(
                 hass, entry, device, async_add_entities, "sensor"
             )
         elif entry_type == ENTRY_TYPE_NEO_SENSOR:
-            capabilities = device.data.get(CONF_SENSOR_CAPABILITIES, 0)
+            capabilities = int(device.data.get(CONF_SENSOR_CAPABILITIES, 0) or 0)
             neo_entities: list[SensorEntity] = []
             if (capabilities >> 4) & 1:
                 neo_entities.append(EasywaveNeoSensorTemperatureSensor(entry, device))
@@ -530,89 +528,6 @@ class EasywaveTransmitterStateSensor(EasywaveTransmitterEntity, RestoreSensor):
         if event_type := self._event_by_state.get(value):
             self._coordinator.fire_device_event(
                 self._device_id, event_type, subtype=value
-            )
-
-
-_BATTERY_STATE_OK = "ok"
-_BATTERY_STATE_LOW = "low"
-_BATTERY_OPTIONS = [_BATTERY_STATE_OK, _BATTERY_STATE_LOW]
-
-
-class EasywaveTransmitterBatterySensor(EasywaveTransmitterEntity, RestoreSensor):
-    """Diagnostic battery-state sensor for an Easywave transmitter (CORE-aligned).
-
-    Requires two consecutive non-low PUSH telegrams to clear an existing
-    warning (_CLEAR_THRESHOLD) to avoid spurious OK flashes on restart.
-    """
-
-    _attr_device_class = SensorDeviceClass.ENUM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_translation_key = "battery_warning"
-    _attr_options = _BATTERY_OPTIONS
-
-    _CLEAR_THRESHOLD = 2
-
-    def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
-        """Initialize the transmitter battery sensor."""
-        super().__init__(entry, device, "battery_warning")
-        self._native_value: str | None = None
-        self._ok_streak: int = 0
-
-    @override
-    async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator and restore last known battery state.
-
-        Restore BEFORE calling super() to prevent the coordinator listener
-        from overwriting the restored value.
-        """
-        if (last_data := await self.async_get_last_sensor_data()) is not None:
-            native = last_data.native_value
-            if native in _BATTERY_OPTIONS:
-                self._native_value = str(native)
-        await super().async_added_to_hass()
-
-    @override
-    @property
-    def native_value(self) -> str | None:
-        """Return the current battery state."""
-        return self._native_value
-
-    @override
-    @property
-    def icon(self) -> str:
-        """Return a battery icon reflecting the current state."""
-        if self._native_value == _BATTERY_STATE_LOW:
-            return "mdi:battery-alert"
-        if self._native_value == _BATTERY_STATE_OK:
-            return "mdi:battery"
-        return "mdi:battery-unknown"
-
-    @callback
-    def handle_telegram(self, event: ButtonPushEvent | ButtonReleaseEvent) -> None:
-        """Battery state is updated via handle_battery_status."""
-
-    @override
-    @callback
-    def handle_battery_status(self, is_low: bool) -> None:
-        """Update battery state from the LOWBAT flag of a PUSH telegram."""
-        if is_low:
-            self._ok_streak = 0
-            if self._native_value != _BATTERY_STATE_LOW:
-                self._native_value = _BATTERY_STATE_LOW
-                self.async_write_ha_state()
-                self._coordinator.fire_device_event(
-                    self._device_id, EVENT_TYPE_BATTERY_LOW, subtype="low"
-                )
-            return
-        if self._native_value == _BATTERY_STATE_OK:
-            return
-        self._ok_streak += 1
-        if self._ok_streak >= self._CLEAR_THRESHOLD:
-            self._native_value = _BATTERY_STATE_OK
-            self._ok_streak = 0
-            self.async_write_ha_state()
-            self._coordinator.fire_device_event(
-                self._device_id, EVENT_TYPE_BATTERY_NORMAL, subtype="ok"
             )
 
 

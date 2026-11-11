@@ -30,6 +30,7 @@ from .device_cleanup import (
 )
 from .devices import async_sync_bucket_subentry_titles, iter_device_buckets
 from .gateway_device import update_gateway_device
+from .battery_migration import async_migrate_enum_battery_entities
 from .migration import async_migrate_json_devices
 from .transceiver import RX11Transceiver
 
@@ -152,6 +153,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EasywaveConfigEntry) -> 
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = EasywaveRuntimeData(coordinator=coordinator)
+    await async_migrate_enum_battery_entities(hass, entry)
 
     entry.runtime_data.gateway_device_id = update_gateway_device(
         hass, entry, transceiver

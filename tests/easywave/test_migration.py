@@ -55,6 +55,21 @@ def iter_subentries_of_type(_entry, _subentry_type: str):  # noqa: ANN001
 devices.iter_subentries_of_type = iter_subentries_of_type  # type: ignore[attr-defined]
 sys.modules["custom_components.easywave.devices"] = devices
 migration = _load("migration", COMPONENT / "migration.py")
+battery_migration = _load("battery_migration", COMPONENT / "battery_migration.py")
+
+
+def test_battery_entity_id_and_state_mapping() -> None:
+    """Enum battery sensors keep their object id on the binary sensor."""
+    assert (
+        battery_migration.binary_entity_id_for_sensor(
+            "sensor.easywave_transmitter_1_batterie"
+        )
+        == "binary_sensor.easywave_transmitter_1_batterie"
+    )
+    assert battery_migration.binary_entity_id_for_sensor("binary_sensor.batterie") is None
+    assert battery_migration.enum_state_is_low("low") is True
+    assert battery_migration.enum_state_is_low("ok") is False
+    assert battery_migration.enum_state_is_low("unknown") is None
 
 
 def test_normalize_serial_hex() -> None:

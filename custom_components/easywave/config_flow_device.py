@@ -3,6 +3,7 @@
 from typing import Any
 
 from easywave_home_control.codec import (
+    ButtonFunction,
     ButtonPushEvent,
     SensorLearnPayload,
     SensorTelegramEvent,
@@ -47,6 +48,8 @@ _BUTTON_COUNT_MAP: dict[str, int] = {
 def _normalize_learned_transmitter(telegram: Any) -> dict[str, Any] | None:
     """Return learned transmitter data from a codec event."""
     if not isinstance(telegram, ButtonPushEvent):
+        return None
+    if telegram.function == ButtonFunction.LOW_BATTERY:
         return None
     return {
         "serial": telegram.transmitter_serial,

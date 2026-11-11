@@ -1,27 +1,27 @@
 {
   "config": {
     "abort": {
-      "frequency_not_permitted": "This device operates on {frequency}, which is not permitted in your configured Home Assistant region ({country}).",
-      "no_devices_found": "No serial ports found. Make sure the RX11 USB Transceiver is plugged in and recognized by the system."
+      "frequency_not_permitted": "Dieses Gerät arbeitet auf {frequency}. Das ist in der konfigurierten Home-Assistant-Region ({country}) nicht zulässig.",
+      "no_devices_found": "Keine seriellen Schnittstellen gefunden. Stellen Sie sicher, dass der RX11-USB-Transceiver eingesteckt und vom System erkannt wird."
     },
     "error": {
-      "cannot_connect": "Could not connect to the RX11 USB Transceiver. Make sure it is plugged in and no other application is using the port.",
-      "device_no_longer_available": "The selected device is no longer available. Please try again."
+      "cannot_connect": "Verbindung zum RX11-USB-Transceiver fehlgeschlagen. Stellen Sie sicher, dass er eingesteckt ist und kein anderes Programm die Schnittstelle verwendet.",
+      "device_no_longer_available": "Das ausgewählte Gerät ist nicht mehr verfügbar. Bitte versuchen Sie es erneut."
     },
     "step": {
       "confirm": {
-        "description": "Detected device:\n**{name} ({serial_number})**\n\nPort: {device}",
-        "title": "Set up RX11 USB Transceiver"
+        "description": "Erkanntes Gerät:\n**{name} ({serial_number})**\n\nAnschluss: {device}",
+        "title": "RX11-USB-Transceiver einrichten"
       },
       "ports": {
         "data": {
           "device_path": "USB-Gerätepfad"
         },
         "data_description": {
-          "device_path": "The serial port your RX11 USB Transceiver is connected to."
+          "device_path": "Die serielle Schnittstelle, an der der RX11-USB-Transceiver angeschlossen ist."
         },
-        "description": "Select the serial port of the RX11 USB Transceiver.",
-        "title": "Select Easywave device"
+        "description": "Wählen Sie die serielle Schnittstelle des RX11-USB-Transceivers.",
+        "title": "Easywave-Gerät auswählen"
       }
     }
   },
@@ -31,10 +31,10 @@
         "already_configured": "Gerät ist bereits konfiguriert",
         "device_added": "Das Gerät wurde erfolgreich hinzugefügt.",
         "device_not_connected": "Der RX11 USB Transceiver ist nicht verbunden.\n\nZum Hinzufügen eines neuen Geräts muss der RX11 erreichbar sein.\nBitte prüfen Sie die USB-Verbindung.",
-        "index_serial_unavailable": "Die Gateway-Seriennummer für den zugewiesenen Index konnte nicht gelesen werden.",
+        "index_serial_unavailable": "Die Funk-Seriennummer für den zugewiesenen Index konnte nicht gelesen werden.",
         "learning_cancelled": "Einlernmodus wurde abgebrochen.",
         "no_device_learned": "Es wurde kein Gerät erkannt.",
-        "no_free_index": "Es ist kein freier EWneo-Gateway-Index verfügbar."
+        "no_free_index": "Es ist kein freier Index für Easywave neo verfügbar."
       },
       "entry_type": "",
       "initiate_flow": {
@@ -89,11 +89,11 @@
         "user": "Easywave neo Sensor"
       },
       "progress": {
-        "waiting_for_sensor": "Warte auf Learn-Signal... Drücken Sie JETZT die Learn-Taste am Easywave neo Sensor!"
+        "waiting_for_sensor": "Warte auf das Lernsignal... Drücken Sie JETZT die Lerntaste am Easywave neo Sensor!"
       },
       "step": {
         "learn_sensor": {
-          "title": "Learn-Taste drücken!"
+          "title": "Lerntaste drücken!"
         },
         "learn_timeout_sensor": {
           "title": "Zeitüberschreitung",
@@ -118,7 +118,7 @@
         },
         "sensor_learn_intro": {
           "title": "Sensor einlernen",
-          "description": "Home Assistant erkennt automatisch, welche Messdaten der Sensor liefert.\n\nDrücken Sie im nächsten Schritt die Learn-Taste auf der Rückseite des Sensors.",
+          "description": "Home Assistant erkennt automatisch, welche Messdaten der Sensor liefert.\n\nDrücken Sie im nächsten Schritt die Lerntaste auf der Rückseite des Sensors.",
           "menu_options": {
             "learn": "Sensor einlernen"
           }
@@ -296,14 +296,14 @@
         },
         "transmitter_switch_mode": {
           "title": "Verhalten",
-          "description": "Soll der Schaltzustand nach der Betätigung zurück gesetzt werden oder permanent anstehen?",
+          "description": "Soll der Schaltzustand nach der Betätigung zurückgesetzt werden oder dauerhaft anstehen?",
           "menu_options": {
             "transmitter_switch_impulse": "Impuls",
             "transmitter_switch_permanent": "Dauer",
             "transmitter_grouping": "Zurück"
           },
           "menu_option_descriptions": {
-            "transmitter_switch_impulse": "Der Schaltzustand eines Objektes wird 1 Sekunde nach loslassen der jeweiligen Sendertaste wieder zurückgesetzt.",
+            "transmitter_switch_impulse": "Der Schaltzustand eines Objektes wird 1 Sekunde nach dem Loslassen der jeweiligen Sendertaste wieder zurückgesetzt.",
             "transmitter_switch_permanent": "Der Schaltzustand der einzelnen Objekte wechselt bei jeder Betätigung der jeweiligen Sendertaste."
           }
         },
@@ -346,8 +346,8 @@
       "button_press": "Taste betätigt ({subtype})",
       "button_release": "Nicht betätigt",
       "closed": "Geschlossen",
-      "gateway_connected": "Gateway verbunden",
-      "gateway_disconnected": "Gateway getrennt",
+      "gateway_connected": "Transceiver verbunden",
+      "gateway_disconnected": "Transceiver getrennt",
       "opened": "Geöffnet",
       "stopped": "Gestoppt",
       "turned_off": "Ausgeschaltet",
@@ -413,7 +413,7 @@
         }
       },
       "battery_warning": {
-        "name": "Batteriestatus"
+        "name": "Batterie"
       }
     },
     "sensor": {
@@ -661,11 +661,11 @@
   "issues": {
     "devices_migrated": {
       "title": "Easywave-Geräte migriert — Automationen neu anlegen",
-      "description": "{count} Easywave-Gerät(e) wurden vom bisherigen JSON-Speicher in Config-Subentries migriert.\n\nEntity-Unique-IDs wurden auf das CORE-kompatible serienbasierte Schema umgestellt. Bitte legen Sie Automationen und Device-Trigger neu an."
+      "description": "{count} Easywave-Gerät(e) wurden aus dem bisherigen JSON-Speicher in die Konfigurationseinträge übernommen.\n\nDie eindeutigen Entitäts-IDs folgen jetzt dem seriennummernbasierten Schema von Home Assistant Core. Bitte legen Sie Automationen und Geräteauslöser neu an."
     },
     "frequency_not_permitted": {
       "title": "Easywave: {frequency} in {country} nicht erlaubt",
-      "description": "Diese Easywave-Hardware arbeitet auf **{frequency}**, was in Ihrer konfigurierten Home-Assistant-Region (**{country}**) **nicht erlaubt** ist.\n\nDie Integration wurde aus regulatorischen Gründen deaktiviert."
+      "description": "Diese Easywave-Hardware arbeitet auf **{frequency}**. Das ist in Ihrer konfigurierten Home-Assistant-Region (**{country}**) **nicht zulässig**.\n\nDie Integration wurde aus regulatorischen Gründen deaktiviert.\n\nWenn das nicht zutrifft, prüfen Sie die Länderangabe unter **Einstellungen → System → Allgemein → Land**. Das 868-MHz-Band ist in den Ländern der EU und des EWR, im Vereinigten Königreich, in der Schweiz, in Norwegen und in Liechtenstein zulässig."
     }
   },
   "selector": {
@@ -713,16 +713,16 @@
       "name": "Geschlossen"
     },
     "stopped": {
-      "description": "Wird ausgelöst, wenn ein 3-Tasten-Cover stoppt.",
+      "description": "Wird ausgelöst, wenn ein 3-Tasten-Rollladen stoppt.",
       "name": "Gestoppt"
     },
     "gateway_connected": {
       "description": "Wird ausgelöst, wenn der RX11 USB Transceiver verbunden ist.",
-      "name": "Gateway verbunden"
+      "name": "Transceiver verbunden"
     },
     "gateway_disconnected": {
       "description": "Wird ausgelöst, wenn der RX11 USB Transceiver getrennt ist.",
-      "name": "Gateway getrennt"
+      "name": "Transceiver getrennt"
     }
   }
 }

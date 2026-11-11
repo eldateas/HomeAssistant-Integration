@@ -3,6 +3,15 @@
 ## 0.8.0 — Receiver state, neo updates, and RX11 port resolution
 
 ### Fixed
+- A battery-low telegram (function byte 0x80) updates only the battery
+  state. It is no longer handled as a press of button A.
+- Easywave transmitters and neo sensors expose battery as a binary sensor
+  with device class Battery. The device page shows it as the battery icon,
+  and Home Assistant offers the standard low/normal triggers. A low flag is
+  applied immediately. Clearing it takes two readings that are not low.
+  An existing enum battery sensor (`ok` / `low`) is replaced by
+  `binary_sensor` with the same object id. Its name, area, icon, and history
+  move with it. Automations that watched `low` or `ok` need `on` or `off`.
 - Easywave neo sensor measurements are applied again. The 0.4.2
   `should_ignore` flag was dropping the telegram, so temperature and humidity
   stayed on the last restored value. Replacing the RX11 port no longer
@@ -33,7 +42,7 @@
   discovery uses the Home Assistant USB scan and `serialx`; `pyserial` is no
   longer a direct requirement. The telegram listener waits until a telegram
   arrives or it is cancelled, and a timed-out listen is released by the
-  library. The neo battery sensor follows the Table 6 battery flag.
+  library. The neo battery binary sensor follows the Table 6 battery flag.
 
 ## 0.7.11 — Transmitter trigger filtering and On/Off / Open/Close state triggers
 

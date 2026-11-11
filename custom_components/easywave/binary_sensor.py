@@ -1,4 +1,4 @@
-"""Binary sensor platform — HACS-style transmitter/cover/battery presentation."""
+"""Binary sensor platform — HACS-style transmitter cover state."""
 
 from typing import Any, override
 
@@ -8,18 +8,19 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import EasywaveConfigEntry
+from .battery_migration import consume_battery_seed
 from .const import (
     CONF_BUTTON_COUNT,
     CONF_ENTRY_TYPE,
-    CONF_SENSOR_CAPABILITIES,
     ENTRY_TYPE_NEO_SENSOR,
     ENTRY_TYPE_TRANSMITTER,
+    EVENT_TYPE_BATTERY_LOW,
+    EVENT_TYPE_BATTERY_NORMAL,
     EVENT_TYPE_CLOSED,
     EVENT_TYPE_OPENED,
     EasywaveTransmitterFeature,
@@ -42,12 +43,10 @@ async def async_setup_entry(
                 hass, entry, device, async_add_entities, "binary_sensor"
             )
         elif entry_type == ENTRY_TYPE_NEO_SENSOR:
-            capabilities = int(device.data.get(CONF_SENSOR_CAPABILITIES, 0))
-            if capabilities & 1:
-                async_add_entities(
-                    [EasywaveNeoBatteryBinarySensor(entry, device)],
-                    config_subentry_id=device.subentry_id,
-                )
+            async_add_entities(
+                [EasywaveNeoBatteryBinarySensor(entry, device)],
+                config_subentry_id=device.subentry_id,
+            )
 
 
 class EasywaveTransmitterCoverStateBinarySensor(
@@ -124,28 +123,93 @@ class EasywaveTransmitterCoverStateBinarySensor(
             )
 
 
-class EasywaveNeoBatteryBinarySensor(EasywaveNeoSensorEntity, BinarySensorEntity):
-    """Neo sensor battery warning."""
+class _BatteryWarningBinarySensor(RestoreEntity, BinarySensorEntity):
+    """Battery warning shown as the device-page battery icon.
+
+    Home Assistant draws that icon only for device class ``battery``.
+    On means the battery is low. Clearing it takes two readings that are
+    not low.
+    """
 
     _attr_device_class = BinarySensorDeviceClass.BATTERY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "battery_warning"
 
-    def __init__(
-        self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry
-    ) -> None:
-        """Initialize."""
-        super().__init__(entry, device, "battery")
-        self._attr_is_on = False
+    _CLEAR_THRESHOLD = 2
 
     @override
+    async def async_added_to_hass(self) -> None:
+        """Restore the last on/off state before the first write."""
+        if (last := await self.async_get_last_state()) is not None and last.state in (
+            "on",
+            "off",
+        ):
+            self._attr_is_on = last.state == "on"
+        elif self._initial_low is not None:
+            self._attr_is_on = self._initial_low
+        await super().async_added_to_hass()
+
+    def _apply_battery_low(self, is_low: bool) -> None:
+        """Apply a low flag immediately and clear it after two good readings."""
+        if is_low:
+            self._ok_streak = 0
+            if self._attr_is_on is True:
+                return
+            self._attr_is_on = True
+            self.async_write_ha_state()
+            self._coordinator.fire_device_event(
+                self._device_id, EVENT_TYPE_BATTERY_LOW, subtype="low"
+            )
+            return
+        if self._attr_is_on is False:
+            return
+        self._ok_streak += 1
+        if self._ok_streak >= self._CLEAR_THRESHOLD:
+            self._attr_is_on = False
+            self._ok_streak = 0
+            self.async_write_ha_state()
+            self._coordinator.fire_device_event(
+                self._device_id, EVENT_TYPE_BATTERY_NORMAL, subtype="ok"
+            )
+
+
+class EasywaveTransmitterBatteryBinarySensor(
+    EasywaveTransmitterEntity, _BatteryWarningBinarySensor
+):
+    """Battery warning for an Easywave transmitter."""
+
+    def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
+        """Initialize the transmitter battery binary sensor."""
+        super().__init__(entry, device, "battery_warning")
+        self._ok_streak = 0
+        self._initial_low = consume_battery_seed(
+            entry.runtime_data.coordinator.hass, device.device_id
+        )
+        self._attr_is_on = None
+
+    @override
+    @callback
+    def handle_battery_status(self, is_low: bool) -> None:
+        """Update from the LOWBAT flag of a PUSH telegram."""
+        self._apply_battery_low(is_low)
+
+
+class EasywaveNeoBatteryBinarySensor(EasywaveNeoSensorEntity, _BatteryWarningBinarySensor):
+    """Battery warning for an Easywave neo sensor."""
+
+    def __init__(self, entry: EasywaveConfigEntry, device: EasywaveDeviceEntry) -> None:
+        """Initialize the neo sensor battery binary sensor."""
+        super().__init__(entry, device, "battery_warning")
+        self._ok_streak = 0
+        self._initial_low = consume_battery_seed(
+            entry.runtime_data.coordinator.hass, device.device_id
+        )
+        self._attr_is_on = None
+
+    @override
+    @callback
     def handle_telegram(self, event: Any) -> None:
         """Update from the Table 6 battery flag on a measurement telegram."""
         payload = getattr(event, "payload", None)
         if not isinstance(payload, SensorMeasurementPayload) or not payload.has_battery:
             return
-        is_low = payload.battery_is_weak
-        if self._attr_is_on == is_low:
-            return
-        self._attr_is_on = is_low
-        self.async_write_ha_state()
+        self._apply_battery_low(payload.battery_is_weak)

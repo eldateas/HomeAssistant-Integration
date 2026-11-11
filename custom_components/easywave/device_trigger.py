@@ -136,7 +136,7 @@ def _get_device_data(
 async def async_get_triggers(
     hass: HomeAssistant, device_id: str
 ) -> list[dict[str, Any]]:
-    """List device triggers for an Easywave gateway or transmitter."""
+    """List device triggers for a gateway, transmitter, or neo sensor."""
     device_registry = dr.async_get(hass)
     device = device_registry.async_get(device_id)
     if device is None:
@@ -173,7 +173,8 @@ async def async_get_triggers(
         ]
 
     assert isinstance(device_data, dict)
-    if device_data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_TRANSMITTER:
+    entry_type = device_data.get(CONF_ENTRY_TYPE)
+    if entry_type != ENTRY_TYPE_TRANSMITTER:
         return []
 
     operating_type = str(device_data.get(CONF_OPERATING_TYPE, "1"))
@@ -215,13 +216,6 @@ async def async_get_triggers(
             triggers.append(
                 _device_trigger(device_id, EVENT_TYPE_BUTTON_RELEASE, "released")
             )
-    triggers.extend(
-        _device_trigger(device_id, trigger_type, subtype)
-        for trigger_type, subtype in (
-            (EVENT_TYPE_BATTERY_LOW, "low"),
-            (EVENT_TYPE_BATTERY_NORMAL, "ok"),
-        )
-    )
     return triggers
 
 
