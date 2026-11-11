@@ -79,15 +79,15 @@ lsusb | grep 155a
 
 ## Installation
 
-### HACS Installation (recommended)
+### Marketplace (recommended)
 
-1. Open **HACS** in Home Assistant
-2. Navigate to **Integrations**
-3. Click **⋮** (three dots) → **Custom repositories**
-4. Add: `https://github.com/eldateas/HomeAssistant-Integration`
-5. Category: `Integration`
-6. Search for **"Easywave"** and install
-7. **Restart Home Assistant**
+Home Assistant includes the Marketplace under **Settings → Marketplace**.
+
+1. Open **Settings → Marketplace**
+2. Select **Add from link**
+3. Enter `https://github.com/eldateas/HomeAssistant-Integration` and select **Add**
+4. Open **Easywave** and install it
+5. **Restart Home Assistant**
 
 ### Manual Installation
 
