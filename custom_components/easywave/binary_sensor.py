@@ -8,6 +8,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -127,11 +128,13 @@ class _BatteryWarningBinarySensor(RestoreEntity, BinarySensorEntity):
     """Battery warning shown as the device-page battery icon.
 
     Home Assistant draws that icon only for device class ``battery``.
-    On means the battery is low. Clearing it takes two readings that are
-    not low.
+    The entity is diagnostic, so it is grouped with the other diagnostic
+    entities. On means the battery is low. Clearing it takes two readings
+    that are not low.
     """
 
     _attr_device_class = BinarySensorDeviceClass.BATTERY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "battery_warning"
 
     _CLEAR_THRESHOLD = 2

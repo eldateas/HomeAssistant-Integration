@@ -1,5 +1,12 @@
 # Easywave Integration Changelog
 
+## 0.8.2 — Diagnostic battery
+
+### Changed
+- Installation is described through **Settings → Marketplace**.
+- Easywave transmitter and neo sensor battery entities are diagnostic again.
+  **Battery low** and **Battery normal** stay available as device triggers.
+
 ## 0.8.1 — Battery migration on the registry restore index
 
 ### Fixed
