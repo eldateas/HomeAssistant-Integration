@@ -1,5 +1,12 @@
 # Easywave Integration Changelog
 
+## 0.8.3 — Health check no longer freezes Home Assistant
+
+### Fixed
+- Requires `easywave-home-control==0.4.3`. A disconnect while the library
+  health check (`PING_RCV`) is in flight finishes locally. Home Assistant
+  stays responsive and the RX11 goes offline instead of stalling the event loop.
+
 ## 0.8.2 — Diagnostic battery
 
 ### Changed

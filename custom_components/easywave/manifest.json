@@ -10,7 +10,7 @@
   "issue_tracker": "https://github.com/eldateas/HomeAssistant-Integration/issues",
   "loggers": ["easywave_home_control"],
   "quality_scale": "bronze",
-  "requirements": ["easywave-home-control==0.4.2"],
+  "requirements": ["easywave-home-control==0.4.3"],
   "single_config_entry": true,
   "usb": [
     {
@@ -20,5 +20,5 @@
       "description": "*rx11*"
     }
   ],
-  "version": "0.8.2"
+  "version": "0.8.3"
 }

@@ -1,6 +1,6 @@
 # Easywave Integration – User Documentation
 
-> **Version:** 0.8.2 | **Last Updated:** November 2026
+> **Version:** 0.8.3 | **Last Updated:** November 2026
 
 🇩🇪 **[Deutsche Version](index_de.md)**
 
